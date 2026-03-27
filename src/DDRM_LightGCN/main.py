@@ -20,7 +20,7 @@ import register
 args = parse_args()
 dataset = dataloader.DiffData(path = args.data_path) 
 train_loader = data.DataLoader(dataset,
-		batch_size=args.batch_size, shuffle=True, num_workers=4)
+		batch_size=args.batch_size, shuffle=True, num_workers=0)
 
 # define rec mdoel
 Recmodel = register.MODELS[world.model_name](world.config, dataset)
