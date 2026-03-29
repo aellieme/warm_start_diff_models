@@ -175,8 +175,13 @@ def Test(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_model, 
         pool = multiprocessing.Pool(CORES)
 
     with torch.no_grad():
-        users = list(validDict.keys())
-        users = shuffle_and_get_half_with_seed(users, 42)
+        # Берём только тех пользователей, которые есть И в valid, И в test
+        valid_users = set(validDict.keys())
+        test_users = set(testDict.keys())
+        common_users = list(valid_users & test_users)
+        users = shuffle_and_get_half_with_seed(common_users, 42)
+        # users = list(validDict.keys())
+        # users = shuffle_and_get_half_with_seed(users, 42)
 
         users_list = []
         test_rating_list = []
