@@ -14,6 +14,7 @@ import multiprocessing
 from sklearn.metrics import roc_auc_score
 import pdb
 
+
 # В начале файла Procedure.py добавьте:
 from evaluate_topk_dp import precision_at_k, recall_at_k, ndcg_at_k, mrr, catalog_coverage
 
@@ -292,6 +293,11 @@ def Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_mod
         total_batch = len(users) // u_batch_size + 1
         for batch_users in utils.minibatch(users, batch_size=u_batch_size):
             allPos = dataset.getUserPosItems(batch_users)
+            
+            if flag == 1 and dataset.adapt_dict is not None:
+                for idx, user in enumerate(batch_users):
+                    allPos[idx].extend(dataset.adapt_dict.get(user, []))
+            
             groundTrue = [testDict[u] for u in batch_users]
             batch_users_gpu = torch.Tensor(batch_users).long()
             batch_users_gpu = batch_users_gpu.to(world.device)
