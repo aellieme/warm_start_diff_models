@@ -1,8 +1,8 @@
-# src\evaluate\evaluate_topk.py
+# src\evaluate\evaluate_topk_dp.py
 
 import numpy as np
 
-def precision_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
+def precision_at_k(actual: list, predicted: list, k: int) -> float:
     """
     какая доля из рекомендованных k айтемов реально релевантна
     actual: list of lists (у каждого пользователя свой список правильных id)
@@ -10,15 +10,13 @@ def precision_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
     """
     precisions = []
     for i in range(len(actual)):
-        ground_truth = set(actual[i])
-        if not ground_truth:
+        gt = set(actual[i])
+        if not gt:
             continue
-        
-        top_k = predicted[i, :k]
-        hits = len(set(top_k) & ground_truth)
+        top_k = predicted[i][:k]          
+        hits = len(set(top_k) & gt)
         precisions.append(hits / k)
-        
-    return float(np.mean(precisions)) if precisions else 0.0
+    return np.mean(precisions) if precisions else 0.0
 
 def recall_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
     """
