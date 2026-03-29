@@ -30,7 +30,7 @@ def recall_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
         if not ground_truth:
             continue
             
-        top_k = predicted[i, :k]
+        top_k = predicted[i][:k]
         hits = len(set(top_k) & ground_truth)
         recalls.append(hits / len(ground_truth))
         
@@ -46,7 +46,7 @@ def mrr(actual: list, predicted: np.ndarray, k: int) -> float:
         if not ground_truth:
             continue
             
-        top_k = predicted[i, :k]
+        top_k = predicted[i][:k]
         found = False
         for rank, item in enumerate(top_k, 1):
             if item in ground_truth:
@@ -65,7 +65,7 @@ def ndcg_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
         if not ground_truth:
             continue
             
-        top_k = predicted[i, :k]
+        top_k = predicted[i][:k]
         
         # DCG
         dcg = 0.0
@@ -85,15 +85,26 @@ def ndcg_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
             
     return float(np.mean(ndcg_scores)) if ndcg_scores else 0.0
 
-def catalog_coverage(predicted: np.ndarray, total_items: set, k: int) -> float:
-    """
-    процент айтемов из каталога, которые были рекомендованы хотя бы раз
-    """
-    top_k = predicted[:, :k]
-    unique_recommended = set(top_k.flatten())
+# def catalog_coverage(predicted: np.ndarray, total_items: set, k: int) -> float:
+#     """
+#     процент айтемов из каталога, которые были рекомендованы хотя бы раз
+#     """
+#     top_k = predicted[:, :k]
+#     unique_recommended = set(top_k.flatten())
     
+#     if not total_items:
+#         return 0.0
+        
+#     return len(unique_recommended) / len(total_items)
+
+def calculate_catalog_coverage(predicted: list, total_items: set, k: int) -> float:
+    """
+    predicted: list of lists (рекомендованные id для каждого пользователя)
+    total_items: set всех id предметов в каталоге
+    """
+    unique_recommended = set()
+    for user_recs in predicted:
+        unique_recommended.update(user_recs[:k])
     if not total_items:
         return 0.0
-        
     return len(unique_recommended) / len(total_items)
-
