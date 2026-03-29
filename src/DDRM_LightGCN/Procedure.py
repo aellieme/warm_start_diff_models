@@ -14,6 +14,9 @@ import multiprocessing
 from sklearn.metrics import roc_auc_score
 import pdb
 
+# В начале файла Procedure.py добавьте:
+from evaluate_topk_dp import precision_at_k, recall_at_k, ndcg_at_k, mrr, catalog_coverage
+
 CORES = multiprocessing.cpu_count() // 2
 
 
@@ -211,6 +214,10 @@ def Test(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_model, 
             # _, rating_K = torch.topk(rating, k=max_K, largest=False)
             _, test_rating_K = torch.topk(test_rating, k=max_K)
             _, valid_rating_K = torch.topk(valid_rating, k=max_K)
+            print("Sample recommendations for first 3 users:")
+            for i in range(min(3, len(batch_users))):
+                print(f"User {batch_users[i]}: top-10 items = {valid_rating_K[i][:10].tolist()}")
+            
             test_rating = test_rating_K.cpu().numpy()
             valid_rating = valid_rating_K.cpu().numpy()
 
@@ -223,8 +230,18 @@ def Test(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_model, 
             valid_groundTrue_list.extend(valid_groundTrue)
         #ipdb.set_trace()
         assert total_batch == len(users_list)
-        test_precision, test_recall, test_NDCG, test_MRR = computeTopNAccuracy(test_groundTrue_list,test_rating_list,[10,20,50,100])
-        valid_precision, valid_recall, valid_NDCG, valid_MRR = computeTopNAccuracy(valid_groundTrue_list, valid_rating_list, [10,20,50,100])
+        # test_precision, test_recall, test_NDCG, test_MRR = computeTopNAccuracy(test_groundTrue_list,test_rating_list,[10,20,50,100])
+        # valid_precision, valid_recall, valid_NDCG, valid_MRR = computeTopNAccuracy(valid_groundTrue_list, valid_rating_list, [10,20,50,100])
+        topKs = world.topks
+        valid_precision = [precision_at_k(valid_groundTrue_list, valid_rating_list, k) for k in topKs]
+        valid_recall = [recall_at_k(valid_groundTrue_list, valid_rating_list, k) for k in topKs]
+        valid_NDCG = [ndcg_at_k(valid_groundTrue_list, valid_rating_list, k) for k in topKs]
+        valid_MRR = [mrr(valid_groundTrue_list, valid_rating_list, k) for k in topKs]
+
+        test_precision = [precision_at_k(test_groundTrue_list, test_rating_list, k) for k in topKs]
+        test_recall = [recall_at_k(test_groundTrue_list, test_rating_list, k) for k in topKs]
+        test_NDCG = [ndcg_at_k(test_groundTrue_list, test_rating_list, k) for k in topKs]
+        test_MRR = [mrr(test_groundTrue_list, test_rating_list, k) for k in topKs]
         if multicore == 1:
             pool.close()
         return valid_precision, valid_recall, valid_NDCG, valid_MRR, test_precision, test_recall, test_NDCG, test_MRR
@@ -305,11 +322,21 @@ def Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_mod
             groundTrue_list.extend(groundTrue)
         #ipdb.set_trace()
         assert total_batch == len(users_list)
-        precision, recall, NDCG, MRR = computeTopNAccuracy(groundTrue_list,rating_list,[10,20,50,100])
+        # precision, recall, NDCG, MRR = computeTopNAccuracy(groundTrue_list,rating_list,[10,20,50,100])
+        topKs = world.topks
+        precision = [precision_at_k(groundTrue_list, rating_list, k) for k in topKs]
+        recall = [recall_at_k(groundTrue_list, rating_list, k) for k in topKs]
+        NDCG = [ndcg_at_k(groundTrue_list, rating_list, k) for k in topKs]
+        MRR = [mrr(groundTrue_list, rating_list, k) for k in topKs]
+
+        # Coverage для максимального K
+        max_k = max(topKs)
+        total_items_set = set(range(dataset.m_items))  # все возможные ID предметов
+        cov = catalog_coverage(rating_list, total_items_set, max_k)
     
         if multicore == 1:
             pool.close()
-        return precision, recall, NDCG, MRR
+        return precision, recall, NDCG, MRR, cov
 
 def print_epoch_result(results):
     print("Precision: {} Recall: {} NDCG: {} MRR: {}".format(

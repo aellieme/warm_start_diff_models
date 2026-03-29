@@ -2,7 +2,7 @@
 
 import numpy as np
 
-def calculate_precision_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
+def precision_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
     """
     какая доля из рекомендованных k айтемов реально релевантна
     actual: list of lists (у каждого пользователя свой список правильных id)
@@ -20,7 +20,7 @@ def calculate_precision_at_k(actual: list, predicted: np.ndarray, k: int) -> flo
         
     return float(np.mean(precisions)) if precisions else 0.0
 
-def calculate_recall_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
+def recall_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
     """
     какую долю из всех релевантных айтемов мы смогли найти в топ-k
     actual: list of lists
@@ -38,7 +38,7 @@ def calculate_recall_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
         
     return float(np.mean(recalls)) if recalls else 0.0
 
-def calculate_mrr(actual: list, predicted: np.ndarray, k: int) -> float:
+def mrr(actual: list, predicted: np.ndarray, k: int) -> float:
     """
     срзнач, обратное рангу первого найденного релевантного айтема
     """
@@ -60,7 +60,7 @@ def calculate_mrr(actual: list, predicted: np.ndarray, k: int) -> float:
             
     return float(np.mean(rr_scores)) if rr_scores else 0.0
 
-def calculate_ndcg_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
+def ndcg_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
     ndcg_scores = []
     for i in range(len(actual)):
         ground_truth = set(actual[i])
@@ -87,7 +87,7 @@ def calculate_ndcg_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
             
     return float(np.mean(ndcg_scores)) if ndcg_scores else 0.0
 
-def calculate_catalog_coverage(predicted: np.ndarray, total_items: set, k: int) -> float:
+def catalog_coverage(predicted: np.ndarray, total_items: set, k: int) -> float:
     """
     процент айтемов из каталога, которые были рекомендованы хотя бы раз
     """

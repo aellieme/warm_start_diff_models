@@ -132,12 +132,26 @@ if __name__ == '__main__':
         Recmodel.load_state_dict(torch.load(weight_file,map_location=torch.device('cpu')))  
         user_reverse_model.load_state_dict(torch.load(user_weight_file,map_location=torch.device('cpu')))   
         item_reverse_model.load_state_dict(torch.load(item_weight_file,map_location=torch.device('cpu')))    
+        # best_results_valid = Procedure.Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion, epoch, w, world.config['multicore'], 0)
+        # best_results_test = Procedure.Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion, epoch, w, world.config['multicore'], 1)
+        # print("Validation:")
+        # Procedure.print_results_all(None, best_results_valid, None)
+        # print("Test:")
+        # Procedure.print_results_all(None, None, best_results_test)
+        
         best_results_valid = Procedure.Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion, epoch, w, world.config['multicore'], 0)
         best_results_test = Procedure.Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion, epoch, w, world.config['multicore'], 1)
+
+        valid_precision, valid_recall, valid_ndcg, valid_mrr, valid_cov = best_results_valid
+        test_precision, test_recall, test_ndcg, test_mrr, test_cov = best_results_test
+
         print("Validation:")
-        Procedure.print_results_all(None, best_results_valid, None)
+        Procedure.print_results_all(None, (valid_precision, valid_recall, valid_ndcg, valid_mrr), None)
+        print(f"Coverage@{max(world.topks)}: {valid_cov:.4f}")
+
         print("Test:")
-        Procedure.print_results_all(None, None, best_results_test)
+        Procedure.print_results_all(None, None, (test_precision, test_recall, test_ndcg, test_mrr))
+        print(f"Coverage@{max(world.topks)}: {test_cov:.4f}")
 
     finally:
         if world.tensorboard:
