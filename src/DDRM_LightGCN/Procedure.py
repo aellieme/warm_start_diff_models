@@ -299,6 +299,7 @@ def Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_mod
         for batch_users in utils.minibatch(users, batch_size=u_batch_size):
             allPos = dataset.getUserPosItems(batch_users)
             
+            # размер до
             sizes_before = [len(items) for items in allPos]
             
             if flag == 1 and dataset.adapt_dict is not None:
@@ -306,10 +307,10 @@ def Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_mod
                     allPos[idx].extend(dataset.adapt_dict.get(user, []))
                     
                     
-            # Сохраняем размеры ПОСЛЕ
+            # размеры после
             sizes_after = [len(items) for items in allPos]
 
-            # === ВЕРИФИКАЦИЯ (удалите после проверки) ===
+            # проверка
             if flag == 1:
                 print(f"\n[TEST MODE] Batch users: {batch_users[:3]}")
                 print(f"[TEST MODE] History sizes BEFORE adapt: {sizes_before[:3]}")
