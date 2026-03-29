@@ -299,9 +299,25 @@ def Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_mod
         for batch_users in utils.minibatch(users, batch_size=u_batch_size):
             allPos = dataset.getUserPosItems(batch_users)
             
+            sizes_before = [len(items) for items in allPos]
+            
             if flag == 1 and dataset.adapt_dict is not None:
                 for idx, user in enumerate(batch_users):
                     allPos[idx].extend(dataset.adapt_dict.get(user, []))
+                    
+                    
+            # Сохраняем размеры ПОСЛЕ
+            sizes_after = [len(items) for items in allPos]
+
+            # === ВЕРИФИКАЦИЯ (удалите после проверки) ===
+            if flag == 1:
+                print(f"\n[TEST MODE] Batch users: {batch_users[:3]}")
+                print(f"[TEST MODE] History sizes BEFORE adapt: {sizes_before[:3]}")
+                print(f"[TEST MODE] History sizes AFTER adapt:  {sizes_after[:3]}")
+                print(f"[TEST MODE] Adapt items added: {[sizes_after[i] - sizes_before[i] for i in range(3)]}")
+            else:
+                print(f"\n[VALID MODE] Batch users: {batch_users[:3]}")
+                print(f"[VALID MODE] History sizes (no adapt): {sizes_before[:3]}")
             
             groundTrue = [testDict[u] for u in batch_users]
             batch_users_gpu = torch.Tensor(batch_users).long()
