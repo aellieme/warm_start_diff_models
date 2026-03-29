@@ -302,9 +302,17 @@ def Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_mod
             # размер до
             sizes_before = [len(items) for items in allPos]
             
-            if flag == 1 and dataset.adapt_dict is not None:
+            if flag == 1 and dataset.adapt_dict:
                 for idx, user in enumerate(batch_users):
-                    allPos[idx].extend(dataset.adapt_dict.get(user, []))
+                    adapt_items = dataset.adapt_dict.get(user, [])
+                    if adapt_items:
+                        if isinstance(allPos[idx], np.ndarray):
+                            allPos[idx] = allPos[idx].tolist()
+                        allPos[idx].extend(adapt_items)
+                
+            # if flag == 1 and dataset.adapt_dict is not None:
+            #     for idx, user in enumerate(batch_users):
+            #         allPos[idx].extend(dataset.adapt_dict.get(user, []))
                     
                     
             # размеры после
