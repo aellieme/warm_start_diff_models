@@ -21,7 +21,7 @@ if __name__ == '__main__':
     args = parse_args()
     dataset = dataloader.DiffData(path = args.data_path) 
     train_loader = data.DataLoader(dataset,
-            batch_size=args.batch_size, shuffle=True, num_workers=4)
+            batch_size=args.batch_size, shuffle=True, num_workers=2)
 
     # define rec mdoel
     Recmodel = register.MODELS[world.model_name](world.config, dataset)
@@ -60,9 +60,9 @@ if __name__ == '__main__':
     weight_file, user_weight_file, item_weight_file = utils.getFileName()
     print(f"load and save to {weight_file}")
 
-    path = './pretrain_checkpoint/' + args.dataset + '_LightGCN_checkpoint.tar'
-    Recmodel.load_state_dict(torch.load(path,map_location=torch.device('cpu')))
-    print(f"loaded model weights from {path}")
+    # path = './pretrain_checkpoint/' + args.dataset + '_LightGCN_checkpoint.tar'
+    # Recmodel.load_state_dict(torch.load(path,map_location=torch.device('cpu')))
+    # print(f"loaded model weights from {path}")
 
     Neg_k = 1
 
