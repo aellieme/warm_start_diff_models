@@ -97,7 +97,7 @@ def ndcg_at_k(actual: list, predicted: np.ndarray, k: int) -> float:
         
 #     return len(unique_recommended) / len(total_items)
 
-def calculate_catalog_coverage(predicted: list, total_items: set, k: int) -> float:
+def catalog_coverage(predicted: list, total_items: set, k: int) -> float:
     """
     predicted: list of lists (рекомендованные id для каждого пользователя)
     total_items: set всех id предметов в каталоге
