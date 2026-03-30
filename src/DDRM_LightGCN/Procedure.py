@@ -15,11 +15,9 @@ from sklearn.metrics import roc_auc_score
 import pdb
 
 
-# В начале файла Procedure.py добавьте:
 from evaluate_topk_dp import precision_at_k, recall_at_k, ndcg_at_k, mrr, catalog_coverage
 
 CORES = multiprocessing.cpu_count() // 2
-
 
 def BPR_train_original(dataset, recommend_model, loss_class, epoch, neg_k=1, w=None):
     Recmodel = recommend_model
@@ -137,7 +135,6 @@ def print_results(loss, valid_result, test_result):
                             '-'.join([str(x) for x in test_result[3]])))
 
 def shuffle_and_get_half_with_seed(my_list, seed_value):
-    # Make a copy of the list to avoid modifying the original
     shuffled_list = my_list.copy()
 
     # Set a fixed seed for the random number generator
@@ -175,7 +172,7 @@ def Test(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_model, 
         pool = multiprocessing.Pool(CORES)
 
     with torch.no_grad():
-        # Берём только тех пользователей, которые есть И в valid, И в test
+        # just users who are in valid and in test
         valid_users = set(validDict.keys())
         test_users = set(testDict.keys())
         common_users = list(valid_users & test_users)
@@ -220,9 +217,9 @@ def Test(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_model, 
             # _, rating_K = torch.topk(rating, k=max_K, largest=False)
             _, test_rating_K = torch.topk(test_rating, k=max_K)
             _, valid_rating_K = torch.topk(valid_rating, k=max_K)
-            print("Sample recommendations for first 3 users:")
-            for i in range(min(3, len(batch_users))):
-                print(f"User {batch_users[i]}: top-10 items = {valid_rating_K[i][:10].tolist()}")
+            # print("Sample recommendations for first 3 users:")
+            # for i in range(min(3, len(batch_users))):
+            #     print(f"User {batch_users[i]}: top-10 items = {valid_rating_K[i][:10].tolist()}")
             
             test_rating = test_rating_K.cpu().numpy()
             valid_rating = valid_rating_K.cpu().numpy()
@@ -365,9 +362,8 @@ def Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_mod
         NDCG = [ndcg_at_k(groundTrue_list, rating_list, k) for k in topKs]
         MRR = [mrr(groundTrue_list, rating_list, k) for k in topKs]
 
-        # Coverage для максимального K
         max_k = max(topKs)
-        total_items_set = set(range(dataset.m_items))  # все возможные ID предметов
+        total_items_set = set(range(dataset.m_items))  # все возможные id айтемов
         cov = catalog_coverage(rating_list, total_items_set, max_k)
     
         if multicore == 1:
