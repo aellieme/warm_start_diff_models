@@ -74,7 +74,7 @@ def ndcg_at_k(actual: list, predicted: list, k: int) -> float:
 
 def coverage(predicted: list, n_items: int) -> float:
     """
-    Coverage: количество уникальных рекомендованных предметов / общее количество предметов.
+    количество уникальных рекомендованных предметов / общее количество предметов.
     predicted: список списков рекомендованных предметов (top-k для каждого пользователя)
     n_items: общее количество предметов в датасете
     """
@@ -87,9 +87,8 @@ def coverage(predicted: list, n_items: int) -> float:
 
 def compute_all_metrics(actual: list, predicted: list, topN_list: list, n_items: int):
     """
-    Вычисляет precision, recall, ndcg, mrr, coverage для каждого topN.
-    Возвращает кортеж из пяти списков (по одному для каждой метрики),
-    каждый список содержит значения для соответствующих topN.
+    precision, recall, ndcg, mrr, coverage для каждого topk.
+    кортеж из пяти списков, каждый список содержит значения для соответствующих topk
     """
     precisions = []
     recalls = []
@@ -101,5 +100,5 @@ def compute_all_metrics(actual: list, predicted: list, topN_list: list, n_items:
         recalls.append(recall_at_k(actual, predicted, k))
         ndcgs.append(ndcg_at_k(actual, predicted, k))
         mrrs.append(mrr(actual, predicted, k))
-        covs.append(coverage(predicted, n_items))  # coverage не зависит от k, но можно вычислять один раз
+        covs.append(coverage(predicted, n_items)) 
     return precisions, recalls, ndcgs, mrrs, covs
