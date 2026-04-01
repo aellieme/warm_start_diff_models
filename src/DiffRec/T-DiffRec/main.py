@@ -9,6 +9,7 @@ import time
 import numpy as np
 import copy
 import multiprocessing
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -188,7 +189,8 @@ if __name__ == '__main__':
         batch_count = 0
         total_loss = 0.0
         
-        for batch_idx, batch in enumerate(train_loader):
+        # for batch_idx, batch in enumerate(train_loader):
+        for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch:03d}/{args.epochs}", unit="batch")):
             batch = batch.to(device)
             batch_count += 1
             optimizer.zero_grad()
