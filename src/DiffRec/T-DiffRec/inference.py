@@ -19,7 +19,8 @@ import torch.nn.functional as F
 
 import models.gaussian_diffusion as gd
 from models.DNN import DNN
-import evaluate_utils
+# import evaluate_utils
+import evaluate_topk_dp as eval_metrics
 import data_utils
 from copy import deepcopy
 
@@ -127,6 +128,27 @@ model = torch.load(model_path + model_name).to(device)
 
 print("models ready.")
 
+
+def print_results(loss, valid_result, test_result):
+    if loss is not None:
+        print("[Train]: loss: {:.4f}".format(loss))
+    if valid_result is not None:
+        print("[Valid]: Precision: {} Recall: {} NDCG: {} MRR: {} Coverage: {}".format(
+            '-'.join([f"{x:.4f}" for x in valid_result[0]]),
+            '-'.join([f"{x:.4f}" for x in valid_result[1]]),
+            '-'.join([f"{x:.4f}" for x in valid_result[2]]),
+            '-'.join([f"{x:.4f}" for x in valid_result[3]]),
+            '-'.join([f"{x:.4f}" for x in valid_result[4]])
+        ))
+    if test_result is not None:
+        print("[Test]: Precision: {} Recall: {} NDCG: {} MRR: {} Coverage: {}".format(
+            '-'.join([f"{x:.4f}" for x in test_result[0]]),
+            '-'.join([f"{x:.4f}" for x in test_result[1]]),
+            '-'.join([f"{x:.4f}" for x in test_result[2]]),
+            '-'.join([f"{x:.4f}" for x in test_result[3]]),
+            '-'.join([f"{x:.4f}" for x in test_result[4]])
+        ))
+
 def evaluate(data_loader, data_te, mask_his, topN):
     model.eval()
     e_idxlist = list(range(mask_his.shape[0]))
@@ -148,9 +170,8 @@ def evaluate(data_loader, data_te, mask_his, topN):
             indices = indices.cpu().numpy().tolist()
             predict_items.extend(indices)
 
-    test_results = evaluate_utils.computeTopNAccuracy(target_items, predict_items, topN)
-
-    return test_results
+    precisions, recalls, ndcgs, mrrs, covs = eval_metrics.compute_all_metrics(target_items, predict_items, topN, n_item)
+    return (precisions, recalls, ndcgs, mrrs, covs)
 
 
 valid_results = evaluate(test_loader, valid_y_data, train_data, eval(args.topN))
@@ -158,7 +179,7 @@ if args.tst_w_val:
     test_results = evaluate(test_twv_loader, test_y_data, mask_tv, eval(args.topN))
 else:
     test_results = evaluate(test_loader, test_y_data, mask_tv, eval(args.topN))
-evaluate_utils.print_results(None, valid_results, test_results)
+print_results(None, valid_results, test_results)
 
 
 
