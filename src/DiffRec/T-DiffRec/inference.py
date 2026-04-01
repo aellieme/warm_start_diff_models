@@ -10,6 +10,7 @@ import numpy as np
 import copy
 from tqdm import tqdm
 import scipy.sparse as sp
+import traceback
 
 import torch
 import torch.nn as nn
@@ -125,7 +126,9 @@ if args.dataset == "amazon-book_clean":
     model_name = "amazon-book_clean_lr1e-05_wd0.0_bs400_dims[1000]_emb10_x0_steps10_scale0.0005_min0.001_max0.005_sample0_reweight1_wmin0.1_wmax1.0_log.pth"
 elif args.dataset == "yelp_clean":
     model_name = "yelp_clean_lr1e-05_wd0.0_bs400_dims[1000]_emb10_x0_steps5_scale0.005_min0.001_max0.01_sample0_reweight1_wmin0.5_wmax1.0_log.pth"
-
+elif args.dataset =="ml-1m":
+    model_name = "ml-1m_lr0.0001_wd0.0_bs400_dims[1000]_emb10_x0_steps100_scale0.1_min0.0001_max0.02_sample0_reweightTrue_wmin0.1_wmax1.0_log.pth"
+    model_path = "saved_models/"
 model = torch.load(model_path + model_name).to(device)
 
 print("models ready.")
