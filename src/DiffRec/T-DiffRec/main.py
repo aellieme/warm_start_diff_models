@@ -20,7 +20,8 @@ import torch.nn.functional as F
 
 import models.gaussian_diffusion as gd
 from models.DNN import DNN
-import evaluate_utils
+# import evaluate_utils
+import evaluate_topk_dp as eval_metrics
 import data_utils
 from copy import deepcopy
 
@@ -127,6 +128,26 @@ if __name__ == '__main__':
     diff_num = sum([param.nelement() for param in diffusion.parameters()])  # 0
     param_num = mlp_num + diff_num
     print("Number of all parameters:", param_num)
+    
+    def print_results(loss, valid_result, test_result):
+        if loss is not None:
+            print("[Train]: loss: {:.4f}".format(loss))
+        if valid_result is not None:
+            print("[Valid]: Precision: {} Recall: {} NDCG: {} MRR: {} Coverage: {}".format(
+                '-'.join([f"{x:.4f}" for x in valid_result[0]]),
+                '-'.join([f"{x:.4f}" for x in valid_result[1]]),
+                '-'.join([f"{x:.4f}" for x in valid_result[2]]),
+                '-'.join([f"{x:.4f}" for x in valid_result[3]]),
+                '-'.join([f"{x:.4f}" for x in valid_result[4]])
+            ))
+        if test_result is not None:
+            print("[Test]: Precision: {} Recall: {} NDCG: {} MRR: {} Coverage: {}".format(
+                '-'.join([f"{x:.4f}" for x in test_result[0]]),
+                '-'.join([f"{x:.4f}" for x in test_result[1]]),
+                '-'.join([f"{x:.4f}" for x in test_result[2]]),
+                '-'.join([f"{x:.4f}" for x in test_result[3]]),
+                '-'.join([f"{x:.4f}" for x in test_result[4]])
+            ))
 
     def evaluate(data_loader, data_te, mask_his, topN):
         model.eval()
@@ -148,10 +169,9 @@ if __name__ == '__main__':
                 _, indices = torch.topk(prediction, topN[-1])
                 indices = indices.cpu().numpy().tolist()
                 predict_items.extend(indices)
-
-        test_results = evaluate_utils.computeTopNAccuracy(target_items, predict_items, topN)
-
-        return test_results
+                
+        precisions, recalls, ndcgs, mrrs, covs = eval_metrics.compute_all_metrics(target_items, predict_items, topN, n_item)
+        return (precisions, recalls, ndcgs, mrrs, covs)
 
     best_recall, best_epoch = -100, 0
     best_test_result = None
@@ -184,7 +204,7 @@ if __name__ == '__main__':
                 test_results = evaluate(test_twv_loader, test_y_data, mask_tv, eval(args.topN))
             else:
                 test_results = evaluate(test_loader, test_y_data, mask_tv, eval(args.topN))
-            evaluate_utils.print_results(None, valid_results, test_results)
+            print_results(None, valid_results, test_results)
 
             if valid_results[1][1] > best_recall: # recall@20 as selection
                 best_recall, best_epoch = valid_results[1][1], epoch
@@ -203,7 +223,7 @@ if __name__ == '__main__':
 
     print('==='*18)
     print("End. Best Epoch {:03d} ".format(best_epoch))
-    evaluate_utils.print_results(None, best_results, best_test_results)   
+    print_results(None, best_results, best_test_results)   
     print("End time: ", time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
 
 
