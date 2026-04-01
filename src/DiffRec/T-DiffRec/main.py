@@ -45,7 +45,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='ml-1m_noisy', help='choose the dataset')
-    parser.add_argument('--data_path', type=str, default='../datasets/', help='load data path')
+    parser.add_argument('--data_path', type=str, default='../../data/ml-1m/', help='load data path')
     parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
     parser.add_argument('--weight_decay', type=float, default=0.0)
     parser.add_argument('--batch_size', type=int, default=400)
