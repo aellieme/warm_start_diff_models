@@ -1,0 +1,10 @@
+bottleneck==1.6.0
+cppimport==22.8.2
+numpy==2.4.4
+pandas==3.0.2
+polara==0.7.2.dev0
+scikit_learn==1.8.0
+scipy==1.17.1
+tensorboardx==2.6.4
+torch==2.11.0
+tqdm==4.67.3
