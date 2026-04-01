@@ -178,7 +178,7 @@ if __name__ == '__main__':
     best_test_result = None
     print("Start training...")
     for epoch in range(1, args.epochs + 1):
-        if epoch - best_epoch >= 20:
+        if epoch - best_epoch >= 25:
             print('-'*18)
             print('Exiting from training early')
             break
