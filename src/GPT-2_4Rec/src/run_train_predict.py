@@ -86,7 +86,22 @@ def main(config):
             #оцениваем на тех же тестовых данных
             print("Adaptation metrics on test")
             evaluate(recs_adapt, test, train_adapt, config, prefix='test_adapt')
+            
+    metrics_baseline = evaluate(recs, test, train, task, config, prefix='test')
+    metrics_adapt = evaluate(recs_adapt, test, train_adapt, task, config, prefix='test_adapt')
+    summary = {
+    'Recall@10 (Baseline)': metrics_baseline.get('test_recall@10', 0),
+    'NDCG@10 (Baseline)': metrics_baseline.get('test_ndcg@10', 0),
+    'Coverage (Baseline)': metrics_baseline.get('test_coverage@10', 0),
+    'MRR (Baseline)': metrics_baseline.get('test_mrr@10', 0),
+    'Recall (adaptation)': metrics_adapt.get('test_adapt_recall@10', 0),
+    'NDCG (adaptation)': metrics_adapt.get('test_adapt_ndcg@10', 0),
+    'Coverage (adaptation)': metrics_adapt.get('test_adapt_coverage@10', 0),
+    'MRR (adaptation)': metrics_adapt.get('test_adapt_mrr@10', 0),
+    }
 
+    summary_df = pd.DataFrame([summary])
+    print(summary_df.to_string(index=False))
     # if task is not None:
     #     task.get_logger().report_single_value('training_time', training_time)
     #     task.upload_artifact('recs', recs)
