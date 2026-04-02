@@ -270,10 +270,10 @@ def evaluate(recs, test, train,  config, prefix='test'):
     compute_by_time_idx_flag = test['time_idx'].nunique() > 1
     if compute_by_time_idx_flag:
         metrics_by_time_idx = evaluator.compute_metrics_by_time_idx(test, recs)
-        print(f'{prefix} metrics_by_time_idx\n', metrics_by_time_idx.to_string())
-        metrics_by_time_idx_top_k_gt = evaluator.compute_metrics_by_time_idx(
-            test, recs, top_k_gt=True)
-        print(f'{prefix} metrics_by_time_idx_top_k_gt\n', metrics_by_time_idx_top_k_gt.to_string())
+        # print(f'{prefix} metrics_by_time_idx\n', metrics_by_time_idx.to_string())
+        print(f'{prefix} metrics_by_time_idx (first 200 rows)\n', metrics_by_time_idx.head(200).to_string())
+        metrics_by_time_idx_top_k_gt = evaluator.compute_metrics_by_time_idx(test, recs, top_k_gt=True)
+        print(f'{prefix} metrics_by_time_idx_top_k_gt (first 200 rows) \n', metrics_by_time_idx_top_k_gt.head(200).to_string())
 
     # if task:
 
