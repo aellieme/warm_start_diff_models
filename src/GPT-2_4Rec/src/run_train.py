@@ -43,11 +43,11 @@ def main(config):
     training_time = time.time() - start_time
     print('training_time', training_time)
 
-    if task is not None:
-        task.get_logger().report_single_value('training_time', training_time)
-        torch.save(seqrec_module.model.state_dict(), 'model.pt')
-        task.upload_artifact('model', 'model.pt')
-        task.close()
+    # if task is not None:
+    #     task.get_logger().report_single_value('training_time', training_time)
+    #     torch.save(seqrec_module.model.state_dict(), 'model.pt')
+    #     task.upload_artifact('model', 'model.pt')
+    #     task.close()
 
 
 if __name__ == "__main__":

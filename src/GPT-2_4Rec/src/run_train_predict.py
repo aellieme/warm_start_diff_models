@@ -77,7 +77,13 @@ def main(config):
         task.close()
 
 def prepare_data(config):
-    data = pd.read_csv(config.data_path)
+    
+    # from csv
+    # data = pd.read_csv(config.data_path)
+    from polara import get_movielens_data
+    df = get_movielens_data(include_time=True)   # загружаем датасет
+    
+    
     print('GTS')
     global_time_col = getattr(config, 'global_time_col', 'timestamp')
 
@@ -85,6 +91,7 @@ def prepare_data(config):
     assert len(ratios) == 4 and abs(sum(ratios) - 1.0) < 1e-6
 
     data = data.sort_values(global_time_col)
+    
 
     time_values = data[global_time_col]
     train_cutoff = time_values.quantile(ratios[0])
