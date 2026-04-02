@@ -49,7 +49,8 @@ def main(config):
     else:
         task = None
 
-    train, validation, validation_full, test, item_count = prepare_data(config)
+    # train, validation, validation_full, test, item_count = prepare_data(config)
+    train, validation, validation_full, adapt, test, item_count = prepare_data(config)
     train_loader, eval_loader = create_dataloaders(train, validation_full, config)
     model = create_model(config, item_count=item_count)
     start_time = time.time()
@@ -68,13 +69,28 @@ def main(config):
         return val_metrics[val_metrics['metric_name'] == config.optuna_metrics]['metric_value'].values
     else:
         evaluate(recs, validation, train, task, config, prefix='val')
+        
     if config.test_metrics:
         evaluate(recs, test, train, task, config, prefix='test')
+        
+        if adapt is not None and len(adapt) > 0: #адаптация
+            print("\nStarting adaptation=")
+            
+            #объединяем train и adapt, пересчитываем time_idx
+            train_adapt = pd.concat([train, adapt], ignore_index=True)
+            train_adapt = add_time_idx(train_adapt)   # пересортировка и новый time_idx
+            
+            #генерируем рекомендации на основе обновл истории
+            recs_adapt = predict(trainer, seqrec_module, train_adapt, config)
+            
+            #оцениваем на тех же тестовых данных
+            print("Adaptation metrics on test")
+            evaluate(recs_adapt, test, train_adapt, task, config, prefix='test_adapt')
 
-    if task is not None:
-        task.get_logger().report_single_value('training_time', training_time)
-        task.upload_artifact('recs', recs)
-        task.close()
+    # if task is not None:
+    #     task.get_logger().report_single_value('training_time', training_time)
+    #     task.upload_artifact('recs', recs)
+    #     task.close()
 
 def prepare_data(config):
     
@@ -98,7 +114,7 @@ def prepare_data(config):
     train_cutoff = time_values.quantile(ratios[0])
     val_cutoff   = time_values.quantile(ratios[0] + ratios[1])
     adapt_cutoff = time_values.quantile(ratios[0] + ratios[1] + ratios[2])
-    print(f'time_values {time_values}, train_cutoff {train_cutoff}, val cutoff {val_cutoff}, adapt cutoff {val_cutoff}, adapt {adapt_cutoff}')
+    print(f'time_values {time_values}, train_cutoff {train_cutoff}, val cutoff {val_cutoff}, adapt cutoff {adapt_cutoff}, adapt {adapt_cutoff}')
 
     train = data[data[global_time_col] <= train_cutoff].copy()
     validation = data[(data[global_time_col] > train_cutoff) & (data[global_time_col] <= val_cutoff)].copy()
@@ -121,36 +137,6 @@ def prepare_data(config):
     print(f'item count {item_count}')
 
     return train, validation, validation_full, adapt, test, item_count
-
-# def prepare_data(config):
-
-#     data = pd.read_csv(config.data_path)
-#     data = add_time_idx(data)
-
-#     # index 1 is used for masking value
-#     if config.model == 'BERT4Rec':
-#         data.item_id += 1
-
-#     train = data[data.time_idx_reversed >= config.last_n_items]
-#     test = data[data.time_idx_reversed < config.last_n_items]
-
-#     users_validation, users_test = train_test_split(
-#         test.user_id.unique(), test_size=0.5, random_state=42)
-#     validation = test[test.user_id.isin(users_validation)]
-#     test = test[test.user_id.isin(users_test)]
-
-#     train = add_time_idx(train)
-#     validation = add_time_idx(validation)
-#     test = add_time_idx(test)
-
-#     train2 = train[train.user_id.isin(users_validation)]
-#     validation2 = validation[validation.time_idx == 0]
-#     validation_full = pd.concat([train2, validation2])
-#     validation_full = add_time_idx(validation_full)
-
-#     item_count = data.item_id.max()
-
-#     return train, validation, validation_full, test, item_count
 
 
 def create_dataloaders(train, validation, config):
@@ -321,6 +307,11 @@ def evaluate(recs, test, train, task, config, prefix='test'):
             task.upload_artifact(f'{prefix}_metrics_by_time_idx_top_k_gt',
                               metrics_by_time_idx_top_k_gt)
     return metrics
+
+
+
+
+
 
 
 if __name__ == "__main__":
