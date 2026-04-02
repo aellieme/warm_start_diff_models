@@ -59,10 +59,13 @@ def main(config):
     print('training_time', training_time)
 
     if config.test_metrics:
+        start_time_inf = time.perf_counter()
         recs = predict(trainer, seqrec_module, train, config)
+        baseline_latency = time.perf_counter() - start_time_inf
     else:
-        recs = predict(trainer, seqrec_module,
-                       train[train.user_id.isin(validation.user_id.unique())], config)
+        start_time_inf = time.perf_counter()
+        recs = predict(trainer, seqrec_module, train[train.user_id.isin(validation.user_id.unique())], config)
+        baseline_latency = time.perf_counter() - start_time_inf
     
     if hasattr(config, 'optuna_metrics'):
         val_metrics = evaluate(recs, validation[validation.time_idx == 0], train,  config, prefix='val')
@@ -80,8 +83,10 @@ def main(config):
             train_adapt = pd.concat([train, adapt], ignore_index=True)
             train_adapt = add_time_idx(train_adapt)   # пересортировка и новый time_idx
             
+            start_time_adapt = time.perf_counter()
             #генерируем рекомендации на основе обновл истории
             recs_adapt = predict(trainer, seqrec_module, train_adapt, config)
+            adapt_latency = time.perf_counter() - start_time_adapt
             
             #оцениваем на тех же тестовых данных
             print("Adaptation metrics on test")
@@ -96,6 +101,8 @@ def main(config):
             'NDCG (adaptation)': metrics_adapt.get('test_adapt_ndcg@10', 0),
             'Coverage (adaptation)': metrics_adapt.get('test_adapt_coverage@10', 0),
             'MRR (adaptation)': metrics_adapt.get('test_adapt_mrr@10', 0),
+            'Latency (baseline, s)': baseline_latency,
+            'Latency (adaptation, s)': adapt_latency,
             }
 
             summary_df = pd.DataFrame([summary])
