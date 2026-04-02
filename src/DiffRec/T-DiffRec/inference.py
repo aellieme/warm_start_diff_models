@@ -61,7 +61,7 @@ parser.add_argument('--noise_scale', type=float, default=0.1, help='noise scale 
 parser.add_argument('--noise_min', type=float, default=0.0001, help='noise lower bound for noise generating')
 parser.add_argument('--noise_max', type=float, default=0.02, help='noise upper bound for noise generating')
 parser.add_argument('--sampling_noise', type=bool, default=False, help='sampling with noise or not')
-parser.add_argument('--sampling_steps', type=int, default=0, help='steps of the forward process during inference')
+parser.add_argument('--sampling_steps', type=int, default=100, help='steps of the forward process during inference')
 
 args = parser.parse_args()
 
