@@ -81,7 +81,8 @@ def prepare_data(config):
     # from csv
     # data = pd.read_csv(config.data_path)
     from polara import get_movielens_data
-    df = get_movielens_data(include_time=True)   # загружаем датасет
+    data = get_movielens_data(include_time=True)   # загружаем датасет
+    data = data.rename(columns={'userid': 'user_id', 'movieid': 'item_id'})
     
     
     print('GTS')
