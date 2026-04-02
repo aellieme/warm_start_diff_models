@@ -9,7 +9,7 @@ import hydra
 import numpy as np
 import pandas as pd
 import torch
-from clearml import Task
+# from clearml import Task
 from omegaconf import OmegaConf
 from run_train_predict import prepare_data, create_dataloaders, create_model, training
 
@@ -42,6 +42,7 @@ def main(config):
     trainer, seqrec_module = training(model, train_loader, eval_loader, config)
     training_time = time.time() - start_time
     print('training_time', training_time)
+    torch.save(seqrec_module.model.state_dict(), "best_model.pt")
 
     # if task is not None:
     #     task.get_logger().report_single_value('training_time', training_time)

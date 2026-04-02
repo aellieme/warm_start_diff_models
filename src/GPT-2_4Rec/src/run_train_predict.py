@@ -9,7 +9,7 @@ import hydra
 import numpy as np
 import pandas as pd
 
-from clearml import Task
+# from clearml import Task
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import (EarlyStopping, ModelCheckpoint,
                                          ModelSummary, TQDMProgressBar)
@@ -38,16 +38,16 @@ def main(config):
     if hasattr(config, 'cuda_visible_devices'):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(config.cuda_visible_devices)
 
-    if hasattr(config, 'project_name'):
-        if hasattr(config, 'seed'):
-            Task.set_random_seed(config.seed)
-        else:
-            Task.set_random_seed(None)
-        task = Task.init(project_name=config.project_name, task_name=config.task_name,
-                        reuse_last_task_id=False)
-        task.connect(OmegaConf.to_container(config))
-    else:
-        task = None
+    # if hasattr(config, 'project_name'):
+    #     if hasattr(config, 'seed'):
+    #         Task.set_random_seed(config.seed)
+    #     else:
+    #         Task.set_random_seed(None)
+    #     task = Task.init(project_name=config.project_name, task_name=config.task_name,
+    #                     reuse_last_task_id=False)
+    #     task.connect(OmegaConf.to_container(config))
+    # else:
+    #     task = None
 
     # train, validation, validation_full, test, item_count = prepare_data(config)
     train, validation, validation_full, adapt, test, item_count = prepare_data(config)
@@ -65,13 +65,13 @@ def main(config):
                        train[train.user_id.isin(validation.user_id.unique())], config)
     
     if hasattr(config, 'optuna_metrics'):
-        val_metrics = evaluate(recs, validation[validation.time_idx == 0], train, task, config, prefix='val')
+        val_metrics = evaluate(recs, validation[validation.time_idx == 0], train,  config, prefix='val')
         return val_metrics[val_metrics['metric_name'] == config.optuna_metrics]['metric_value'].values
     else:
-        evaluate(recs, validation, train, task, config, prefix='val')
+        evaluate(recs, validation, train,  config, prefix='val')
         
     if config.test_metrics:
-        evaluate(recs, test, train, task, config, prefix='test')
+        evaluate(recs, test, train,  config, prefix='test')
         
         if adapt is not None and len(adapt) > 0: #адаптация
             print("\nStarting adaptation=")
@@ -85,12 +85,13 @@ def main(config):
             
             #оцениваем на тех же тестовых данных
             print("Adaptation metrics on test")
-            evaluate(recs_adapt, test, train_adapt, task, config, prefix='test_adapt')
+            evaluate(recs_adapt, test, train_adapt, config, prefix='test_adapt')
 
     # if task is not None:
     #     task.get_logger().report_single_value('training_time', training_time)
     #     task.upload_artifact('recs', recs)
     #     task.close()
+    torch.save(seqrec_module.model.state_dict(), "best_model.pt")
 
 def prepare_data(config):
     
@@ -258,7 +259,7 @@ def predict(trainer, seqrec_module, data, config):
     return recs
 
 
-def evaluate(recs, test, train, task, config, prefix='test'):
+def evaluate(recs, test, train,  config, prefix='test'):
 
     evaluator = Evaluator(**config['evaluator'])
 
@@ -274,38 +275,38 @@ def evaluate(recs, test, train, task, config, prefix='test'):
             test, recs, top_k_gt=True)
         print(f'{prefix} metrics_by_time_idx_top_k_gt\n', metrics_by_time_idx_top_k_gt.to_string())
 
-    if task:
+    # if task:
 
-        clearml_logger = task.get_logger()
+        # clearml_logger = task.get_logger()
 
-        for key, value in metrics.items():
-            clearml_logger.report_single_value(key, value)
+        # for key, value in metrics.items():
+        #     clearml_logger.report_single_value(key, value)
 
-        if compute_by_time_idx_flag:
-            for metric_name in metrics_by_time_idx.columns:
-                for i, value in metrics_by_time_idx[metric_name].to_dict().items():
-                    clearml_logger.report_scalar(title=prefix + '_' + metric_name,
-                                                 series='by_time_idx', value=value, iteration=i)
-                for i, value in metrics_by_time_idx_top_k_gt[metric_name].to_dict().items():
-                    clearml_logger.report_scalar(title=prefix + '_' + metric_name,
-                                                 series='by_time_idx_top_k_gt',
-                                                 value=value, iteration=i)
+        # if compute_by_time_idx_flag:
+        #     for metric_name in metrics_by_time_idx.columns:
+        #         for i, value in metrics_by_time_idx[metric_name].to_dict().items():
+        #             clearml_logger.report_scalar(title=prefix + '_' + metric_name,
+        #                                          series='by_time_idx', value=value, iteration=i)
+        #         for i, value in metrics_by_time_idx_top_k_gt[metric_name].to_dict().items():
+        #             clearml_logger.report_scalar(title=prefix + '_' + metric_name,
+        #                                          series='by_time_idx_top_k_gt',
+        #                                          value=value, iteration=i)
 
-        metrics = pd.Series(metrics).to_frame().reset_index()
-        metrics.columns = ['metric_name', 'metric_value']
-        clearml_logger.report_table(title=f'{prefix}_metrics', series='dataframe',
-                                    table_plot=metrics)
-        task.upload_artifact(f'{prefix}_metrics', metrics)
+        # metrics = pd.Series(metrics).to_frame().reset_index()
+        # metrics.columns = ['metric_name', 'metric_value']
+        # clearml_logger.report_table(title=f'{prefix}_metrics', series='dataframe',
+        #                             table_plot=metrics)
+        # task.upload_artifact(f'{prefix}_metrics', metrics)
 
-        if compute_by_time_idx_flag:
-            clearml_logger.report_table(title=f'{prefix}_metrics_by_time_idx', series='dataframe',
-                                        table_plot=metrics_by_time_idx)
-            task.upload_artifact(f'{prefix}_metrics_by_time_idx', metrics_by_time_idx)
-            clearml_logger.report_table(title=f'{prefix}_metrics_by_time_idx_top_k_gt',
-                                        series='dataframe',
-                                        table_plot=metrics_by_time_idx_top_k_gt)
-            task.upload_artifact(f'{prefix}_metrics_by_time_idx_top_k_gt',
-                              metrics_by_time_idx_top_k_gt)
+        # if compute_by_time_idx_flag:
+        #     clearml_logger.report_table(title=f'{prefix}_metrics_by_time_idx', series='dataframe',
+        #                                 table_plot=metrics_by_time_idx)
+        #     task.upload_artifact(f'{prefix}_metrics_by_time_idx', metrics_by_time_idx)
+        #     clearml_logger.report_table(title=f'{prefix}_metrics_by_time_idx_top_k_gt',
+        #                                 series='dataframe',
+        #                                 table_plot=metrics_by_time_idx_top_k_gt)
+        #     task.upload_artifact(f'{prefix}_metrics_by_time_idx_top_k_gt',
+        #                       metrics_by_time_idx_top_k_gt)
     return metrics
 
 
@@ -317,3 +318,4 @@ def evaluate(recs, test, train, task, config, prefix='test'):
 if __name__ == "__main__":
 
     main()
+    
