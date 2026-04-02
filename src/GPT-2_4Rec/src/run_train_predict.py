@@ -89,7 +89,7 @@ def main(config):
             adapt_latency = time.perf_counter() - start_time_adapt
             
             #оцениваем на тех же тестовых данных
-            print("Adaptation metrics on test")
+            print("\nAdaptation metrics on test")
             metrics_adapt = evaluate(recs_adapt, test, train_adapt, config, prefix='test_adapt')
             
             summary = {
@@ -294,8 +294,8 @@ def evaluate(recs, test, train,  config, prefix='test'):
         os.makedirs("metrics_csv", exist_ok=True)
         metrics_by_time_idx.to_csv(f"metrics_csv/{prefix}_metrics_by_time_idx.csv", index=False)
         metrics_by_time_idx_top_k_gt.to_csv(f"metrics_csv/{prefix}_metrics_by_time_idx_top_k_gt.csv", index=False)
-        print(f"Saved metrics_by_time_idx to metrics_csv/{prefix}_metrics_by_time_idx.csv")
-        print(f"Saved metrics_by_time_idx_top_k_gt to metrics_csv/{prefix}_metrics_by_time_idx_top_k_gt.csv")
+        print(f"\nSaved metrics_by_time_idx to metrics_csv/{prefix}_metrics_by_time_idx.csv")
+        print(f"\nSaved metrics_by_time_idx_top_k_gt to metrics_csv/{prefix}_metrics_by_time_idx_top_k_gt.csv")
 
     # if task:
 
