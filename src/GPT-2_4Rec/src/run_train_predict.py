@@ -163,6 +163,10 @@ def create_dataloaders(train, validation, config):
         validation_users = np.random.choice(validation_users, size=validation_size, replace=False)
         validation = validation[validation.user_id.isin(validation_users)]
     
+    user_seq_len = validation.groupby('user_id').size()
+    users_with_enough = user_seq_len[user_seq_len >= 2].index
+    validation = validation[validation.user_id.isin(users_with_enough)]
+    
     train_dataset = MaskedLMDataset(train, **config['dataset']) if config.model == 'BERT4Rec' else CausalLMDataset(train, **config['dataset'])
     eval_dataset = MaskedLMPredictionDataset(validation, max_length=config.dataset.max_length, validation_mode=True) if config.model == 'BERT4Rec' else CausalLMPredictionDataset(validation, max_length=config.dataset.max_length, validation_mode=True)
 
