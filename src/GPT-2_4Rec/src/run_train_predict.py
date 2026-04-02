@@ -281,12 +281,14 @@ def evaluate(recs, test, train,  config, prefix='test'):
     print(f'{prefix} metrics\n', metrics)
 
     compute_by_time_idx_flag = test['time_idx'].nunique() > 1
-    if compute_by_time_idx_flag:
+    if compute_by_time_idx_flag: #подробные метрики я сохраняю в файлы csv в папку метрикс csv, она создается если ее нет 
         metrics_by_time_idx = evaluator.compute_metrics_by_time_idx(test, recs)
-        # print(f'{prefix} metrics_by_time_idx\n', metrics_by_time_idx.to_string())
-        print(f'{prefix} metrics_by_time_idx (first 200 rows)\n', metrics_by_time_idx.head(200).to_string())
         metrics_by_time_idx_top_k_gt = evaluator.compute_metrics_by_time_idx(test, recs, top_k_gt=True)
-        print(f'{prefix} metrics_by_time_idx_top_k_gt (first 200 rows) \n', metrics_by_time_idx_top_k_gt.head(200).to_string())
+        os.makedirs("metrics_csv", exist_ok=True)
+        metrics_by_time_idx.to_csv(f"metrics_csv/{prefix}_metrics_by_time_idx.csv", index=False)
+        metrics_by_time_idx_top_k_gt.to_csv(f"metrics_csv/{prefix}_metrics_by_time_idx_top_k_gt.csv", index=False)
+        print(f"Saved metrics_by_time_idx to metrics_csv/{prefix}_metrics_by_time_idx.csv")
+        print(f"Saved metrics_by_time_idx_top_k_gt to metrics_csv/{prefix}_metrics_by_time_idx_top_k_gt.csv")
 
     # if task:
 
