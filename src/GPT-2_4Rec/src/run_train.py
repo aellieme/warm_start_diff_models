@@ -24,16 +24,15 @@ def main(config):
     if hasattr(config, 'cuda_visible_devices'):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(config.cuda_visible_devices)
 
-    if hasattr(config, 'project_name'):
-        if hasattr(config, 'seed'):
-            Task.set_random_seed(config.seed)
-        else:
-            Task.set_random_seed(None)
-        task = Task.init(project_name=config.project_name, task_name=config.task_name,
-                        reuse_last_task_id=False)
-        task.connect(OmegaConf.to_container(config))
-    else:
-        task = None
+    # if hasattr(config, 'project_name'):
+    #     if hasattr(config, 'seed'):
+    #         Task.set_random_seed(config.seed)
+    #     else:
+    #         Task.set_random_seed(None)
+    #     # task = Task.init(project_name=config.project_name, task_name=config.task_name,  reuse_last_task_id=False)
+    #     # task.connect(OmegaConf.to_container(config))
+    # else:
+    #     task = None
 
     # train, validation, validation_full, test, item_count = prepare_data(config)
     train, validation, validation_full, adapt, test, item_count = prepare_data(config)
