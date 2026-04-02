@@ -1,23 +1,63 @@
 cuda_visible_devices: 0
 
-project_name: sequential_recsys/generation_paper
-task_name: GPT_predict
-seed: 1337
+model_checkpoint: best_model.pt
 
-train_task: 0
+data_path: ../data/ml-20m.csv
+global_time_col: timestamp
+split_ratios: [0.7, 0.1, 0.1, 0.1]
 
-evaluator:
-  top_k: [10]
-test_metrics: True
+dataset:
+  max_length: 128
+  shift_labels: false
+
+model: GPT-2
+model_params:
+  n_positions: 128
+  n_embd: 64      # должно совпадать с обучением
+  n_layer: 2
+  n_head: 1
+
+seqrec_module:
+  lr: 0.001
+  predict_top_k: 10
+  filter_seen: true
 
 dataloader:
   test_batch_size: 16
+  num_workers: 8
 
-generation: False
+evaluator:
+  top_k: [10]
+test_metrics: true
+
+generation: false
 mode: 'reciprocal_rank_aggregation'
 generation_params:
   num_return_sequences: 1
-  # no_repeat_ngram_size: 1
-  do_sample: False
-  # temperature: 0.1
-  # num_beams: 1
+  do_sample: false
+  
+# cuda_visible_devices: 0
+
+# project_name: sequential_recsys/generation_paper
+# task_name: GPT_predict
+# seed: 1337
+
+# train_task: 0
+
+# evaluator:
+#   top_k: [10]
+# test_metrics: True
+
+# dataloader:
+#   test_batch_size: 16
+
+# generation: False
+# mode: 'reciprocal_rank_aggregation'
+# generation_params:
+#   num_return_sequences: 1
+#   # no_repeat_ngram_size: 1
+#   do_sample: False
+#   # temperature: 0.1
+#   # num_beams: 1
+
+# model_checkpoint: best_model.pt
