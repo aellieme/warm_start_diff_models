@@ -13,7 +13,7 @@ dataset:
 model: GPT-2
 model_params:
   n_positions: 128
-  n_embd: 64      # должно совпадать с обучением
+  n_embd: 64      
   n_layer: 2
   n_head: 1
 

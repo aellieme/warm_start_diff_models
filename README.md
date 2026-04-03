@@ -28,3 +28,5 @@
 
 
 !python src/run_train_predict.py --config-name=GPT_train_predict data_path=data/ml-20m.csv task_name=ml-1m_GPT_train dataloader.test_batch_size=256 model_params.n_embd=256
+
+!python src/run_predict.py --config-name=GPT_predict data_path=data/ml-20m.csv dataloader.test_batch_size=256 model_params.n_embd=256
