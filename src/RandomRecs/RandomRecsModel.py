@@ -4,25 +4,6 @@ from polara import get_movielens_data
 from evaluate_topk_dp import compute_all_metrics
 import time
 
-df = get_movielens_data()
-
-n_rows = len(df)
-train_end = int(n_rows * 0.7)
-val_end   = int(n_rows * 0.8)
-adapt_end = int(n_rows * 0.9)
-
-train_df = df.iloc[:train_end].copy()
-val_df   = df.iloc[train_end:val_end].copy()
-adapt_df = df.iloc[val_end:adapt_end].copy()
-test_df  = df.iloc[adapt_end:].copy()
-
-print(f"Разбиение: Train: {len(train_df)}, Val: {len(val_df)}, Adapt: {len(adapt_df)}, Test: {len(test_df)}")
-
-all_items_count = df['movieid'].nunique()
-
-# список всех уникальных айтемов, которые были в трейне
-item_catalog = train_df['movieid'].unique().tolist()
-
 def get_random_recommendations(user_histories, item_catalog, k=20):
     recommendations = []
     rng = np.random.default_rng() 
@@ -42,19 +23,6 @@ def get_random_recommendations(user_histories, item_catalog, k=20):
             recs.append(-1)
         recommendations.append(recs)
     return recommendations
-
-
-test_users = test_df['userid'].unique()
-test_grouped = test_df.groupby('userid')['movieid'].apply(list).reindex(test_users).tolist()
-
-history_baseline = pd.concat([train_df, val_df]).groupby('userid')['movieid'].apply(list)
-history_adapt = pd.concat([train_df, val_df, adapt_df]).groupby('userid')['movieid'].apply(list)
-
-users_hist_baseline = [history_baseline.get(u, []) for u in test_users]
-users_hist_adapt = [history_adapt.get(u, []) for u in test_users]
-
-TOP_K_LIST = [1, 10, 20, 50]
-
 
 def run_experiment(histories, catalog, k_list, title):
     print(f"\n--- Running {title} Inference ---")
@@ -86,10 +54,6 @@ def run_experiment(histories, catalog, k_list, title):
         
     return results
 
-results_baseline = run_experiment(users_hist_baseline, item_catalog, TOP_K_LIST, "BASELINE")
-results_adapt = run_experiment(users_hist_adapt, item_catalog, TOP_K_LIST, "ADAPT")
-
-
 def print_final_results(title, topN_list, res):
     print(f"\nFINAL RESULTS FOR {title}:")
     header = f"{'K':<5} | {'Recall@K':<10} | {'NDCG@K':<10} | {'MRR@K':<10} | {'Coverage':<10} | {'Latency (s)':<12}"
@@ -99,6 +63,50 @@ def print_final_results(title, topN_list, res):
 
     for i, k in enumerate(topN_list):
         print(f"{k:<5} | {res['recalls'][i]:.6f} | {res['ndcgs'][i]:.6f} | {res['mrrs'][i]:.6f} | {res['covs'][i]:.6f} | {res['latencies'][i]:.6f}")
+
+
+
+df = get_movielens_data(include_time=True)
+df = df.sort_values('timestamp').reset_index(drop=True)
+
+n_rows = len(df)
+time_train = df['timestamp'].quantile(0.7)
+time_val   = df['timestamp'].quantile(0.8)
+time_adapt = df['timestamp'].quantile(0.9)
+
+train_df = df[df['timestamp'] <= time_train].copy()
+val_df   = df[(df['timestamp'] > time_train) & (df['timestamp'] <= time_val)].copy()
+adapt_df = df[(df['timestamp'] > time_val) & (df['timestamp'] <= time_adapt)].copy()
+test_df  = df[df['timestamp'] > time_adapt].copy()
+
+# Проверка непересекаемости временных интервалов
+assert train_df['timestamp'].max() <= val_df['timestamp'].min(), "Train и Val пересекаются по времени"
+assert val_df['timestamp'].max() <= adapt_df['timestamp'].min(), "Val и Adapt пересекаются по времени"
+assert adapt_df['timestamp'].max() <= test_df['timestamp'].min(), "Adapt и Test пересекаются по времени"
+
+print("интервалы не пересекаются")
+
+print(f"разбиение: Train: {len(train_df)}, Val: {len(val_df)}, Adapt: {len(adapt_df)}, Test: {len(test_df)}")
+
+all_items_count = df['movieid'].nunique()
+
+# список всех уникальных айтемов, которые были в трейне
+item_catalog = train_df['movieid'].unique().tolist()
+
+test_users = test_df['userid'].unique()
+test_grouped = test_df.groupby('userid')['movieid'].apply(list).reindex(test_users).tolist()
+
+history_baseline = pd.concat([train_df, val_df]).groupby('userid')['movieid'].apply(list)
+history_adapt = pd.concat([train_df, val_df, adapt_df]).groupby('userid')['movieid'].apply(list)
+
+users_hist_baseline = [history_baseline.get(u, []) for u in test_users]
+users_hist_adapt = [history_adapt.get(u, []) for u in test_users]
+
+TOP_K_LIST = [1, 10, 20, 50]
+
+results_baseline = run_experiment(users_hist_baseline, item_catalog, TOP_K_LIST, "BASELINE")
+results_adapt = run_experiment(users_hist_adapt, item_catalog, TOP_K_LIST, "ADAPT")
+
 
 print_final_results("RANDOM BASELINE", TOP_K_LIST, results_baseline)
 print_final_results("RANDOM ADAPT", TOP_K_LIST, results_adapt)
