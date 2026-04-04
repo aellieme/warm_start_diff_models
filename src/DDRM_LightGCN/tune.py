@@ -104,6 +104,7 @@ def objective(trial, base_args, dataset, device):
             idx += 1
             iter_count += 1
         aver_loss = aver_loss / idx
+        print(f"Trial {trial.number}, Epoch {epoch+1}, loss: {aver_loss:.4f}, best_recall: {best_recall:.4f}")
 
         if (epoch + 1) % 5 == 0:
             results = Procedure.Test(
@@ -146,12 +147,13 @@ def main_tune():
 
     dataset = dataloader.DiffData(path=base_args.data_path)
     device = world.device
-
+    
     study = optuna.create_study(direction='maximize', study_name='lightgcn_diff_tuning')
+    optuna.logging.set_verbosity(optuna.logging.INFO)
     study.optimize(
         lambda trial: objective(trial, base_args, dataset, device),
         n_trials=100,  # количество экспериментов
-        timeout=None  # можно ограничить по времени
+        timeout=1800  # можно ограничить по времени
     )
 
     print("Best trial:")
