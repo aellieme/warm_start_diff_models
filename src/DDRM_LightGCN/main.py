@@ -131,26 +131,90 @@ if __name__ == '__main__':
         print( "End train and valid. Best validation epoch is {:03d}. ".format(best_epoch))
         Recmodel.load_state_dict(torch.load(weight_file,map_location=torch.device('cpu')))  
         user_reverse_model.load_state_dict(torch.load(user_weight_file,map_location=torch.device('cpu')))   
-        item_reverse_model.load_state_dict(torch.load(item_weight_file,map_location=torch.device('cpu')))    
+        item_reverse_model.load_state_dict(torch.load(item_weight_file,map_location=torch.device('cpu')))   
         
-        try:
-            best_results_valid = Procedure.Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion, epoch, w, world.config['multicore'], 0)
-            best_results_test = Procedure.Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion, epoch, w, world.config['multicore'], 1)
+        # Все пользователи, у которых есть test-взаимодействия
+        test_users = list(dataset.test_dict.keys())
+        ground_truth_dict = dataset.test_dict   # {user: [items]} 
+        allPos_baseline = dataset.getUserPosItems(test_users)   # только train
+        allPos_adapt = []
+        adapt_items_list = dataset.getUserAdaptItems(test_users)   # список списков адапт items
+        for i, train_items in enumerate(allPos_baseline):
+            # train_items может быть numpy array или list
+            if isinstance(train_items, np.ndarray):
+                train_items = train_items.tolist()
+            adapt_items = adapt_items_list[i]
+            allPos_adapt.append(train_items + adapt_items)
+        
+        # Baseline inference (без адаптации)
+        metrics_baseline = Procedure.Test_all(
+            dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion,
+            users=test_users,
+            allPos=allPos_baseline,
+            ground_truth_dict=ground_truth_dict,
+            multicore=world.config['multicore']
+        )
 
-            valid_precision, valid_recall, valid_ndcg, valid_mrr, valid_cov = best_results_valid
-            test_precision, test_recall, test_ndcg, test_mrr, test_cov = best_results_test
+        # Adaptation inference (с адаптацией)
+        metrics_adapt = Procedure.Test_all(
+            dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion,
+            users=test_users,
+            allPos=allPos_adapt,
+            ground_truth_dict=ground_truth_dict,
+            multicore=world.config['multicore']
+        )
+        
+        
+        k_index = 0   # для top-10
+        recall_baseline = metrics_baseline['recall'][k_index]
+        ndcg_baseline = metrics_baseline['ndcg'][k_index]
+        coverage_baseline = metrics_baseline['coverage'][k_index]
+        mrr_baseline = metrics_baseline['mrr'][k_index]
 
-            print("Validation: ")
-            Procedure.print_results_all(None, (valid_precision, valid_recall, valid_ndcg, valid_mrr), None)
-            print(f"Coverage@{max(world.topks)}: {valid_cov:.4f} ")
+        recall_adapt = metrics_adapt['recall'][k_index]
+        ndcg_adapt = metrics_adapt['ndcg'][k_index]
+        coverage_adapt = metrics_adapt['coverage'][k_index]
+        mrr_adapt = metrics_adapt['mrr'][k_index]
+        latency_adapt = metrics_adapt['latency']
+        
+        summary = {
+            'k': world.topks[k_index],
+            'Recall@10 (Baseline)': recall_baseline,
+            'NDCG@10 (Baseline)': ndcg_baseline,
+            'Coverage (Baseline)': coverage_baseline,
+            'MRR (Baseline)': mrr_baseline,
+            'Recall (adaptation)': recall_adapt,
+            'NDCG (adaptation)': ndcg_adapt,
+            'Coverage (adaptation)': coverage_adapt,
+            'MRR (adaptation)': mrr_adapt,
+            'Latency (adaptation, s)': latency_adapt,
+        }
 
-            print("Test: ")
-            Procedure.print_results_all(None, None, (test_precision, test_recall, test_ndcg, test_mrr))
-            print(f"Coverage@{max(world.topks)}: {test_cov:.4f} ")
-        except Exception as e:
-            print(f"!!! CRITICAL ERROR during final Test_all: {e}")
-            import traceback
-            traceback.print_exc()
+        print("\n" + "="*60)
+        print("FINAL SUMMARY")
+        print("="*60)
+        for key, value in summary.items():
+            print(f"{key}: {value}")
+            
+            
+        # try:
+        #     best_results_valid = Procedure.Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion, epoch, w, world.config['multicore'], 0)
+        #     best_results_test = Procedure.Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion, epoch, w, world.config['multicore'], 1)
+
+        #     valid_precision, valid_recall, valid_ndcg, valid_mrr, valid_cov = best_results_valid
+        #     test_precision, test_recall, test_ndcg, test_mrr, test_cov = best_results_test
+
+        #     print("Validation: ")
+        #     Procedure.print_results_all(None, (valid_precision, valid_recall, valid_ndcg, valid_mrr), None)
+        #     print(f"Coverage@{max(world.topks)}: {valid_cov:.4f} ")
+
+        #     print("Test: ")
+        #     Procedure.print_results_all(None, None, (test_precision, test_recall, test_ndcg, test_mrr))
+        #     print(f"Coverage@{max(world.topks)}: {test_cov:.4f} ")
+        # except Exception as e:
+        #     print(f"!!! CRITICAL ERROR during final Test_all: {e}")
+        #     import traceback
+        #     traceback.print_exc()
     finally:
         if world.tensorboard:
             w.close()

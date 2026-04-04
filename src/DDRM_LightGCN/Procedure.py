@@ -13,9 +13,11 @@ import model
 import multiprocessing
 from sklearn.metrics import roc_auc_score
 import pdb
+import time
 
 
-from evaluate_topk_dp import precision_at_k, recall_at_k, ndcg_at_k, mrr, catalog_coverage
+# from evaluate_topk_dp import precision_at_k, recall_at_k, ndcg_at_k, mrr, catalog_coverage
+from evaluate_topk_dp import compute_all_metrics
 
 CORES = multiprocessing.cpu_count() // 2
 
@@ -151,34 +153,25 @@ def shuffle_and_get_half_with_seed(my_list, seed_value):
 
     return first_half
 
-
 def Test(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_model, epoch, w=None, multicore=0, unbias=None):
     u_batch_size = world.config['test_u_batch_size']
     dataset: utils.BasicDataset
     Recmodel: model.LightGCN
     
-    # eval mode with no dropout
     Recmodel = Recmodel.eval()
     user_reverse_model = user_reverse_model.eval()
     item_reverse_model = item_reverse_model.eval()
     validDict = dataset.valid_dict
     testDict = dataset.test_dict
-    # if flag == 0:
-    #     testDict = dataset.valid_dict
-    # else:
-    #     testDict = dataset.test_dict
     max_K = max(world.topks)
     if multicore == 1:
         pool = multiprocessing.Pool(CORES)
 
     with torch.no_grad():
-        # just users who are in valid and in test
         valid_users = set(validDict.keys())
         test_users = set(testDict.keys())
         common_users = list(valid_users & test_users)
         users = shuffle_and_get_half_with_seed(common_users, 42)
-        # users = list(validDict.keys())
-        # users = shuffle_and_get_half_with_seed(users, 42)
 
         users_list = []
         test_rating_list = []
@@ -197,7 +190,7 @@ def Test(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_model, 
 
             valid_exclude_index = []
             valid_exclude_items = []
-            valid_items = dataset.getUserValidItems(batch_users) # exclude validation items
+            valid_items = dataset.getUserValidItems(batch_users)
             for range_i, items in enumerate(allPos):
                 valid_exclude_index.extend([range_i] * len(items))
                 valid_exclude_items.extend(items)
@@ -209,45 +202,128 @@ def Test(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_model, 
                 test_exclude_index.extend([range_i] * len(items))
                 test_exclude_items.extend(items)
 
-            # get the exclu the rating of test and valid
             test_rating = valid_rating.clone()
             valid_rating[valid_exclude_index, valid_exclude_items] = -(1<<10)
             test_rating[test_exclude_index, test_exclude_items] = -(1<<10)
 
-            # _, rating_K = torch.topk(rating, k=max_K, largest=False)
             _, test_rating_K = torch.topk(test_rating, k=max_K)
             _, valid_rating_K = torch.topk(valid_rating, k=max_K)
-            # print("Sample recommendations for first 3 users:")
-            # for i in range(min(3, len(batch_users))):
-            #     print(f"User {batch_users[i]}: top-10 items = {valid_rating_K[i][:10].tolist()}")
             
-            test_rating = test_rating_K.cpu().numpy()
-            valid_rating = valid_rating_K.cpu().numpy()
-
-            del test_rating, valid_rating
-            users_list.append(batch_users)
-
-            test_rating_list.extend(test_rating_K.cpu())
-            valid_rating_list.extend(valid_rating_K.cpu()) # shape: n_batch, user_bs, max_k
-            test_groundTrue_list.extend(test_groundTrue)
+            valid_rating_list.extend([row.tolist() for row in valid_rating_K.cpu()])
+            test_rating_list.extend([row.tolist() for row in test_rating_K.cpu()])
             valid_groundTrue_list.extend(valid_groundTrue)
-        #ipdb.set_trace()
-        assert total_batch == len(users_list)
-        # test_precision, test_recall, test_NDCG, test_MRR = computeTopNAccuracy(test_groundTrue_list,test_rating_list,[10,20,50,100])
-        # valid_precision, valid_recall, valid_NDCG, valid_MRR = computeTopNAccuracy(valid_groundTrue_list, valid_rating_list, [10,20,50,100])
-        topKs = world.topks
-        valid_precision = [precision_at_k(valid_groundTrue_list, valid_rating_list, k) for k in topKs]
-        valid_recall = [recall_at_k(valid_groundTrue_list, valid_rating_list, k) for k in topKs]
-        valid_NDCG = [ndcg_at_k(valid_groundTrue_list, valid_rating_list, k) for k in topKs]
-        valid_MRR = [mrr(valid_groundTrue_list, valid_rating_list, k) for k in topKs]
+            test_groundTrue_list.extend(test_groundTrue)
 
-        test_precision = [precision_at_k(test_groundTrue_list, test_rating_list, k) for k in topKs]
-        test_recall = [recall_at_k(test_groundTrue_list, test_rating_list, k) for k in topKs]
-        test_NDCG = [ndcg_at_k(test_groundTrue_list, test_rating_list, k) for k in topKs]
-        test_MRR = [mrr(test_groundTrue_list, test_rating_list, k) for k in topKs]
+        topKs = world.topks
+        n_items = dataset.m_items
+        
+        valid_precision, valid_recall, valid_ndcg, valid_mrr, valid_cov = compute_all_metrics(
+            valid_groundTrue_list, valid_rating_list, topKs, n_items
+        )
+        test_precision, test_recall, test_ndcg, test_mrr, test_cov = compute_all_metrics(
+            test_groundTrue_list, test_rating_list, topKs, n_items
+        )
+        
         if multicore == 1:
             pool.close()
-        return valid_precision, valid_recall, valid_NDCG, valid_MRR, test_precision, test_recall, test_NDCG, test_MRR
+        return valid_precision, valid_recall, valid_ndcg, valid_mrr, test_precision, test_recall, test_ndcg, test_mrr
+
+# def Test(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_model, epoch, w=None, multicore=0, unbias=None):
+#     u_batch_size = world.config['test_u_batch_size']
+#     dataset: utils.BasicDataset
+#     Recmodel: model.LightGCN
+    
+#     # eval mode with no dropout
+#     Recmodel = Recmodel.eval()
+#     user_reverse_model = user_reverse_model.eval()
+#     item_reverse_model = item_reverse_model.eval()
+#     validDict = dataset.valid_dict
+#     testDict = dataset.test_dict
+#     # if flag == 0:
+#     #     testDict = dataset.valid_dict
+#     # else:
+#     #     testDict = dataset.test_dict
+#     max_K = max(world.topks)
+#     if multicore == 1:
+#         pool = multiprocessing.Pool(CORES)
+
+#     with torch.no_grad():
+#         # just users who are in valid and in test
+#         valid_users = set(validDict.keys())
+#         test_users = set(testDict.keys())
+#         common_users = list(valid_users & test_users)
+#         users = shuffle_and_get_half_with_seed(common_users, 42)
+#         # users = list(validDict.keys())
+#         # users = shuffle_and_get_half_with_seed(users, 42)
+
+#         users_list = []
+#         test_rating_list = []
+#         valid_rating_list = []
+#         test_groundTrue_list = []
+#         valid_groundTrue_list = []
+
+#         total_batch = len(users) // u_batch_size + 1
+#         for batch_users in utils.minibatch(users, batch_size=u_batch_size):
+#             allPos = dataset.getUserPosItems(batch_users)
+#             test_groundTrue = [testDict[u] for u in batch_users]
+#             valid_groundTrue = [validDict[u] for u in batch_users]
+#             batch_users_gpu = torch.Tensor(batch_users).long()
+#             batch_users_gpu = batch_users_gpu.to(world.device)
+#             valid_rating = Recmodel.getUsersRating(batch_users_gpu, allPos, user_reverse_model, item_reverse_model, diff_model)
+
+#             valid_exclude_index = []
+#             valid_exclude_items = []
+#             valid_items = dataset.getUserValidItems(batch_users) # exclude validation items
+#             for range_i, items in enumerate(allPos):
+#                 valid_exclude_index.extend([range_i] * len(items))
+#                 valid_exclude_items.extend(items)
+
+#             test_exclude_index = valid_exclude_index[:]
+#             test_exclude_items = valid_exclude_items[:]
+
+#             for range_i, items in enumerate(valid_items):
+#                 test_exclude_index.extend([range_i] * len(items))
+#                 test_exclude_items.extend(items)
+
+#             # get the exclu the rating of test and valid
+#             test_rating = valid_rating.clone()
+#             valid_rating[valid_exclude_index, valid_exclude_items] = -(1<<10)
+#             test_rating[test_exclude_index, test_exclude_items] = -(1<<10)
+
+#             # _, rating_K = torch.topk(rating, k=max_K, largest=False)
+#             _, test_rating_K = torch.topk(test_rating, k=max_K)
+#             _, valid_rating_K = torch.topk(valid_rating, k=max_K)
+#             # print("Sample recommendations for first 3 users:")
+#             # for i in range(min(3, len(batch_users))):
+#             #     print(f"User {batch_users[i]}: top-10 items = {valid_rating_K[i][:10].tolist()}")
+            
+#             test_rating = test_rating_K.cpu().numpy()
+#             valid_rating = valid_rating_K.cpu().numpy()
+
+#             del test_rating, valid_rating
+#             users_list.append(batch_users)
+
+#             test_rating_list.extend(test_rating_K.cpu())
+#             valid_rating_list.extend(valid_rating_K.cpu()) # shape: n_batch, user_bs, max_k
+#             test_groundTrue_list.extend(test_groundTrue)
+#             valid_groundTrue_list.extend(valid_groundTrue)
+#         #ipdb.set_trace()
+#         assert total_batch == len(users_list)
+#         # test_precision, test_recall, test_NDCG, test_MRR = computeTopNAccuracy(test_groundTrue_list,test_rating_list,[10,20,50,100])
+#         # valid_precision, valid_recall, valid_NDCG, valid_MRR = computeTopNAccuracy(valid_groundTrue_list, valid_rating_list, [10,20,50,100])
+#         topKs = world.topks
+#         valid_precision = [precision_at_k(valid_groundTrue_list, valid_rating_list, k) for k in topKs]
+#         valid_recall = [recall_at_k(valid_groundTrue_list, valid_rating_list, k) for k in topKs]
+#         valid_NDCG = [ndcg_at_k(valid_groundTrue_list, valid_rating_list, k) for k in topKs]
+#         valid_MRR = [mrr(valid_groundTrue_list, valid_rating_list, k) for k in topKs]
+
+#         test_precision = [precision_at_k(test_groundTrue_list, test_rating_list, k) for k in topKs]
+#         test_recall = [recall_at_k(test_groundTrue_list, test_rating_list, k) for k in topKs]
+#         test_NDCG = [ndcg_at_k(test_groundTrue_list, test_rating_list, k) for k in topKs]
+#         test_MRR = [mrr(test_groundTrue_list, test_rating_list, k) for k in topKs]
+#         if multicore == 1:
+#             pool.close()
+#         return valid_precision, valid_recall, valid_NDCG, valid_MRR, test_precision, test_recall, test_NDCG, test_MRR
 
 def print_results_all(loss, valid_result, test_result):
     """output the evaluation results."""
@@ -265,110 +341,191 @@ def print_results_all(loss, valid_result, test_result):
                             '-'.join([str(x) for x in test_result[1]]), 
                             '-'.join([str(x) for x in test_result[2]]), 
                             '-'.join([str(x) for x in test_result[3]])))
-        
-def Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_model, epoch, w=None, multicore=0, flag=None, unbias=None):
+
+def Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_model,
+             users, allPos, ground_truth_dict, multicore=0):
+    """
+    Выполняет инференс и возвращает словарь с метриками и latency.
+
+    Параметры:
+        dataset: объект датасета (нужен для m_items)
+        Recmodel, user_reverse_model, item_reverse_model, diff_model: модели
+        users: список пользователей (int)
+        allPos: список списков положительных items для каждого пользователя
+                (уже включает train + возможно adapt)
+        ground_truth_dict: словарь {user: [items]} для вычисления метрик
+        multicore: флаг многопоточности (не используется, но оставлен для совместимости)
+
+    Возвращает:
+        dict: {
+            'precision': list[float] по topKs,
+            'recall': list[float],
+            'ndcg': list[float],
+            'mrr': list[float],
+            'coverage': list[float] 
+            'latency': float (секунды),
+            'topks': list[int]
+        }
+    """
     u_batch_size = world.config['test_u_batch_size']
-    dataset: utils.BasicDataset
-    Recmodel: model.LightGCN
-    # eval mode with no dropout
-    Recmodel = Recmodel.eval()
-    user_reverse_model = user_reverse_model.eval()
-    item_reverse_model = item_reverse_model.eval()
-    if flag == 0:
-        testDict = dataset.valid_dict
-    else:
-        testDict = dataset.test_dict
-    if unbias == 1:
-        testDict = dataset.unbias_dict
+    Recmodel.eval()
+    user_reverse_model.eval()
+    item_reverse_model.eval()
+
     max_K = max(world.topks)
-    if multicore == 1:
-        pool = multiprocessing.Pool(CORES)
+    start_time = time.time()
 
     with torch.no_grad():
-        users = list(testDict.keys())
-
-        users_list = []
         rating_list = []
         groundTrue_list = []
-        # auc_record = []
-        # ratings = []
-        total_batch = len(users) // u_batch_size + 1
-        for batch_users in utils.minibatch(users, batch_size=u_batch_size):
-            allPos = dataset.getUserPosItems(batch_users)
-            
-            # размер до
-            sizes_before = [len(items) for items in allPos]
-            
-            if flag == 1 and dataset.adapt_dict:
-                for idx, user in enumerate(batch_users):
-                    adapt_items = dataset.adapt_dict.get(user, [])
-                    if adapt_items:
-                        if isinstance(allPos[idx], np.ndarray):
-                            allPos[idx] = allPos[idx].tolist()
-                        allPos[idx].extend(adapt_items)
-                
-            # if flag == 1 and dataset.adapt_dict is not None:
-            #     for idx, user in enumerate(batch_users):
-            #         allPos[idx].extend(dataset.adapt_dict.get(user, []))
-                    
-                    
-            # размеры после
-            sizes_after = [len(items) for items in allPos]
 
-            # проверка
-            if flag == 1:
-                print(f"\n[TEST MODE] Batch users: {batch_users[:3]}")
-                print(f"[TEST MODE] History sizes BEFORE adapt: {sizes_before[:3]}")
-                print(f"[TEST MODE] History sizes AFTER adapt:  {sizes_after[:3]}")
-                print(f"[TEST MODE] Adapt items added: {[sizes_after[i] - sizes_before[i] for i in range(3)]}")
-            else:
-                print(f"\n[VALID MODE] Batch users: {batch_users[:3]}")
-                print(f"[VALID MODE] History sizes (no adapt): {sizes_before[:3]}")
-            
-            groundTrue = [testDict[u] for u in batch_users]
-            batch_users_gpu = torch.Tensor(batch_users).long()
-            batch_users_gpu = batch_users_gpu.to(world.device)
-            rating = Recmodel.getUsersRating(batch_users_gpu, allPos, user_reverse_model, item_reverse_model, diff_model)
-            #ipdb.set_trace()
-            #rating = rating.cpu()
+        # Преобразуем ground_truth_dict в список списков в том же порядке, что и users
+        groundTrue_list = [ground_truth_dict[u] for u in users]
+
+        total_batch = len(users) // u_batch_size + 1
+        for batch_idx in range(total_batch):
+            start_idx = batch_idx * u_batch_size
+            end_idx = min((batch_idx + 1) * u_batch_size, len(users))
+            batch_users = users[start_idx:end_idx]
+            batch_allPos = allPos[start_idx:end_idx]
+
+            batch_users_gpu = torch.Tensor(batch_users).long().to(world.device)
+            rating = Recmodel.getUsersRating(batch_users_gpu, batch_allPos,
+                                             user_reverse_model, item_reverse_model, diff_model)
+
+            # Исключаем все items, которые уже есть в истории (batch_allPos)
             exclude_index = []
             exclude_items = []
-            valid_items = dataset.getUserValidItems(batch_users) # exclude validation items
-            for range_i, items in enumerate(allPos):
-                exclude_index.extend([range_i] * len(items))
+            for i, items in enumerate(batch_allPos):
+                exclude_index.extend([i] * len(items))
                 exclude_items.extend(items)
-            if flag:
-                for range_i, items in enumerate(valid_items):
-                    exclude_index.extend([range_i] * len(items))
-                    exclude_items.extend(items)
-            rating[exclude_index, exclude_items] = -(1<<10)
+            rating[exclude_index, exclude_items] = -(1 << 10)
 
-            # _, rating_K = torch.topk(rating, k=max_K, largest=False)
             _, rating_K = torch.topk(rating, k=max_K)
-            rating = rating.cpu().numpy()
+            rating_list.extend([row.tolist() for row in rating_K.cpu()])
 
-            del rating
-            users_list.append(batch_users)
-            # rating_list.append(rating_K.cpu()) # shape: n_batch, user_bs, max_k
-            # groundTrue_list.append(groundTrue)
-            rating_list.extend(rating_K.cpu()) # shape: n_batch, user_bs, max_k
-            groundTrue_list.extend(groundTrue)
-        #ipdb.set_trace()
-        assert total_batch == len(users_list)
-        # precision, recall, NDCG, MRR = computeTopNAccuracy(groundTrue_list,rating_list,[10,20,50,100])
-        topKs = world.topks
-        precision = [precision_at_k(groundTrue_list, rating_list, k) for k in topKs]
-        recall = [recall_at_k(groundTrue_list, rating_list, k) for k in topKs]
-        NDCG = [ndcg_at_k(groundTrue_list, rating_list, k) for k in topKs]
-        MRR = [mrr(groundTrue_list, rating_list, k) for k in topKs]
+    latency = time.time() - start_time
 
-        max_k = max(topKs)
-        total_items_set = set(range(dataset.m_items))  # все возможные id айтемов
-        cov = catalog_coverage(rating_list, total_items_set, max_k)
+    # Вычисляем метрики
+    topKs = world.topks
+    n_items = dataset.m_items
+    precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
+        groundTrue_list, rating_list, topKs, n_items
+    )
+
+    return {
+        'precision': precisions,
+        'recall': recalls,
+        'ndcg': ndcgs,
+        'mrr': mrrs,
+        'coverage': covs,
+        'latency': latency,
+        'topks': topKs
+    }
+        
+# def Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_model, epoch, w=None, multicore=0, flag=None, unbias=None):
+#     u_batch_size = world.config['test_u_batch_size']
+#     dataset: utils.BasicDataset
+#     Recmodel: model.LightGCN
+#     # eval mode with no dropout
+#     Recmodel = Recmodel.eval()
+#     user_reverse_model = user_reverse_model.eval()
+#     item_reverse_model = item_reverse_model.eval()
+#     if flag == 0:
+#         testDict = dataset.valid_dict
+#     else:
+#         testDict = dataset.test_dict
+#     if unbias == 1:
+#         testDict = dataset.unbias_dict
+#     max_K = max(world.topks)
+#     if multicore == 1:
+#         pool = multiprocessing.Pool(CORES)
+
+#     with torch.no_grad():
+#         users = list(testDict.keys())
+
+#         users_list = []
+#         rating_list = []
+#         groundTrue_list = []
+#         # auc_record = []
+#         # ratings = []
+#         total_batch = len(users) // u_batch_size + 1
+#         for batch_users in utils.minibatch(users, batch_size=u_batch_size):
+#             allPos = dataset.getUserPosItems(batch_users)
+            
+#             # размер до
+#             sizes_before = [len(items) for items in allPos]
+            
+#             if flag == 1 and dataset.adapt_dict:
+#                 for idx, user in enumerate(batch_users):
+#                     adapt_items = dataset.adapt_dict.get(user, [])
+#                     if adapt_items:
+#                         if isinstance(allPos[idx], np.ndarray):
+#                             allPos[idx] = allPos[idx].tolist()
+#                         allPos[idx].extend(adapt_items)
+                
+#             # if flag == 1 and dataset.adapt_dict is not None:
+#             #     for idx, user in enumerate(batch_users):
+#             #         allPos[idx].extend(dataset.adapt_dict.get(user, []))
+                    
+                    
+#             # размеры после
+#             sizes_after = [len(items) for items in allPos]
+
+#             # проверка
+#             if flag == 1:
+#                 print(f"\n[TEST MODE] Batch users: {batch_users[:3]}")
+#                 print(f"[TEST MODE] History sizes BEFORE adapt: {sizes_before[:3]}")
+#                 print(f"[TEST MODE] History sizes AFTER adapt:  {sizes_after[:3]}")
+#                 print(f"[TEST MODE] Adapt items added: {[sizes_after[i] - sizes_before[i] for i in range(3)]}")
+#             else:
+#                 print(f"\n[VALID MODE] Batch users: {batch_users[:3]}")
+#                 print(f"[VALID MODE] History sizes (no adapt): {sizes_before[:3]}")
+            
+#             groundTrue = [testDict[u] for u in batch_users]
+#             batch_users_gpu = torch.Tensor(batch_users).long()
+#             batch_users_gpu = batch_users_gpu.to(world.device)
+#             rating = Recmodel.getUsersRating(batch_users_gpu, allPos, user_reverse_model, item_reverse_model, diff_model)
+#             #ipdb.set_trace()
+#             #rating = rating.cpu()
+#             exclude_index = []
+#             exclude_items = []
+#             valid_items = dataset.getUserValidItems(batch_users) # exclude validation items
+#             for range_i, items in enumerate(allPos):
+#                 exclude_index.extend([range_i] * len(items))
+#                 exclude_items.extend(items)
+#             if flag:
+#                 for range_i, items in enumerate(valid_items):
+#                     exclude_index.extend([range_i] * len(items))
+#                     exclude_items.extend(items)
+#             rating[exclude_index, exclude_items] = -(1<<10)
+
+#             # _, rating_K = torch.topk(rating, k=max_K, largest=False)
+#             _, rating_K = torch.topk(rating, k=max_K)
+#             rating = rating.cpu().numpy()
+
+#             del rating
+#             users_list.append(batch_users)
+#             # rating_list.append(rating_K.cpu()) # shape: n_batch, user_bs, max_k
+#             # groundTrue_list.append(groundTrue)
+#             rating_list.extend(rating_K.cpu()) # shape: n_batch, user_bs, max_k
+#             groundTrue_list.extend(groundTrue)
+#         #ipdb.set_trace()
+#         assert total_batch == len(users_list)
+#         # precision, recall, NDCG, MRR = computeTopNAccuracy(groundTrue_list,rating_list,[10,20,50,100])
+#         topKs = world.topks
+#         precision = [precision_at_k(groundTrue_list, rating_list, k) for k in topKs]
+#         recall = [recall_at_k(groundTrue_list, rating_list, k) for k in topKs]
+#         NDCG = [ndcg_at_k(groundTrue_list, rating_list, k) for k in topKs]
+#         MRR = [mrr(groundTrue_list, rating_list, k) for k in topKs]
+
+#         max_k = max(topKs)
+#         total_items_set = set(range(dataset.m_items))  # все возможные id айтемов
+#         cov = catalog_coverage(rating_list, total_items_set, max_k)
     
-        if multicore == 1:
-            pool.close()
-        return precision, recall, NDCG, MRR, cov
+#         if multicore == 1:
+#             pool.close()
+#         return precision, recall, NDCG, MRR, cov
 
 def print_epoch_result(results):
     print("Precision: {} Recall: {} NDCG: {} MRR: {}".format(
