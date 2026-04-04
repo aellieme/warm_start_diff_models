@@ -35,24 +35,6 @@ def print_results(title, topN_list, recalls, ndcgs, mrrs, covs, latencies=None):
             row += f" | {latencies[i]:.6f}"
         print(row)
         
-# def print_results(title, topN_list, recalls, ndcgs, mrrs, covs, latency=None):
-#     print(f"\nResults for {title}:")
-#     header = f"{'K':<5} | {'Recall@K':<10} | {'NDCG@K':<10} | {'MRR@K':<10} | {'Coverage':<10}"
-#     if latency is not None:
-#         header += f" | {'Latency (s)':<12}"
-#     print("-" * len(header))
-#     print(header)
-#     print("-" * len(header))
-
-#     for i, k in enumerate(topN_list):
-#         row = f"{k:<5} | {recalls[i]:.6f} | {ndcgs[i]:.6f} | {mrrs[i]:.6f} | {covs[i]:.6f}"
-#         if latency is not None:
-#             if i == 0:
-#                 row += f" | {latency:.6f}"
-#             else:
-#                 row += f" | {'—':<12}"
-#         print(row)
-
 df = get_movielens_data(include_time=True) 
 df = df.sort_values('timestamp').reset_index(drop=True)
 
