@@ -142,6 +142,7 @@ def main_tune():
     base_args.act = 'relu'
     base_args.num_ng = 4
     base_args.multicore = 0
+    base_args.data_path = './data/ml-1m'
 
     dataset = dataloader.DiffData(path=base_args.data_path)
     device = world.device
