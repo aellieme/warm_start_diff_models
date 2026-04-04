@@ -129,7 +129,7 @@ def objective(trial, base_args, dataset, device):
 
 def main_tune():
     base_args = parse_args()
-    base_args.epochs = 100  # для ускорения тюнинга
+    base_args.epochs = 100  
     base_args.batch_size = 2048
     base_args.recdim = 64
     base_args.dropout = 0
@@ -142,7 +142,7 @@ def main_tune():
     base_args.act = 'relu'
     base_args.num_ng = 4
     base_args.multicore = 0
-    base_args.data_path = './data/ml-1m'
+    base_args.data_path = '../data/ml-1m'  
 
     dataset = dataloader.DiffData(path=base_args.data_path)
     device = world.device
@@ -150,7 +150,7 @@ def main_tune():
     study = optuna.create_study(direction='maximize', study_name='lightgcn_diff_tuning')
     study.optimize(
         lambda trial: objective(trial, base_args, dataset, device),
-        n_trials=50,  # количество экспериментов
+        n_trials=100,  # количество экспериментов
         timeout=None  # можно ограничить по времени
     )
 
