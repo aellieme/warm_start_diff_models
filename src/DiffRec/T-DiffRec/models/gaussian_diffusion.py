@@ -98,7 +98,8 @@ class GaussianDiffusion(nn.Module):
             t = th.tensor([steps - 1] * x_start.shape[0]).to(x_start.device)
             x_t = self.q_sample(x_start, t)
 
-        indices = list(range(self.steps))[::-1]
+        # indices = list(range(self.steps))[::-1] мне кажется это неверно тк вроде как модель должна расшумлять не от максимума а от реального количества...
+        indices = list(range(steps))[::-1]
 
         if self.noise_scale == 0.:
             for i in indices:
