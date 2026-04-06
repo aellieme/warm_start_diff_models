@@ -170,6 +170,19 @@ if __name__ == '__main__':
                 '-'.join([f"{x:.4f}" for x in test_result[4]])
             ))
 
+    def load_movie_titles(movies_path='../../data/info/movies.dat'):
+        id2title = {}
+        with open(movies_path, 'r', encoding='latin-1') as f:
+            for line in f:
+                parts = line.strip().split('::')
+                if len(parts) >= 2:
+                    movie_id = int(parts[0])
+                    title = parts[1]
+                    id2title[movie_id] = title
+        return id2title
+
+    id2title = load_movie_titles()
+    
     def evaluate(data_loader, data_te, mask_his, topN):
         model.eval()
         e_idxlist = list(range(mask_his.shape[0]))
@@ -190,6 +203,16 @@ if __name__ == '__main__':
                 _, indices = torch.topk(prediction, topN[-1])
                 indices = indices.cpu().numpy().tolist()
                 predict_items.extend(indices)
+
+                if batch_idx == 0:   # только первый батч
+                    for u in range(min(3, len(indices))):
+                        true_items = target_items[batch_idx*args.batch_size + u][:5]
+                        true_names = [id2title.get(i, f"ID_{i}") for i in true_items]
+                        rec_items = indices[u][:10]
+                        rec_names = [id2title.get(i, f"ID_{i}") for i in rec_items]
+                        print(f"\n[DEBUG] User {batch_idx*args.batch_size + u}:")
+                        print(f"  True: {true_names}")
+                        print(f"  Rec : {rec_names}")
                 
         precisions, recalls, ndcgs, mrrs, covs = eval_metrics.compute_all_metrics(target_items, predict_items, topN, n_item)
         return (precisions, recalls, ndcgs, mrrs, covs)
@@ -221,7 +244,8 @@ if __name__ == '__main__':
             optimizer.step()
         
         if epoch % 5 == 0:
-            valid_results = evaluate(test_loader, valid_y_data, train_data, eval(args.topN))
+            # valid_results = evaluate(test_loader, valid_y_data, train_data, eval(args.topN))
+            valid_results = evaluate(test_loader, valid_y_data, train_data_ori, eval(args.topN))
             if args.tst_w_val:
                 test_results = evaluate(test_twv_loader, test_y_data, mask_tv, eval(args.topN))
             else:
