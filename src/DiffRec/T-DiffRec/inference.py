@@ -193,7 +193,7 @@ def evaluate(data_loader, data_te, mask_his, topN):
     return (precisions, recalls, ndcgs, mrrs, covs)
 
 
-valid_results = evaluate(test_loader, valid_y_data, train_data, eval(args.topN))
+valid_results = evaluate(test_loader, valid_y_data, train_data_ori, eval(args.topN))
 if args.tst_w_val:
     test_results = evaluate(test_twv_loader, test_y_data, mask_tv, eval(args.topN))
 else:
@@ -251,49 +251,3 @@ if os.path.exists(adapt_path):
     print_results(None, None, adapt_results)
     print(f"Warm-start inference latency: {warmstart_latency:.4f} seconds")
 
-
-#adaptation
-# adapt_path = args.data_path + 'adapt_list.npy'
-# if os.path.exists(adapt_path):
-#     print("Loading adaptation data...")
-#     adapt_list = np.load(adapt_path, allow_pickle=True)
-    
-#     if len(adapt_list) > 0:
-#         user_items = {}
-#         for uid, iid in adapt_list:
-#             user_items.setdefault(uid, []).append(iid)
-        
-#         rows, cols, weights = [], [], []
-#         for uid, items in user_items.items():
-#             n_adapt = len(items)
-#             w = np.linspace(args.w_min, args.w_max, n_adapt)
-#             for iid, weight in zip(items, w):
-#                 rows.append(uid)
-#                 cols.append(iid)
-#                 weights.append(weight)
-        
-#         adapt_weighted = sp.csr_matrix((weights, (rows, cols)), dtype='float64',
-#                                        shape=(n_user, n_item))
-#         adapt_ori = sp.csr_matrix((np.ones(len(rows)), (rows, cols)), dtype='float64',
-#                                   shape=(n_user, n_item))
-#     else:
-#         adapt_weighted = sp.csr_matrix((n_user, n_item), dtype='float64')
-#         adapt_ori = sp.csr_matrix((n_user, n_item), dtype='float64')
-    
-#     train_data_adapt = train_data + adapt_weighted   # для data_loader (весовая матрица)
-#     train_ori_adapt = train_data_ori + adapt_ori    # для маскирования (единичная)
-    
-#     adapt_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data_adapt.toarray()))
-#     adapt_loader = DataLoader(adapt_dataset, batch_size=args.batch_size, shuffle=False)
-    
-#     if args.tst_w_val:
-#         mask_adapt = train_ori_adapt + valid_y_data
-#     else:
-#         mask_adapt = train_ori_adapt
-    
-#     print("Running inference with adaptation data...")
-#     adapt_results = evaluate(adapt_loader, test_y_data, mask_adapt, eval(args.topN))
-#     print("Adaptation results:")
-#     print_results(None, None, adapt_results)
-# else:
-#     print("adapt_list.npy not found, skipping adaptation inference.")

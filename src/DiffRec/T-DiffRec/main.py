@@ -214,19 +214,34 @@ if __name__ == '__main__':
                 _, indices = torch.topk(prediction, topN[-1])
                 indices = indices.cpu().numpy().tolist()
                 predict_items.extend(indices)
-
-                if batch_idx == 0:   # только первый батч
-                    for u in range(min(3, len(indices))):
+                
+                # Выводим пользователей из разных батчей: первый, середина, последний
+                debug_batches = [0, len(data_loader)//2, len(data_loader)-1]
+                if batch_idx in debug_batches:
+                    u = 0  # берём первого пользователя в батче
+                    if u < len(indices):
                         true_items = target_items[batch_idx*args.batch_size + u][:5]
-                        if not true_items:
-                            continue
-                        true_items = target_items[batch_idx*args.batch_size + u][:5]
-                        true_names = [id2title.get(i, f"ID_{i}") for i in true_items]
-                        rec_items = indices[u][:10]
-                        rec_names = [id2title.get(i, f"ID_{i}") for i in rec_items]
-                        print(f"\n[DEBUG] User {batch_idx*args.batch_size + u}:")
-                        print(f"  True: {true_names}")
-                        print(f"  Rec : {rec_names}")
+                        if true_items:
+                            true_names = [id2title.get(i, f"ID_{i}") for i in true_items]
+                            rec_items = indices[u][:10]
+                            rec_names = [id2title.get(i, f"ID_{i}") for i in rec_items]
+                            print(f"\n[DEBUG] Batch {batch_idx}, User {batch_idx*args.batch_size + u}:")
+                            print(f"  True: {true_names}")
+                            print(f"  Rec : {rec_names}")
+                
+                
+                # if batch_idx == 0:   # только первый батч
+                #     for u in range(min(3, len(indices))):
+                #         true_items = target_items[batch_idx*args.batch_size + u][:5]
+                #         if not true_items:
+                #             continue
+                #         true_items = target_items[batch_idx*args.batch_size + u][:5]
+                #         true_names = [id2title.get(i, f"ID_{i}") for i in true_items]
+                #         rec_items = indices[u][:10]
+                #         rec_names = [id2title.get(i, f"ID_{i}") for i in rec_items]
+                #         print(f"\n[DEBUG] User {batch_idx*args.batch_size + u}:")
+                #         print(f"  True: {true_names}")
+                #         print(f"  Rec : {rec_names}")
                 
         precisions, recalls, ndcgs, mrrs, covs = eval_metrics.compute_all_metrics(target_items, predict_items, topN, n_item)
         return (precisions, recalls, ndcgs, mrrs, covs)
