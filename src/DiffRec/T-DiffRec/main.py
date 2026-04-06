@@ -122,6 +122,10 @@ if __name__ == '__main__':
         test_twv_loader = DataLoader(tv_dataset, batch_size=args.batch_size, shuffle=False)
     mask_tv = train_data_ori + valid_y_data
 
+    train_set = set(zip(*train_data_ori.nonzero()))
+    test_set = set(zip(*test_y_data.nonzero()))
+    print(f"Пересечение train и test: {len(train_set & test_set)}")
+    
     print('data ready.')
 
 
