@@ -207,6 +207,9 @@ if __name__ == '__main__':
                 if batch_idx == 0:   # только первый батч
                     for u in range(min(3, len(indices))):
                         true_items = target_items[batch_idx*args.batch_size + u][:5]
+                        if not true_items:
+                            continue
+                        true_items = target_items[batch_idx*args.batch_size + u][:5]
                         true_names = [id2title.get(i, f"ID_{i}") for i in true_items]
                         rec_items = indices[u][:10]
                         rec_names = [id2title.get(i, f"ID_{i}") for i in rec_items]
