@@ -97,6 +97,13 @@ if __name__ == '__main__':
         args.w_min = 0.5
         args.w_max = 1.0
     elif args.dataset == 'ml-1m':
+        args.steps = 100
+        # args.sampling_steps = 100
+        args.noise_scale = 0.1
+        args.noise_min = 0.0001
+        args.noise_max = 0.02
+        args.w_min = 0.1
+        args.w_max = 1.0
         # Для ml-1m steps=100 по умолчанию, sampling_steps тоже должен быть 100
         args.sampling_steps = args.steps   # <-- добавить
         print("args:", args)
