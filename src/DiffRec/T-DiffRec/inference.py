@@ -232,9 +232,14 @@ if os.path.exists(adapt_path):
     adapt_loader = DataLoader(adapt_dataset, batch_size=args.batch_size, shuffle=False)
     
     # Запуск теста
+    import time
+    start_time = time.perf_counter()
     adapt_results = evaluate(adapt_loader, test_y_data, mask_adapt, eval(args.topN))
+    end_time = time.perf_counter()
+    warmstart_latency = end_time - start_time
     print("--- Final Adaptation Results ---")
     print_results(None, None, adapt_results)
+    print(f"Warm-start inference latency: {warmstart_latency:.4f} seconds")
 
 
 #adaptation
