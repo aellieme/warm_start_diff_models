@@ -79,7 +79,27 @@ if __name__ == '__main__':
     parser.add_argument('--reweight', type=bool, default=True, help='assign different weight to different timestep or not')
 
     args = parser.parse_args()
-    print("args:", args)
+    # После строки args = parser.parse_args()
+    if args.dataset == 'amazon-book_clean':
+        args.steps = 10
+        args.sampling_steps = 10   
+        args.noise_scale = 0.0005
+        args.noise_min = 0.001
+        args.noise_max = 0.005
+        args.w_min = 0.1
+        args.w_max = 1.0
+    elif args.dataset == 'yelp_clean':
+        args.steps = 5
+        args.sampling_steps = 5    
+        args.noise_scale = 0.005
+        args.noise_min = 0.001
+        args.noise_max = 0.01
+        args.w_min = 0.5
+        args.w_max = 1.0
+    elif args.dataset == 'ml-1m':
+        # Для ml-1m steps=100 по умолчанию, sampling_steps тоже должен быть 100
+        args.sampling_steps = args.steps   # <-- добавить
+        print("args:", args)
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     device = torch.device("cuda:0" if args.cuda else "cpu")

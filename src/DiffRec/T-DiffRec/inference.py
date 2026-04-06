@@ -68,6 +68,7 @@ args = parser.parse_args()
 args.data_path = args.data_path + args.dataset + '/'
 if args.dataset == 'amazon-book_clean':
     args.steps = 10
+    args.sampling_steps = 10
     args.noise_scale = 0.0005
     args.noise_min = 0.001
     args.noise_max = 0.005
@@ -75,11 +76,14 @@ if args.dataset == 'amazon-book_clean':
     args.w_max = 1.0
 elif args.dataset == 'yelp_clean':
     args.steps = 5
+    args.sampling_steps = 5   
     args.noise_scale = 0.005
     args.noise_min = 0.001
     args.noise_max = 0.01
     args.w_min = 0.5
     args.w_max = 1.0
+elif args.dataset == "ml-1m":
+    args.sampling_steps = args.steps   # =100
 else:
     raise ValueError
 
@@ -186,48 +190,95 @@ else:
     test_results = evaluate(test_loader, test_y_data, mask_tv, eval(args.topN))
 print_results(None, valid_results, test_results)
 
-#adaptation
+# --- Научная адаптация (Warm-start) ---
 adapt_path = args.data_path + 'adapt_list.npy'
 if os.path.exists(adapt_path):
-    print("Loading adaptation data...")
+    print("Running Warm-start Adaptation...")
     adapt_list = np.load(adapt_path, allow_pickle=True)
+    # Загружаем трейн, чтобы объединить историю
+    train_list_full = np.load(args.data_path + 'train_list.npy', allow_pickle=True)
     
-    if len(adapt_list) > 0:
-        user_items = {}
-        for uid, iid in adapt_list:
-            user_items.setdefault(uid, []).append(iid)
-        
-        rows, cols, weights = [], [], []
-        for uid, items in user_items.items():
-            n_adapt = len(items)
-            w = np.linspace(args.w_min, args.w_max, n_adapt)
-            for iid, weight in zip(items, w):
-                rows.append(uid)
-                cols.append(iid)
-                weights.append(weight)
-        
-        adapt_weighted = sp.csr_matrix((weights, (rows, cols)), dtype='float64',
-                                       shape=(n_user, n_item))
-        adapt_ori = sp.csr_matrix((np.ones(len(rows)), (rows, cols)), dtype='float64',
-                                  shape=(n_user, n_item))
-    else:
-        adapt_weighted = sp.csr_matrix((n_user, n_item), dtype='float64')
-        adapt_ori = sp.csr_matrix((n_user, n_item), dtype='float64')
+    # Объединяем (Train + Adapt)
+    combined_list = np.vstack([train_list_full, adapt_list])
     
-    train_data_adapt = train_data + adapt_weighted   # для data_loader (весовая матрица)
-    train_ori_adapt = train_data_ori + adapt_ori    # для маскирования (единичная)
+    # Собираем словари для весов
+    user_items = {}
+    for uid, iid in combined_list:
+        user_items.setdefault(int(uid), []).append(int(iid))
     
+    rows, cols, weights = [], [], []
+    for uid, items in user_items.items():
+        # Т.к. данные из твоего split_load_data_dp.py отсортированы, 
+        # items здесь в хронологическом порядке.
+        w = np.linspace(args.w_min, args.w_max, len(items))
+        for i, iid in enumerate(items):
+            rows.append(uid)
+            cols.append(iid)
+            weights.append(w[i])
+    
+    # Создаем итоговые матрицы для этапа адаптации
+    # 1. Матрица для входа в модель (с весами linspace)
+    train_data_adapt = sp.csr_matrix((weights, (rows, cols)), shape=(n_user, n_item))
+    # 2. Матрица для маскирования (Train + Adapt + Valid)
+    # (чтобы не рекомендовать то, что уже было во всех трех частях истории)
+    # mask_adapt = sp.csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(n_user, n_item)) + valid_y_data
+    mask_adapt = sp.csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(n_user, n_item))
+    if args.tst_w_val:
+        mask_adapt += valid_y_data
+    
+    # Оборачиваем в наш новый оптимизированный класс
+    # adapt_dataset = data_utils.DataDiffusion(train_data_adapt)
     adapt_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data_adapt.toarray()))
     adapt_loader = DataLoader(adapt_dataset, batch_size=args.batch_size, shuffle=False)
     
-    if args.tst_w_val:
-        mask_adapt = train_ori_adapt + valid_y_data
-    else:
-        mask_adapt = train_ori_adapt
-    
-    print("Running inference with adaptation data...")
+    # Запуск теста
     adapt_results = evaluate(adapt_loader, test_y_data, mask_adapt, eval(args.topN))
-    print("Adaptation results:")
+    print("--- Final Adaptation Results ---")
     print_results(None, None, adapt_results)
-else:
-    print("adapt_list.npy not found, skipping adaptation inference.")
+
+
+#adaptation
+# adapt_path = args.data_path + 'adapt_list.npy'
+# if os.path.exists(adapt_path):
+#     print("Loading adaptation data...")
+#     adapt_list = np.load(adapt_path, allow_pickle=True)
+    
+#     if len(adapt_list) > 0:
+#         user_items = {}
+#         for uid, iid in adapt_list:
+#             user_items.setdefault(uid, []).append(iid)
+        
+#         rows, cols, weights = [], [], []
+#         for uid, items in user_items.items():
+#             n_adapt = len(items)
+#             w = np.linspace(args.w_min, args.w_max, n_adapt)
+#             for iid, weight in zip(items, w):
+#                 rows.append(uid)
+#                 cols.append(iid)
+#                 weights.append(weight)
+        
+#         adapt_weighted = sp.csr_matrix((weights, (rows, cols)), dtype='float64',
+#                                        shape=(n_user, n_item))
+#         adapt_ori = sp.csr_matrix((np.ones(len(rows)), (rows, cols)), dtype='float64',
+#                                   shape=(n_user, n_item))
+#     else:
+#         adapt_weighted = sp.csr_matrix((n_user, n_item), dtype='float64')
+#         adapt_ori = sp.csr_matrix((n_user, n_item), dtype='float64')
+    
+#     train_data_adapt = train_data + adapt_weighted   # для data_loader (весовая матрица)
+#     train_ori_adapt = train_data_ori + adapt_ori    # для маскирования (единичная)
+    
+#     adapt_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data_adapt.toarray()))
+#     adapt_loader = DataLoader(adapt_dataset, batch_size=args.batch_size, shuffle=False)
+    
+#     if args.tst_w_val:
+#         mask_adapt = train_ori_adapt + valid_y_data
+#     else:
+#         mask_adapt = train_ori_adapt
+    
+#     print("Running inference with adaptation data...")
+#     adapt_results = evaluate(adapt_loader, test_y_data, mask_adapt, eval(args.topN))
+#     print("Adaptation results:")
+#     print_results(None, None, adapt_results)
+# else:
+#     print("adapt_list.npy not found, skipping adaptation inference.")
