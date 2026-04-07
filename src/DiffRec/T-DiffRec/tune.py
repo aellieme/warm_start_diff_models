@@ -71,7 +71,8 @@ def evaluate(model, diffusion, data_loader, data_te, mask_his, topN):
 
 def train_and_evaluate(trial):
     lr = trial.suggest_float('lr', 1e-5, 1e-3, log=True)
-    weight_decay = trial.suggest_float('weight_decay', 0.0, 1e-4, log=True)
+    # weight_decay = trial.suggest_float('weight_decay', 0.0, 1e-4, log=True)
+    weight_decay = trial.suggest_float('weight_decay', 1e-8, 1e-4, log=True)
     steps = trial.suggest_int('steps', 5, 100)
     noise_scale = trial.suggest_float('noise_scale', 0.0001, 0.5, log=True)
     noise_min = trial.suggest_float('noise_min', 0.0001, 0.01, log=True)
