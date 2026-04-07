@@ -46,7 +46,8 @@ user_test_items = dict(user_test_items)
 mask_base = train_data_ori + valid_y_data
 
 print(f"Loading best model from {MODEL_PATH}")
-model = torch.load(MODEL_PATH, map_location=DEVICE)
+# model = torch.load(MODEL_PATH, map_location=DEVICE)
+model = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
 model.to(DEVICE)
 model.eval()
 
