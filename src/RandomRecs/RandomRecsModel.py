@@ -118,25 +118,61 @@ from evaluate_successive import evaluate_successive
 # Фиксируем генератор для воспроизводимости
 rng = np.random.default_rng(42)
 
-print("\n LAST (цель - последний элемент в тестовом периоде)")
+# print("\n LAST (цель - последний элемент в тестовом периоде)")
+# last_base = evaluate_last(test_grouped, users_hist_baseline, item_catalog, rng)
+# last_adapt = evaluate_last(test_grouped, users_hist_adapt, item_catalog, rng)
+
+# print("\nBaseline (LAST):")
+# for metric, value in last_base.items():
+#     print(f"  {metric}: {value:.6f}")
+# print("\nAdapt (LAST):")
+# for metric, value in last_adapt.items():
+#     print(f"  {metric}: {value:.6f}")
+
+# print("\n" + "-"*40)
+# print(">>> SUCCESSIVE (каждый элемент - отдельная цель)")
+# succ_base = evaluate_successive(test_grouped, users_hist_baseline, item_catalog, rng)
+# succ_adapt = evaluate_successive(test_grouped, users_hist_adapt, item_catalog, rng)
+
+# print("\nBaseline (SUCCESSIVE):")
+# for metric, value in succ_base.items():
+#     print(f"  {metric}: {value:.6f}")
+# print("\nAdapt (SUCCESSIVE):")
+# for metric, value in succ_adapt.items():
+#     print(f"  {metric}: {value:.6f}")
+
+
+print("\n LAST ")
 last_base = evaluate_last(test_grouped, users_hist_baseline, item_catalog, rng)
 last_adapt = evaluate_last(test_grouped, users_hist_adapt, item_catalog, rng)
 
 print("\nBaseline (LAST):")
 for metric, value in last_base.items():
-    print(f"  {metric}: {value:.6f}")
+    if metric == 'latency':
+        print(f"  {metric}: {value:.6f} сек")
+    else:
+        print(f"  {metric}: {value:.6f}")
 print("\nAdapt (LAST):")
 for metric, value in last_adapt.items():
-    print(f"  {metric}: {value:.6f}")
+    if metric == 'latency':
+        print(f"  {metric}: {value:.6f} сек")
+    else:
+        print(f"  {metric}: {value:.6f}")
 
-print("\n" + "-"*40)
-print(">>> SUCCESSIVE (каждый элемент - отдельная цель)")
+# print("\n" + "-"*40)
+print(" SUCCESSIVE ")
 succ_base = evaluate_successive(test_grouped, users_hist_baseline, item_catalog, rng)
 succ_adapt = evaluate_successive(test_grouped, users_hist_adapt, item_catalog, rng)
 
 print("\nBaseline (SUCCESSIVE):")
 for metric, value in succ_base.items():
-    print(f"  {metric}: {value:.6f}")
+    if metric == 'latency':
+        print(f"  {metric}: {value:.6f} сек")
+    else:
+        print(f"  {metric}: {value:.6f}")
 print("\nAdapt (SUCCESSIVE):")
 for metric, value in succ_adapt.items():
-    print(f"  {metric}: {value:.6f}")
+    if metric == 'latency':
+        print(f"  {metric}: {value:.6f} сек")
+    else:
+        print(f"  {metric}: {value:.6f}")

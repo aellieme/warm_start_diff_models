@@ -1,5 +1,6 @@
 import numpy as np
 from tqdm import tqdm
+import time 
 
 def evaluate_last(test_sequences, user_histories, item_catalog, rng=None):
     """
@@ -25,6 +26,7 @@ def evaluate_last(test_sequences, user_histories, item_catalog, rng=None):
     recommended_items = set()
     
     for i in tqdm(range(n_users), desc="Оценка Last (top-1)"):
+        start_time = time.perf_counter()
         test_seq = test_sequences[i]
         if not test_seq:
             continue
@@ -56,13 +58,17 @@ def evaluate_last(test_sequences, user_histories, item_catalog, rng=None):
         reciprocal_ranks.append(hit) # MRR@1 = hit
         ndcgs.append(hit)            # NDCG@1 = hit
     
+    end_time = time.perf_counter()    
+    latency = end_time - start_time
+    
     if not precisions:
         return {
             'recall@1': 0.0,
             'precision@1': 0.0,
             'ndcg@1': 0.0,
             'mrr@1': 0.0,
-            'coverage@1': 0.0
+            'coverage@1': 0.0,
+            'latency': latency
         }
     
     # Усреднение по пользователям
@@ -77,5 +83,6 @@ def evaluate_last(test_sequences, user_histories, item_catalog, rng=None):
         'precision@1': precision,
         'ndcg@1': ndcg,
         'mrr@1': mrr,
-        'coverage@1': coverage
+        'coverage@1': coverage,
+        'latency': latency
     }
