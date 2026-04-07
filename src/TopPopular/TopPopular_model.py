@@ -73,7 +73,7 @@ users_hist_baseline = [history_baseline.get(u, []) for u in test_users]
 users_hist_adapt = [history_adapt.get(u, []) for u in test_users]
 
 K_MAX = 50
-TOP_K_LIST = [1, 10, 20, 50]
+TOP_K_LIST = [1, 10, 20, 50, 100]
 
 # BASELINE 
 print("\nBaseline Inference")

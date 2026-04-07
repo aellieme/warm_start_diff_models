@@ -68,6 +68,7 @@ def evaluate(model, diffusion, data_loader, data_te, mask_his, topN, sampling_st
             _, indices = torch.topk(prediction, topN[-1])
             indices = indices.cpu().numpy().tolist()
             predict_items.extend(indices)
+            
     precisions, recalls, ndcgs, mrrs, covs = eval_metrics.compute_all_metrics(target_items, predict_items, topN, n_item)
     return precisions, recalls, ndcgs, mrrs, covs
 
