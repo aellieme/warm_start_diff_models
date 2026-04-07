@@ -107,6 +107,5 @@ TOP_K_LIST = [1, 10, 20, 50]
 results_baseline = run_experiment(users_hist_baseline, item_catalog, TOP_K_LIST, "BASELINE")
 results_adapt = run_experiment(users_hist_adapt, item_catalog, TOP_K_LIST, "ADAPT")
 
-
 print_final_results("RANDOM BASELINE", TOP_K_LIST, results_baseline)
 print_final_results("RANDOM ADAPT", TOP_K_LIST, results_adapt)
