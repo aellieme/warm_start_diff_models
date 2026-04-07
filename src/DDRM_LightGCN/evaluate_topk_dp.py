@@ -100,5 +100,6 @@ def compute_all_metrics(actual: list, predicted: list, topN_list: list, n_items:
         recalls.append(recall_at_k(actual, predicted, k))
         ndcgs.append(ndcg_at_k(actual, predicted, k))
         mrrs.append(mrr(actual, predicted, k))
-        covs.append(coverage(predicted, n_items)) 
+        predicted_k = [rec[:k] for rec in predicted]
+        covs.append(coverage(predicted_k, n_items)) 
     return precisions, recalls, ndcgs, mrrs, covs
