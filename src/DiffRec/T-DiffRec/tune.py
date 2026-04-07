@@ -48,7 +48,8 @@ mask_tv = train_data_ori + valid_y_data
 
 print("Data loaded. n_user={}, n_item={}".format(n_user, n_item))
 
-def evaluate(model, diffusion, data_loader, data_te, mask_his, topN):
+# def evaluate(model, diffusion, data_loader, data_te, mask_his, topN):
+def evaluate(model, diffusion, data_loader, data_te, mask_his, topN, sampling_steps, sampling_noise=False):
     """Оценка модели (скопировано из main.py)"""
     model.eval()
     e_idxlist = list(range(mask_his.shape[0]))
@@ -61,7 +62,8 @@ def evaluate(model, diffusion, data_loader, data_te, mask_his, topN):
         for batch_idx, batch in enumerate(data_loader):
             his_data = mask_his[e_idxlist[batch_idx*BATCH_SIZE:batch_idx*BATCH_SIZE+len(batch)]]
             batch = batch.to(device)
-            prediction = diffusion.p_sample(model, batch, args_sampling_steps, args_sampling_noise)
+            # prediction = diffusion.p_sample(model, batch, args_sampling_steps, args_sampling_noise)
+            prediction = diffusion.p_sample(model, batch, sampling_steps, sampling_noise)
             prediction[his_data.nonzero()] = -np.inf
             _, indices = torch.topk(prediction, topN[-1])
             indices = indices.cpu().numpy().tolist()
@@ -116,7 +118,8 @@ def train_and_evaluate(trial):
         # Оценка каждые 5 эпох
         if epoch % 5 == 0:
             # используем train_data_ori (бинарную) для маски
-            precisions, recalls, ndcgs, mrrs, covs = evaluate(model, diffusion, test_loader, valid_y_data, train_data_ori, TOP_N)
+            # precisions, recalls, ndcgs, mrrs, covs = evaluate(model, diffusion, test_loader, valid_y_data, train_data_ori, TOP_N)
+            precisions, recalls, ndcgs, mrrs, covs = evaluate(model, diffusion, test_loader, valid_y_data, train_data_ori, TOP_N, sampling_steps=steps, sampling_noise=False)
             recall10 = recalls[0]   # recall@10
             if recall10 > best_recall:
                 best_recall = recall10
@@ -136,6 +139,7 @@ def main():
 
     # Лучшие параметры
     best_params = study.best_params
+    steps = best_params['steps']
     print("Best hyperparameters:", best_params)
 
     #  Обучение финальной модели с лучшими параметрами 
@@ -172,7 +176,8 @@ def main():
             optimizer.step()
             total_loss += loss.item()
         if epoch % 5 == 0:
-            precisions, recalls, _, _, _ = evaluate(model, diffusion, test_loader, valid_y_data, train_data_ori, TOP_N)
+            # precisions, recalls, _, _, _ = evaluate(model, diffusion, test_loader, valid_y_data, train_data_ori, TOP_N)
+            precisions, recalls, _, _, _ = evaluate(model, diffusion, test_loader, valid_y_data, train_data_ori, TOP_N, sampling_steps=steps, sampling_noise=False)
             recall10 = recalls[0]
             if recall10 > best_recall:
                 best_recall = recall10
@@ -191,7 +196,8 @@ def main():
     # Загружаем модель (можно из сохранённой, но у нас уже есть в памяти)
     model.eval()
     # Для базового теста используем test_loader и test_y_data, маска mask_tv = train_data_ori + valid_y_data
-    precisions, recalls, ndcgs, mrrs, covs = evaluate(model, diffusion, test_loader, test_y_data, mask_tv, TOP_N)
+    # precisions, recalls, ndcgs, mrrs, covs = evaluate(model, diffusion, test_loader, test_y_data, mask_tv, TOP_N)
+    precisions, recalls, ndcgs, mrrs, covs = evaluate(model, diffusion, test_loader, test_y_data, mask_tv, TOP_N, sampling_steps=steps, sampling_noise=False)
     print("Base test results:")
     # print(f"  Precision@{TOP_N}: {precisions}")
     print(f"  Recall@{TOP_N}:    {recalls}")
@@ -227,15 +233,16 @@ def main():
         
         start_time = time.perf_counter()
         # Оценка
-        precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a = evaluate(model, diffusion, adapt_loader, test_y_data, mask_adapt, TOP_N)
+        # precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a = evaluate(model, diffusion, adapt_loader, test_y_data, mask_adapt, TOP_N)
+        precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a = evaluate(model, diffusion, adapt_loader, test_y_data, mask_adapt, TOP_N, sampling_steps=steps, sampling_noise=False)
         warm_latency = time.perf_counter() - start_time
-        print(f"Warm-start inference latency: {warm_latency:.4f} sec")
         print("Warm-start test results:")
         # print(f"  Precision@{TOP_N}: {precisions_a}")
         print(f"  Recall@{TOP_N}:    {recalls_a}")
         print(f"  NDCG@{TOP_N}:      {ndcgs_a}")
         print(f"  MRR@{TOP_N}:       {mrrs_a}")
         print(f"  Coverage:          {covs_a}")
+        print(f"Warm-start inference latency: {warm_latency:.4f} sec")
     else:
         print("adapt_list.npy not found, skipping warm-start.")
 
