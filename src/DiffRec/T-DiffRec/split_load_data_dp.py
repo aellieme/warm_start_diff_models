@@ -11,7 +11,7 @@ project_root = os.path.dirname(current_file_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-DATA_DIR = '../data/ml-1m/'
+DATA_DIR = '../../data/ml-1m/'
 T_VALUES = [10, 20, 50, 100]      # количество шагов диффузии для экспериментов
 
 def ensure_dirs():
