@@ -102,10 +102,41 @@ history_adapt = pd.concat([train_df, val_df, adapt_df]).groupby('userid')['movie
 users_hist_baseline = [history_baseline.get(u, []) for u in test_users]
 users_hist_adapt = [history_adapt.get(u, []) for u in test_users]
 
-TOP_K_LIST = [1, 10, 20, 50]
+TOP_K_LIST = [1, 10, 20, 50, 100]
 
 results_baseline = run_experiment(users_hist_baseline, item_catalog, TOP_K_LIST, "BASELINE")
 results_adapt = run_experiment(users_hist_adapt, item_catalog, TOP_K_LIST, "ADAPT")
 
 print_final_results("RANDOM BASELINE", TOP_K_LIST, results_baseline)
 print_final_results("RANDOM ADAPT", TOP_K_LIST, results_adapt)
+
+
+# Импортируем новые модули
+from evaluate_last import evaluate_last
+from evaluate_successive import evaluate_successive
+
+# Фиксируем генератор для воспроизводимости
+rng = np.random.default_rng(42)
+
+print("\n LAST (цель - последний элемент в тестовом периоде)")
+last_base = evaluate_last(test_grouped, users_hist_baseline, item_catalog, rng)
+last_adapt = evaluate_last(test_grouped, users_hist_adapt, item_catalog, rng)
+
+print("\nBaseline (LAST):")
+for metric, value in last_base.items():
+    print(f"  {metric}: {value:.6f}")
+print("\nAdapt (LAST):")
+for metric, value in last_adapt.items():
+    print(f"  {metric}: {value:.6f}")
+
+print("\n" + "-"*40)
+print(">>> SUCCESSIVE (каждый элемент - отдельная цель)")
+succ_base = evaluate_successive(test_grouped, users_hist_baseline, item_catalog, rng)
+succ_adapt = evaluate_successive(test_grouped, users_hist_adapt, item_catalog, rng)
+
+print("\nBaseline (SUCCESSIVE):")
+for metric, value in succ_base.items():
+    print(f"  {metric}: {value:.6f}")
+print("\nAdapt (SUCCESSIVE):")
+for metric, value in succ_adapt.items():
+    print(f"  {metric}: {value:.6f}")
