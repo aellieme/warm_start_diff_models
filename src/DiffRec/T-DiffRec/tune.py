@@ -18,7 +18,7 @@ from models.DNN import DNN
 DATASET = 'ml-1m'                     
 DATA_PATH = f'../../data/{DATASET}/'
 BATCH_SIZE = 400
-EPOCHS = 50                          
+EPOCHS = 1000                          
 TOP_N = [10, 20, 50, 100]
 TST_W_VAL = False  #валидацию отдельно
 CUDA = True
@@ -163,6 +163,7 @@ def main():
     optimizer = optim.AdamW(model.parameters(), lr=best_params['lr'], weight_decay=best_params['weight_decay'])
 
     best_recall = -100
+    best_epoch = 0
     best_model_state = None
     for epoch in range(1, EPOCHS + 1):
         model.train()
@@ -181,10 +182,18 @@ def main():
             recall10 = recalls[0]
             if recall10 > best_recall:
                 best_recall = recall10
+                best_epoch = epoch
                 best_model_state = model.state_dict()
             print(f"Epoch {epoch:03d}, val recall@10={recall10:.4f}, best={best_recall:.4f}")
+            if epoch - best_epoch >= 25:
+                print(f"Early stopping triggered at epoch {epoch}. Best epoch was {best_epoch} with recall {best_recall:.4f}")
+                break
     # Загружаем лучшую модель
-    model.load_state_dict(best_model_state)
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+    else:
+        print("Warning: No best model state found!")
+    # model.load_state_dict(best_model_state)
     # Сохраняем модель
     os.makedirs(SAVE_PATH, exist_ok=True)
     model_path = f"{SAVE_PATH}/best_tuned_model.pth"
