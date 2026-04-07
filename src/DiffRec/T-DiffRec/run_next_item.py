@@ -16,7 +16,7 @@ from next_item_eval import evaluate_last_target, evaluate_successive_target  # �
 DATASET = 'ml-1m'
 DATA_PATH = f'../../data/{DATASET}/'
 BATCH_SIZE = 400
-TOP_N = [10, 20, 50, 100]
+TOP_N = [1]
 CUDA = True
 GPU = '0'
 MODEL_PATH = './saved_models/best_tuned_model.pth'   # модель из tune.py
@@ -96,21 +96,20 @@ print(f"Coverage:          {[round(x,4) for x in last_cov]}")
 
 
 #basic succsessive target
-# print("\n" + "="*60)
-print("succsessive target baseline")
-start_time = time.perf_counter()
-succ_prec, succ_rec, succ_ndcg, succ_mrr, succ_cov = evaluate_successive_target(
-    model, diffusion, history_loader, mask_base, user_test_items, TOP_N,
-    DEVICE, sampling_steps=steps, sampling_noise=False
-)
-succ_latency = time.perf_counter() - start_time
+# print("succsessive target baseline")
+# start_time = time.perf_counter()
+# succ_prec, succ_rec, succ_ndcg, succ_mrr, succ_cov = evaluate_successive_target(
+#     model, diffusion, history_loader, mask_base, user_test_items, TOP_N,
+#     DEVICE, sampling_steps=steps, sampling_noise=False
+# )
+# succ_latency = time.perf_counter() - start_time
 
-print(f"succsessive target latency: {succ_latency:.2f} sec")
-print(f"Precision@{TOP_N}: {[round(x,4) for x in succ_prec]}")
-print(f"Recall@{TOP_N}:    {[round(x,4) for x in succ_rec]}")
-print(f"NDCG@{TOP_N}:      {[round(x,4) for x in succ_ndcg]}")
-print(f"MRR@{TOP_N}:       {[round(x,4) for x in succ_mrr]}")
-print(f"Coverage:          {[round(x,4) for x in succ_cov]}")
+# print(f"succsessive target latency: {succ_latency:.2f} sec")
+# print(f"Precision@{TOP_N}: {[round(x,4) for x in succ_prec]}")
+# print(f"Recall@{TOP_N}:    {[round(x,4) for x in succ_rec]}")
+# print(f"NDCG@{TOP_N}:      {[round(x,4) for x in succ_ndcg]}")
+# print(f"MRR@{TOP_N}:       {[round(x,4) for x in succ_mrr]}")
+# print(f"Coverage:          {[round(x,4) for x in succ_cov]}")
 
 
 
@@ -152,15 +151,20 @@ if os.path.exists(adapt_path):
     last_latency_w = time.perf_counter() - start_time
     print(f"LAST (warm) latency: {last_latency_w:.2f} sec")
     print(f"Recall@{TOP_N}: {[round(x,4) for x in last_rec_w]}")
+    print(f"Precision@{TOP_N}: {[round(x,4) for x in last_prec_w]}")
+    print(f"Recall@{TOP_N}:    {[round(x,4) for x in last_rec_w]}")
+    print(f"NDCG@{TOP_N}:      {[round(x,4) for x in last_ndcg_w]}")
+    print(f"MRR@{TOP_N}:       {[round(x,4) for x in last_mrr_w]}")
+    print(f"Coverage:          {[round(x,4) for x in last_cov_w]}")
     
-    print("\nsuccsessive target + warm‑start")
-    start_time = time.perf_counter()
-    succ_prec_w, succ_rec_w, succ_ndcg_w, succ_mrr_w, succ_cov_w = evaluate_successive_target(
-        model, diffusion, adapt_loader, mask_adapt, user_test_items, TOP_N,
-        DEVICE, sampling_steps=steps, sampling_noise=False
-    )
-    succ_latency_w = time.perf_counter() - start_time
-    print(f"SUCCESSIVE (warm) latency: {succ_latency_w:.2f} sec")
-    print(f"Recall@{TOP_N}: {[round(x,4) for x in succ_rec_w]}")
+    # print("\nsuccsessive target + warm‑start")
+    # start_time = time.perf_counter()
+    # succ_prec_w, succ_rec_w, succ_ndcg_w, succ_mrr_w, succ_cov_w = evaluate_successive_target(
+    #     model, diffusion, adapt_loader, mask_adapt, user_test_items, TOP_N,
+    #     DEVICE, sampling_steps=steps, sampling_noise=False
+    # )
+    # succ_latency_w = time.perf_counter() - start_time
+    # print(f"SUCCESSIVE (warm) latency: {succ_latency_w:.2f} sec")
+    # print(f"Recall@{TOP_N}: {[round(x,4) for x in succ_rec_w]}")
 else:
     print("adapt_list.npy not found ")

@@ -1,11 +1,10 @@
-# next_item_eval.py
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 import time
 from collections import defaultdict
+from tqdm import tqdm
 
-# Импорты из ваших модулей
 import data_utils
 import evaluate_topk_dp as eval_metrics
 import models.gaussian_diffusion as gd
@@ -21,11 +20,6 @@ def _get_user_sequences(test_list_path, n_user, n_item):
     user_items = defaultdict(list)
     for uid, iid in test_list:
         user_items[int(uid)].append(int(iid))
-    # Сортировка по времени не требуется, если test_list уже отсортирован глобально,
-    # но внутри пользователя порядок может быть нарушен, т.к. глобальная сортировка
-    # не группирует пользователей. Для реального хронологического порядка нужно
-    # сохранять временные метки. Здесь мы оставляем как есть (порядок в test_list).
-    # Для простоты будем считать, что test_list уже в правильном порядке.
     # Преобразуем в обычные списки
     user_test_items = {uid: items for uid, items in user_items.items()}
     # Создаём csr-матрицу для совместимости с существующим кодом (если нужно)
@@ -56,12 +50,10 @@ def evaluate_last_target(model, diffusion, history_loader, history_mask, user_te
         (precisions, recalls, ndcgs, mrrs, covs) – каждый список длины len(topN_list)
     """
     model.eval()
-    # Получаем список пользователей в том же порядке, что и history_loader
-    # history_loader обычно итерирует по всем пользователям подряд (shuffle=False)
-    # Нам нужно сопоставить uid с его последним айтемом.
-    # Проще: создадим список target_last_items в порядке индексов пользователей (0..n_user-1)
+    
     n_user = history_mask.shape[0]
-    target_last = [None] * n_user
+    # target_last = [None] * n_user
+    target_last = [[] for _ in range(n_user)]
     for uid, items in user_test_items.items():
         if items:
             target_last[uid] = [items[-1]]   # только последний
@@ -83,21 +75,18 @@ def evaluate_last_target(model, diffusion, history_loader, history_mask, user_te
             indices = indices.cpu().numpy().tolist()
             predict_items.extend(indices)
     
-    # Теперь у нас есть predict_items в том же порядке пользователей, что и в history_loader
-    # Но нам нужны target_last в том же порядке. history_loader итерирует по train_dataset,
-    # который содержит всех пользователей в индексации от 0 до n_user-1. Порядок совпадает с порядком строк в history_mask.
-    # Значит, мы можем просто взять target_last[i] для i от 0 до n_user-1.
+    
     target_items_ordered = [target_last[i] for i in range(n_user)]
     
     # Вычисляем метрики
     precisions, recalls, ndcgs, mrrs, covs = eval_metrics.compute_all_metrics(
-        target_items_ordered, predict_items, topN_list, n_item=history_mask.shape[1]
+        target_items_ordered, predict_items, topN_list, n_items=history_mask.shape[1]
     )
     return precisions, recalls, ndcgs, mrrs, covs
 
 def evaluate_successive_target(model, diffusion, history_loader, history_mask, user_test_items, topN_list, device, sampling_steps, sampling_noise=False):
     """
-    Оценка SUCCESSIVE target: предсказываем каждый следующий айтем в тестовой последовательности,
+    Оценка succsessive target: предсказываем каждый следующий айтем в тестовой последовательности,
     инкрементально расширяя историю.
     
     Возвращает средние метрики по всем предсказанным шагам.
@@ -106,62 +95,98 @@ def evaluate_successive_target(model, diffusion, history_loader, history_mask, u
     n_user = history_mask.shape[0]
     n_item = history_mask.shape[1]
     
-    # Для каждого пользователя будем хранить текущую историю (как список айтемов) и пошагово её расширять.
-    # Начальная история – все взаимодействия из history_mask (train_data_ori + возможно adapt)
-    # Но history_mask – это csr-матрица. Получим для каждого пользователя список айтемов из истории.
-    # Для ускорения можно предварительно построить user_history_items.
+    # Получаем историю каждого пользователя из csr-матрицы
     user_history_items = {}
     for uid in range(n_user):
         row = history_mask[uid]
         user_history_items[uid] = row.nonzero()[1].tolist()
     
-    # Собираем все предсказания и цели для каждого шага
-    all_targets = []   # список истинных айтемов для каждого шага (в порядке обхода)
-    all_predictions = []  # список топ-K списков для каждого шага
+    all_targets = []
+    all_predictions = []
     
-    # Проходим по каждому пользователю отдельно (для successive нужен последовательный инференс)
-    for uid in range(n_user):
+    # Прогресс-бар по пользователям
+    for uid in tqdm(range(n_user), desc="Successive evaluation"):
         test_items = user_test_items.get(uid, [])
         if not test_items:
             continue
-        # Текущая история (копия)
         current_history = user_history_items[uid].copy()
-        # Для каждого тестового айтема (по порядку)
-        for t_idx, target_item in enumerate(test_items):
-            # Строим входной вектор для модели: one-hot с весами? 
-            # В вашей модели вход – это взвешенная матрица (train_data). Для successive мы должны использовать веса.
-            # Однако для простоты и единообразия с обучением, мы можем использовать бинарную историю,
-            # но лучше с весами (linspace). Но это сложнее.
-            # Здесь для демонстрации используем бинарную историю (1 для каждого взаимодействия).
-            # Для полной точности нужно пересчитывать веса при добавлении каждого нового айтема.
-            # Оставляем как есть – бинарную.
+        for target_item in test_items:
             input_vec = torch.zeros(n_item).to(device)
             for it in current_history:
-                input_vec[it] = 1.0   # бинарно
-            # Добавляем размерность батча
+                input_vec[it] = 1.0
             input_batch = input_vec.unsqueeze(0)
-            # Маска – текущая история (чтобы не рекомендовать уже виденное)
             mask = torch.zeros(n_item).to(device)
             mask[current_history] = 1.0
-            # Предсказание
             pred = diffusion.p_sample(model, input_batch, sampling_steps, sampling_noise).squeeze(0)
             pred[mask.bool()] = -np.inf
             _, topk = torch.topk(pred, max(topN_list))
             topk = topk.cpu().numpy().tolist()
-            # Сохраняем
             all_predictions.append(topk)
             all_targets.append([target_item])
-            # Обновляем историю: добавляем текущий целевой айтем (для следующего шага)
             current_history.append(target_item)
     
-    # Теперь all_targets и all_predictions – списки одинаковой длины (общее число шагов)
     # Вычисляем метрики
     precisions, recalls, ndcgs, mrrs, covs = eval_metrics.compute_all_metrics(
-        all_targets, all_predictions, topN_list, n_item
+        all_targets, all_predictions, topN_list, n_items=n_item
     )
     return precisions, recalls, ndcgs, mrrs, covs
 
-# Пример использования (если файл запускается как основной)
+# def evaluate_successive_target(model, diffusion, history_loader, history_mask, user_test_items, topN_list, device, sampling_steps, sampling_noise=False):
+#     """
+#     Оценка SUCCESSIVE target: предсказываем каждый следующий айтем в тестовой последовательности,
+#     инкрементально расширяя историю.
+    
+#     Возвращает средние метрики по всем предсказанным шагам.
+#     """
+#     model.eval()
+#     n_user = history_mask.shape[0]
+#     n_item = history_mask.shape[1]
+    
+#     user_history_items = {}
+#     for uid in range(n_user):
+#         row = history_mask[uid]
+#         user_history_items[uid] = row.nonzero()[1].tolist()
+    
+#     # Собираем все предсказания и цели для каждого шага
+#     all_targets = []   # список истинных айтемов для каждого шага (в порядке обхода)
+#     all_predictions = []  # список топ-K списков для каждого шага
+    
+#     # Проходим по каждому пользователю отдельно (для successive нужен последовательный инференс)
+#     for uid in range(n_user):
+#         test_items = user_test_items.get(uid, [])
+#         if not test_items:
+#             continue
+#         # Текущая история (копия)
+#         current_history = user_history_items[uid].copy()
+#         # Для каждого тестового айтема (по порядку)
+#         for t_idx, target_item in enumerate(test_items):
+            
+#             input_vec = torch.zeros(n_item).to(device)
+#             for it in current_history:
+#                 input_vec[it] = 1.0   # бинарно
+#             # Добавляем размерность батча
+#             input_batch = input_vec.unsqueeze(0)
+#             # Маска – текущая история (чтобы не рекомендовать уже виденное)
+#             mask = torch.zeros(n_item).to(device)
+#             mask[current_history] = 1.0
+#             # Предсказание
+#             pred = diffusion.p_sample(model, input_batch, sampling_steps, sampling_noise).squeeze(0)
+#             pred[mask.bool()] = -np.inf
+#             _, topk = torch.topk(pred, max(topN_list))
+#             topk = topk.cpu().numpy().tolist()
+#             # Сохраняем
+#             all_predictions.append(topk)
+#             all_targets.append([target_item])
+#             # Обновляем историю: добавляем текущий целевой айтем (для следующего шага)
+#             current_history.append(target_item)
+    
+#     # Теперь all_targets и all_predictions – списки одинаковой длины (общее число шагов)
+#     # Вычисляем метрики
+#     precisions, recalls, ndcgs, mrrs, covs = eval_metrics.compute_all_metrics(
+#       all_targets, all_predictions, topN_list, n_items=n_item
+#     )
+    # return precisions, recalls, ndcgs, mrrs, covs
+
 if __name__ == "__main__":
-    # Здесь можно протестировать функции, но для реальной работы они импортируются
+    
     pass
