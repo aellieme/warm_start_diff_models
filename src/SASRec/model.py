@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import os
 
 def fix_torch_seed(seed):
     torch.manual_seed(seed)
@@ -113,7 +114,7 @@ def save_sasrec_model(model, config, data_description, data_index, filepath):
 def load_sasrec_model(filepath, device=None):
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    checkpoint = torch.load(filepath, map_location=device)
+    checkpoint = torch.load(filepath, map_location=device, weights_only=False)
     model = SASRec(checkpoint['item_num'], checkpoint['config'])
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
@@ -126,3 +127,33 @@ def load_sasrec_model(filepath, device=None):
 #     model.to(device)
 #     model.eval()
 #     return model, checkpoint['config'], checkpoint['data_description'], checkpoint['data_index']
+
+def get_model_path(filename):
+    """Возвращает полный путь к файлу модели внутри папки saved_models."""
+    model_dir = 'saved_models'
+    os.makedirs(model_dir, exist_ok=True)
+    return os.path.join(model_dir, filename)
+
+def generate_model_name(config, suffix='best'):
+    """Генерирует имя файла на основе гиперпараметров."""
+    # Ключевые параметры, влияющие на архитектуру/обучение
+    parts = [
+        f"e{config['num_epochs']}",
+        f"ml{config['maxlen']}",
+        f"hid{config['hidden_units']}",
+        f"b{config['batch_size']}",
+        f"lr{config['learning_rate']}",
+        f"{suffix}"
+    ]
+    return "sasrec_" + "_".join(parts) + ".pt"
+
+def get_latest_model_path():
+    """Возвращает путь к самому свежему .pt файлу в папке saved_models."""
+    model_dir = 'saved_models'
+    if not os.path.exists(model_dir):
+        raise FileNotFoundError(f"Directory '{model_dir}' does not exist.")
+    model_files = [f for f in os.listdir(model_dir) if f.endswith('.pt')]
+    if not model_files:
+        raise FileNotFoundError(f"No .pt files found in '{model_dir}'.")
+    latest = max(model_files, key=lambda f: os.path.getmtime(os.path.join(model_dir, f)))
+    return os.path.join(model_dir, latest)

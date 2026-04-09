@@ -9,7 +9,8 @@ from data_utils import (
 )
 from evaluate_metrics import downvote_seen_items, topn_recommendations, model_evaluate
 from training import sasrec_model_scoring   
-from model import load_sasrec_model
+from model import load_sasrec_model, get_latest_model_path 
+
 
 def main():
     #  Загрузка и подготовка данных 
@@ -38,7 +39,16 @@ def main():
     #  Загрузка сохранённой модели 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # model, config, _, _ = load_sasrec_model('sasrec_checkpoint.pt', device=device)
-    model, config, _, _ = load_sasrec_model('sasrec_checkpoint.pt')  
+    # model, config, _, _ = load_sasrec_model('sasrec_checkpoint.pt')  
+    
+     # Загрузка последней сохранённой модели
+    from model import load_sasrec_model, get_latest_model_path
+    model_path = get_latest_model_path()
+    print(f"Loading latest model from {model_path}")
+    model, config, _, _ = load_sasrec_model(model_path)
+    print(f"Loaded config: {config}")
+    
+    
     print("Model loaded from sasrec_checkpoint.pt")
     print(f"Loaded config: {config}")
 

@@ -4,6 +4,7 @@ import torch
 from polara import get_movielens_data
 from polara.preprocessing.dataframes import reindex
 
+from model import save_sasrec_model, get_model_path, generate_model_name
 from data_utils import (
     transform_indices, split_per_user_leave_k, split_future_for_eval,
     data_to_sequences
@@ -12,21 +13,21 @@ from evaluate_metrics import downvote_seen_items, topn_recommendations, model_ev
 from training import build_sasrec_model, sasrec_model_scoring
 
 def main():
-    # 1. Загрузка данных
+    #  Загрузка данных
     mldata = get_movielens_data(include_time=True)
     userid_col = 'userid'
     itemid_col = 'movieid'
     time_col = 'timestamp'
 
-    # 2. Разделение: train (последние k=3 interactions уходят в future)
+    #  Разделение: train (последние k=3 interactions уходят в future)
     train_raw, future_raw = split_per_user_leave_k(mldata, user_col=userid_col, time_col=time_col, k=3)
 
-    # 3. Индексация
+    #  Индексация
     train_data, data_index = transform_indices(train_raw.copy(), userid_col, itemid_col)
     future_data = reindex(future_raw, data_index['items'])
     future_data = future_data[future_data[userid_col].isin(data_index['users'])]
 
-    # 4. Разделение future на adaptation и holdout
+    #  Разделение future на adaptation и holdout
     adapt_data, holdout_data = split_future_for_eval(future_data, user_col=userid_col, time_col=time_col)
 
     data_description = dict(
@@ -38,7 +39,7 @@ def main():
     )
     print("Data description:", data_description)
 
-    # 5. Конфигурация модели
+    #  Конфигурация модели
     config = dict(
         num_epochs=120,
         maxlen=200,
@@ -53,23 +54,32 @@ def main():
         l2_emb=0.0,
     )
 
-    # 6. Обучение SASRec на train_data
+    #  Обучение SASRec на train_data
     print("Training SASRec...")
     model, losses = build_sasrec_model(config, train_data, data_description)
-    # Сохраняем модель
-    from model import save_sasrec_model
-    save_sasrec_model(model, config, data_description, data_index, 'sasrec_checkpoint.pt')
+    # # from model import save_sasrec_model
+    # model_filename = generate_model_name(config, suffix='best')
+    # model_path = get_model_path(model_filename)
+    # save_sasrec_model(model, config, data_description, data_index, model_path)
+    # # save_sasrec_model(model, config, data_description, data_index, 'sasrec_checkpoint.pt')
+    
+    # Сохраняем модель в папку saved_models с именем, включающим гиперпараметры
+    from model import save_sasrec_model, get_model_path, generate_model_name
+    model_filename = generate_model_name(config, suffix='best')
+    model_path = get_model_path(model_filename)
+    save_sasrec_model(model, config, data_description, data_index, model_path)
+    print(f"Model saved to {model_path}")
 
-    # 7. Warm‑start инференс: добавляем адаптационные взаимодействия
+    #  добавляем адаптационные взаимодействия
     inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
     inference_history = inference_history.sort_values([userid_col, time_col])
 
     sasrec_scores, user_order = sasrec_model_scoring(model, inference_history, data_description)
 
-    # 8. Убираем просмотренные айтемы
+    #  Убираем просмотренные айтемы
     downvote_seen_items(sasrec_scores, inference_history, data_description)
 
-    # 9. Фильтруем только пользователей, присутствующих в holdout
+    #  Фильтруем только пользователей, присутствующих в holdout
     valid_users = set(holdout_data[userid_col].unique())
     valid_indices = [i for i, u in enumerate(user_order) if u in valid_users]
     sasrec_scores = sasrec_scores[valid_indices]
@@ -81,20 +91,24 @@ def main():
         .reset_index()
     )
 
-    # 10. Рекомендации top‑10 и оценка
+    #  Рекомендации top‑10 и оценка
     sasrec_recs = topn_recommendations(sasrec_scores, topn=10)
     hr, mrr, cov = model_evaluate(sasrec_recs, holdout_ordered, data_description, topn=10)
     print(f"Evaluated users: {len(filtered_user_order)}")
     print(f"HR: {hr:.4f}, MRR: {mrr:.4f}, Coverage: {cov:.4f}")
 
-    # 11. Демонстрация для одного пользователя 
+    #  Демонстрация для одного пользователя 
     # Загружаем метаданные MovieLens 1M для отображения названий
     import os
-    if not os.path.exists('ml-1m'):
+    if not os.path.exists('../data/info'):
         os.system('wget -O ml-1m.zip https://files.grouplens.org/datasets/movielens/ml-1m.zip')
         os.system('unzip -o ml-1m.zip')
+    # movies_meta = pd.read_csv(
+    #     'ml-1m/movies.dat', sep='::', engine='python',
+    #     encoding='ISO-8859-1', names=['movieId', 'title', 'genres']
+    # )
     movies_meta = pd.read_csv(
-        'ml-1m/movies.dat', sep='::', engine='python',
+        '../data/info/movies.dat', sep='::', engine='python',
         encoding='ISO-8859-1', names=['movieId', 'title', 'genres']
     )
     movie_dict = dict(zip(movies_meta.movieId, movies_meta.title))
