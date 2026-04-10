@@ -10,7 +10,7 @@ from data_utils import (
 from evaluate_metrics import downvote_seen_items, topn_recommendations, model_evaluate
 from training import sasrec_model_scoring   
 from model import load_sasrec_model, get_latest_model_path 
-
+from evaluate_topk_dp import compute_all_metrics
 
 def main():
     #  Загрузка и подготовка данных 
@@ -19,13 +19,17 @@ def main():
     itemid_col = 'movieid'
     time_col = 'timestamp'
 
-    train_raw, future_raw = split_per_user_leave_k(mldata, user_col=userid_col, time_col=time_col, k=3)
+    all_data, data_index = transform_indices(mldata.copy(), userid_col, itemid_col)
+    all_data_sorted = all_data.sort_values(time_col).reset_index(drop=True)
+    N = len(all_data_sorted)
 
-    train_data, data_index = transform_indices(train_raw.copy(), userid_col, itemid_col)
-    future_data = reindex(future_raw, data_index['items'])
-    future_data = future_data[future_data[userid_col].isin(data_index['users'])]
+    train_end = int(0.7 * N)
+    val_end   = int(0.8 * N)
+    adapt_end = int(0.9 * N)
 
-    adapt_data, holdout_data = split_future_for_eval(future_data, user_col=userid_col, time_col=time_col)
+    train_data = all_data_sorted.iloc[:train_end].copy()
+    adapt_data = all_data_sorted.iloc[val_end:adapt_end].copy()
+    test_data  = all_data_sorted.iloc[adapt_end:].copy()
 
     data_description = dict(
         users=data_index['users'].name,
@@ -33,8 +37,7 @@ def main():
         order=time_col,
         n_users=len(data_index['users']),
         n_items=len(data_index['items']),
-    )
-    print("Data description:", data_description)
+        )
 
     #  Загрузка сохранённой модели 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -62,30 +65,37 @@ def main():
     downvote_seen_items(sasrec_scores, inference_history, data_description)
 
     # Фильтруем только пользователей, присутствующих в holdout
-    valid_users = set(holdout_data[userid_col].unique())
+    valid_users = set(test_data[userid_col].unique())
     valid_indices = [i for i, u in enumerate(user_order) if u in valid_users]
     sasrec_scores = sasrec_scores[valid_indices]
     filtered_user_order = [user_order[i] for i in valid_indices]
 
-    holdout_ordered = (
-        holdout_data.set_index(userid_col)
-        .loc[filtered_user_order]
-        .reset_index()
-    )
+    holdout_ordered = test_data.set_index(userid_col).loc[filtered_user_order].reset_index()
 
     # Рекомендации top‑10 и оценка
     sasrec_recs = topn_recommendations(sasrec_scores, topn=10)
-    hr, mrr, cov = model_evaluate(sasrec_recs, holdout_ordered, data_description, topn=10)
+    
+    # holdout_ordered — DataFrame с колонкой itemid (целевые айтемы)
+    actual = [[row] for row in holdout_ordered[itemid_col].values]   # список списков с одним айтемом
+    predicted = sasrec_recs.tolist()                                 # список списков (top‑10)
+    n_items = data_description['n_items']
+    topN_list = [10]   # какие k вас интересуют
+    precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(actual, predicted, topN_list, n_items)
     print(f"Evaluated users: {len(filtered_user_order)}")
-    print(f"HR: {hr:.4f}, MRR: {mrr:.4f}, Coverage: {cov:.4f}")
+    for k, p, r, ndcg, mrr, cov in zip(topN_list, precisions, recalls, ndcgs, mrrs, covs):
+        print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
+    
+    # hr, mrr, cov = model_evaluate(sasrec_recs, holdout_ordered, data_description, topn=10)
+    # print(f"Evaluated users: {len(filtered_user_order)}")
+    # print(f"HR: {hr:.4f}, MRR: {mrr:.4f}, Coverage: {cov:.4f}")
 
     # Пример для одного юзера
     import os
-    if not os.path.exists('ml-1m'):
+    if not os.path.exists('../data/info'):
         os.system('wget -O ml-1m.zip https://files.grouplens.org/datasets/movielens/ml-1m.zip')
         os.system('unzip -o ml-1m.zip')
     movies_meta = pd.read_csv(
-        'ml-1m/movies.dat', sep='::', engine='python',
+        '../data/info/movies.dat', sep='::', engine='python',
         encoding='ISO-8859-1', names=['movieId', 'title', 'genres']
     )
     movie_dict = dict(zip(movies_meta.movieId, movies_meta.title))
@@ -100,13 +110,17 @@ def main():
     example_user = filtered_user_order[0]
     user_train = train_data[train_data[userid_col] == example_user].sort_values(time_col)
     user_adapt = adapt_data[adapt_data[userid_col] == example_user].sort_values(time_col)
-    user_holdout = holdout_data[holdout_data[userid_col] == example_user]
+    
+    user_holdout = test_data[test_data[userid_col] == example_user]
+    
+    # user_holdout = holdout_data[holdout_data[userid_col] == example_user]
     user_position = filtered_user_order.index(example_user)
     user_recs = sasrec_recs[user_position]
 
     train_movies = decode_items(user_train[itemid_col], data_index, movie_dict)
     adapt_movies = decode_items(user_adapt[itemid_col], data_index, movie_dict)
     rec_movies = decode_items(user_recs, data_index, movie_dict)
+    # holdout_movie = decode_items(user_holdout[itemid_col], data_index, movie_dict)[0]
     holdout_movie = decode_items(user_holdout[itemid_col], data_index, movie_dict)[0]
 
     print("\n--- Example user ---")

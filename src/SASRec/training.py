@@ -86,16 +86,62 @@ def train_sasrec_epoch(model, num_batch, l2_emb, sampler, optimizer, criterion, 
         losses.append(loss.item())
     return losses
 
-def build_sasrec_model(config, data, data_description):
-    model, sampler, n_batches, criterion, optimizer = prepare_sasrec_model(config, data, data_description)
+# def build_sasrec_model(config, data, data_description):
+#     model, sampler, n_batches, criterion, optimizer = prepare_sasrec_model(config, data, data_description)
+#     device = 'cpu'
+#     if torch.cuda.is_available():
+#         device = torch.device(f'cuda:{torch.cuda.current_device()}')
+#     losses = {}
+#     for epoch in tqdm(range(config['num_epochs'])):
+#         losses[epoch] = train_sasrec_epoch(
+#             model, n_batches, config['l2_emb'], sampler, optimizer, criterion, device
+#         )
+#     return model, losses
+
+def build_sasrec_model(config, train_data, val_data, data_description, patience=5):
+    """
+    Обучает модель с early stopping на val_data (last-item стратегия).
+    Возвращает лучшую модель (по HR@10) и словарь потерь.
+    """
+    model, sampler, n_batches, criterion, optimizer = prepare_sasrec_model(config, train_data, data_description)
     device = 'cpu'
     if torch.cuda.is_available():
         device = torch.device(f'cuda:{torch.cuda.current_device()}')
+        model = model.to(device)
+
+    best_hr = 0.0
+    best_model_state = None
+    epochs_no_improve = 0
     losses = {}
+
     for epoch in tqdm(range(config['num_epochs'])):
-        losses[epoch] = train_sasrec_epoch(
+        # Обучаем одну эпоху
+        epoch_loss = train_sasrec_epoch(
             model, n_batches, config['l2_emb'], sampler, optimizer, criterion, device
         )
+        losses[epoch] = epoch_loss
+
+        # Валидация после эпохи
+        hr, mrr = validate_last_item(model, val_data, train_data, data_description, topn=10)
+        print(f"Epoch {epoch}: loss={np.mean(epoch_loss):.4f}, val_HR@10={hr:.4f}, val_MRR={mrr:.4f}")
+
+        # Early stopping
+        if hr > best_hr:
+            best_hr = hr
+            best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= patience:
+                print(f"Early stopping at epoch {epoch} (no improvement for {patience} epochs)")
+                break
+
+    # Восстанавливаем лучшую модель
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        model.to(device)
+        print(f"Restored best model with val_HR@10={best_hr:.4f}")
+
     return model, losses
 
 def sasrec_model_scoring(model, data, data_description):
@@ -114,3 +160,65 @@ def sasrec_model_scoring(model, data, data_description):
         user_order.append(uid)
 
     return np.concatenate(scores, axis=0), user_order
+
+def validate_last_item(model, val_data, train_data, data_description, topn=10):
+    """
+    Оценка модели на val_data по last-item.
+    Для каждого пользователя:
+      - история = train_data + все взаимодействия из val_data кроме последнего
+      - цель = последнее взаимодействие из val_data
+    Возвращает HR@topn и MRR.
+    """
+    model.eval()
+    device = next(model.parameters()).device
+    tensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
+
+    # Группируем val_data по пользователям
+    userid = data_description['users']
+    itemid = data_description['items']
+    time_col = data_description['order']
+
+    # Для каждого пользователя собираем все его взаимодействия из val_data, сортируем по времени
+    val_by_user = val_data.sort_values([userid, time_col]).groupby(userid)[itemid].apply(list)
+
+    # Также нужны train последовательности для каждого пользователя (вся история)
+    train_seq = data_to_sequences(train_data, data_description)  # уже есть функция
+
+    hits = 0
+    reciprocal_ranks = []
+    n_users = 0
+
+    with torch.no_grad():
+        for uid, val_items in val_by_user.items():
+            if len(val_items) == 0:
+                continue
+            # последний айтем - цель
+            target = val_items[-1]
+            # история: train_seq[uid] + все val_items кроме последнего
+            history = train_seq.get(uid, []) + val_items[:-1]
+            if len(history) == 0:
+                # нет истории - пропускаем (модель не может предсказать)
+                continue
+            # получаем предсказания
+            seq_tensor = tensor(history)
+            scores = model.score(seq_tensor).cpu().numpy()
+            # downvote уже просмотренные айтемы (включая историю и target? target ещё не просмотрен)
+            # для чистоты downvote только историю
+            seen_items = set(history)
+            # но в scores индексы айтемов, downvote через -np.inf
+            for it in seen_items:
+                scores[it] = -np.inf
+            # top-n
+            top_idx = np.argpartition(scores, -topn)[-topn:]
+            top_idx = top_idx[np.argsort(-scores[top_idx])]
+            if target in top_idx[:topn]:
+                hits += 1
+                rank = np.where(top_idx == target)[0][0] + 1
+                reciprocal_ranks.append(1.0 / rank)
+            else:
+                reciprocal_ranks.append(0.0)
+            n_users += 1
+
+    hr = hits / n_users if n_users > 0 else 0.0
+    mrr = np.mean(reciprocal_ranks) if reciprocal_ranks else 0.0
+    return hr, mrr
