@@ -30,6 +30,7 @@ def main():
     train_data = all_data_sorted.iloc[:train_end].copy()
     adapt_data = all_data_sorted.iloc[val_end:adapt_end].copy()
     test_data  = all_data_sorted.iloc[adapt_end:].copy()
+    test_last = test_data.sort_values([userid_col, time_col]).groupby(userid_col).last().reset_index()
 
     data_description = dict(
         users=data_index['users'].name,
@@ -65,12 +66,12 @@ def main():
     downvote_seen_items(sasrec_scores, inference_history, data_description)
 
     # Фильтруем только пользователей, присутствующих в holdout
-    valid_users = set(test_data[userid_col].unique())
+    valid_users = set(test_last[userid_col].unique())
     valid_indices = [i for i, u in enumerate(user_order) if u in valid_users]
     sasrec_scores = sasrec_scores[valid_indices]
     filtered_user_order = [user_order[i] for i in valid_indices]
 
-    holdout_ordered = test_data.set_index(userid_col).loc[filtered_user_order].reset_index()
+    holdout_ordered = test_last.set_index(userid_col).loc[filtered_user_order].reset_index()
 
     # Рекомендации top‑10 и оценка
     sasrec_recs = topn_recommendations(sasrec_scores, topn=10)
@@ -111,7 +112,7 @@ def main():
     user_train = train_data[train_data[userid_col] == example_user].sort_values(time_col)
     user_adapt = adapt_data[adapt_data[userid_col] == example_user].sort_values(time_col)
     
-    user_holdout = test_data[test_data[userid_col] == example_user]
+    user_holdout = test_last[test_last[userid_col] == example_user]
     
     # user_holdout = holdout_data[holdout_data[userid_col] == example_user]
     user_position = filtered_user_order.index(example_user)

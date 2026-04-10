@@ -35,8 +35,9 @@ def main():
     val_data   = all_data_sorted.iloc[train_end:val_end].copy()
     adapt_data = all_data_sorted.iloc[val_end:adapt_end].copy()
     test_data  = all_data_sorted.iloc[adapt_end:].copy()
+    test_last = test_data.sort_values([userid_col, time_col]).groupby(userid_col).last().reset_index()
 
-    print(f"Train: {len(train_data)}, Val: {len(val_data)}, Adapt: {len(adapt_data)}, Test: {len(test_data)}")
+    print(f"Train: {len(train_data)}, Val: {len(val_data)}, Adapt: {len(adapt_data)}, Test: {len(test_data)}, len test last (shold be = 1): {len(test_last)}")
 
     #  Описание данных
     data_description = dict(
@@ -88,12 +89,15 @@ def main():
 
     #  Фильтруем только пользователей, присутствующих в holdout
     # valid_users = set(holdout_data[userid_col].unique())
-    valid_users = set(test_data[userid_col].unique())
+    
+    valid_users = set(test_last[userid_col].unique())
+    # valid_users = set(test_data[userid_col].unique())
     valid_indices = [i for i, u in enumerate(user_order) if u in valid_users]
     sasrec_scores = sasrec_scores[valid_indices]
     filtered_user_order = [user_order[i] for i in valid_indices]
 
-    holdout_ordered = (test_data.set_index(userid_col).loc[filtered_user_order].reset_index())
+    # holdout_ordered = (test_data.set_index(userid_col).loc[filtered_user_order].reset_index())
+    holdout_ordered = test_last.set_index(userid_col).loc[filtered_user_order].reset_index()
     # holdout_ordered = (
     #     holdout_data.set_index(userid_col)
     #     .loc[filtered_user_order]
@@ -105,7 +109,7 @@ def main():
     # hr, mrr, cov = model_evaluate(sasrec_recs, holdout_ordered, data_description, topn=10)
     # print(f"Evaluated users: {len(filtered_user_order)}")
     # print(f"HR: {hr:.4f}, MRR: {mrr:.4f}, Coverage: {cov:.4f}")
-    sasrec_recs = topn_recommendations(sasrec_scores, topn=10)
+    # sasrec_recs = topn_recommendations(sasrec_scores, topn=10)
 
     # Подготовка для compute_all_metrics
     actual = [[row] for row in holdout_ordered[itemid_col].values]
@@ -145,7 +149,8 @@ def main():
     example_user = filtered_user_order[0]
     user_train = train_data[train_data[userid_col] == example_user].sort_values(time_col)
     user_adapt = adapt_data[adapt_data[userid_col] == example_user].sort_values(time_col)
-    user_holdout = test_data[test_data[userid_col] == example_user]
+    # user_holdout = test_data[test_data[userid_col] == example_user]
+    user_holdout = test_last[test_last[userid_col] == example_user]
     user_position = filtered_user_order.index(example_user)
     user_recs = sasrec_recs[user_position]
 
