@@ -202,6 +202,8 @@ def validate_last_item(model, val_data, train_data, data_description, topn=10):
             # получаем предсказания
             seq_tensor = tensor(history)
             scores = model.score(seq_tensor).cpu().numpy()
+            if scores.ndim == 2 and scores.shape[0] == 1:
+                scores = scores[0]   # из (1, n_items) в (n_items,)
             # downvote уже просмотренные айтемы (включая историю и target? target ещё не просмотрен)
             # для чистоты downvote только историю
             seen_items = set(history)
