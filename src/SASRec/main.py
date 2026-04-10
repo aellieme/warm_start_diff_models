@@ -107,6 +107,7 @@ def main():
 
 
     #  adaptation
+    print("\nadaptation")
     # добавляем взаимодействия из адапт
     inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
     inference_history = inference_history.sort_values([userid_col, time_col])
@@ -120,8 +121,8 @@ def main():
     #  Фильтруем только пользователей, присутствующих в holdout
     # valid_users = set(holdout_data[userid_col].unique())
     
-    valid_users = set(test_last[userid_col].unique())
-    # valid_users = set(test_data[userid_col].unique())
+    train_users = set(train_data[userid_col].unique())
+    valid_users = set(test_last[userid_col].unique()).intersection(train_users)
     valid_indices = [i for i, u in enumerate(user_order) if u in valid_users]
     sasrec_scores = sasrec_scores[valid_indices]
     filtered_user_order = [user_order[i] for i in valid_indices]
