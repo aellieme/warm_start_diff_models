@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from polara import get_movielens_data
 from polara.preprocessing.dataframes import reindex
+import time
 
 from data_utils import (
     transform_indices, split_per_user_leave_k, split_future_for_eval
@@ -60,6 +61,7 @@ def main():
     inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
     inference_history = inference_history.sort_values([userid_col, time_col])
 
+    start_time = time.perf_counter()
     sasrec_scores, user_order = sasrec_model_scoring(model, inference_history, data_description)
 
     # Убираем просмотренные айтемы
@@ -75,6 +77,8 @@ def main():
 
     # Рекомендации top‑10 и оценка
     sasrec_recs = topn_recommendations(sasrec_scores, topn=10)
+    inference_time = time.perf_counter() - start_time
+    print(f"Total inference time: {inference_time:.4f} sec")
     
     # holdout_ordered — DataFrame с колонкой itemid (целевые айтемы)
     actual = [[row] for row in holdout_ordered[itemid_col].values]   # список списков с одним айтемом
