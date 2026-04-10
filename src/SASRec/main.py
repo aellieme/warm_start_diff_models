@@ -48,7 +48,7 @@ def main():
         )
     #  Конфигурация модели
     config = dict(
-        num_epochs=120,
+        num_epochs=500,
         maxlen=200,
         hidden_units=128,
         dropout_rate=0.5,
@@ -64,7 +64,7 @@ def main():
     #  Обучение SASRec на train_data
     print("Training SASRec...")
     # model, losses = build_sasrec_model(config, train_data, data_description)
-    model, losses = build_sasrec_model(config, train_data, val_data, data_description, patience=5)
+    model, losses = build_sasrec_model(config, train_data, val_data, data_description, patience=20)
     # # from model import save_sasrec_model
     # model_filename = generate_model_name(config, suffix='best')
     # model_path = get_model_path(model_filename)
@@ -72,7 +72,6 @@ def main():
     # # save_sasrec_model(model, config, data_description, data_index, 'sasrec_checkpoint.pt')
     
     # Сохраняем модель в папку saved_models с именем, включающим гиперпараметры
-    from model import save_sasrec_model, get_model_path, generate_model_name
     model_filename = generate_model_name(config, suffix='best')
     model_path = get_model_path(model_filename)
     save_sasrec_model(model, config, data_description, data_index, model_path)
