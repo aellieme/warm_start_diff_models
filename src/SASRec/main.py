@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from polara import get_movielens_data
 from polara.preprocessing.dataframes import reindex
+import time
 
 from model import save_sasrec_model, get_model_path, generate_model_name
 from data_utils import (
@@ -78,10 +79,39 @@ def main():
     save_sasrec_model(model, config, data_description, data_index, model_path)
     print(f"Model saved to {model_path}")
 
-    #  добавляем адаптационные взаимодействия
+
+    #baseline
+    print("\nbaseline")
+    history_baseline = train_data.sort_values([userid_col, time_col])
+
+    start_time = time.perf_counter()
+    sasrec_scores, user_order = sasrec_model_scoring(model, history_baseline, data_description)
+    downvote_seen_items(sasrec_scores, history_baseline, data_description)
+
+    valid_users = set(test_last[userid_col].unique())
+    valid_indices = [i for i, u in enumerate(user_order) if u in valid_users]
+    sasrec_scores = sasrec_scores[valid_indices]
+    filtered_user_order = [user_order[i] for i in valid_indices]
+
+    holdout_ordered = test_last.set_index(userid_col).loc[filtered_user_order].reset_index()
+    sasrec_recs = topn_recommendations(sasrec_scores, topn=10)
+    inference_time = time.perf_counter() - start_time
+
+    print(f"Total inference time: {inference_time:.4f} sec")
+    actual = [[row] for row in holdout_ordered[itemid_col].values]
+    predicted = sasrec_recs.tolist()
+    precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(actual, predicted, [10], data_description['n_items'])
+    print(f"Evaluated users: {len(filtered_user_order)}")
+    for k, p, r, ndcg, mrr, cov in zip([10], precisions, recalls, ndcgs, mrrs, covs):
+        print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
+
+
+    #  adaptation
+    # добавляем взаимодействия из адапт
     inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
     inference_history = inference_history.sort_values([userid_col, time_col])
 
+    start_time = time.perf_counter()
     sasrec_scores, user_order = sasrec_model_scoring(model, inference_history, data_description)
 
     #  Убираем просмотренные айтемы
@@ -106,6 +136,9 @@ def main():
 
     #  Рекомендации top‑10 и оценка
     sasrec_recs = topn_recommendations(sasrec_scores, topn=10)
+    inference_time = time.perf_counter() - start_time
+    print(f"Inference latency (total): {inference_time:.4f} seconds")
+    
     # hr, mrr, cov = model_evaluate(sasrec_recs, holdout_ordered, data_description, topn=10)
     # print(f"Evaluated users: {len(filtered_user_order)}")
     # print(f"HR: {hr:.4f}, MRR: {mrr:.4f}, Coverage: {cov:.4f}")
@@ -146,7 +179,7 @@ def main():
             return [movie_dict[i] for i in real_items]
         return real_items
 
-    example_user = filtered_user_order[0]
+    example_user = filtered_user_order[1]
     user_train = train_data[train_data[userid_col] == example_user].sort_values(time_col)
     user_adapt = adapt_data[adapt_data[userid_col] == example_user].sort_values(time_col)
     # user_holdout = test_data[test_data[userid_col] == example_user]
