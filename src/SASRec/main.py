@@ -88,7 +88,9 @@ def main():
     sasrec_scores, user_order = sasrec_model_scoring(model, history_baseline, data_description)
     downvote_seen_items(sasrec_scores, history_baseline, data_description)
 
-    valid_users = set(test_last[userid_col].unique())
+    # valid_users = set(test_last[userid_col].unique())
+    train_users = set(train_data[userid_col].unique())
+    valid_users = set(test_last[userid_col].unique()).intersection(train_users)
     valid_indices = [i for i, u in enumerate(user_order) if u in valid_users]
     sasrec_scores = sasrec_scores[valid_indices]
     filtered_user_order = [user_order[i] for i in valid_indices]
