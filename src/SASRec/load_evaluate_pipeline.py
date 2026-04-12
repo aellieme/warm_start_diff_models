@@ -10,7 +10,6 @@ from evaluate_metrics import downvote_seen_items, topn_recommendations
 from evaluate_topk_dp import compute_all_metrics
 from training import sasrec_model_scoring
 
-
 def prepare_data_and_description():
     """
     Загружает данные MovieLens-1M, проводит сквозную переиндексацию пользователей и айтемов,
@@ -32,30 +31,69 @@ def prepare_data_and_description():
     itemid_col : str
     time_col : str
     """
-    # Загрузка сырых данных
     mldata = get_movielens_data(include_time=True)
     userid_col = 'userid'
     itemid_col = 'movieid'
     time_col = 'timestamp'
 
-    # Переиндексация пользователей и фильмов в непрерывные 0..N-1
     all_data, data_index = transform_indices(mldata.copy(), userid_col, itemid_col)
-
-    # Глобальная хронологическая сортировка
     all_data_sorted = all_data.sort_values(time_col).reset_index(drop=True)
-    N = len(all_data_sorted)
 
-    # Хронологическое разбиение: train 70%, val 10%, adapt 10%, test 10%
-    train_end = int(0.7 * N)
-    val_end   = int(0.8 * N)
-    adapt_end = int(0.9 * N)
+    # Ваши квантили
+    quantile_valid = 0.70   # T_valid
+    quantile_adapt = 0.80   # граница между validation и adapt
+    quantile_test  = 0.90   # T_test
 
-    train_data = all_data_sorted.iloc[:train_end].copy()
-    val_data   = all_data_sorted.iloc[train_end:val_end].copy()
-    adapt_data = all_data_sorted.iloc[val_end:adapt_end].copy()
-    test_data  = all_data_sorted.iloc[adapt_end:].copy()
+    T_valid = all_data_sorted[time_col].quantile(quantile_valid)
+    T_adapt = all_data_sorted[time_col].quantile(quantile_adapt)
+    T_test  = all_data_sorted[time_col].quantile(quantile_test)
 
-    # Последний элемент каждого пользователя в тестовой части (таргет для next-item)
+    assert T_valid < T_adapt < T_test
+
+    #  Обучающая выборка (до T_valid) 
+    train_data = all_data_sorted[all_data_sorted[time_col] <= T_valid].copy()
+
+    #  Данные после T_valid (для валидации, адаптации, теста) 
+    future_data = all_data_sorted[all_data_sorted[time_col] > T_valid].copy()
+
+    # Валидационные примеры (цель — последнее взаимодействие до T_adapt)
+    val_inputs, val_targets, val_users = [], [], []
+    for uid, user_future in future_data.groupby(userid_col):
+        user_future = user_future.sort_values(time_col)
+        items = user_future[itemid_col].tolist()
+        times = user_future[time_col].tolist()
+
+        # Находим последний элемент с timestamp <= T_adapt
+        target_idx = -1
+        for i, t in enumerate(times):
+            if t <= T_adapt:
+                target_idx = i
+        if target_idx == -1:
+            continue   # нет цели в валидационном окне
+
+        target_item = items[target_idx]
+        # Входная последовательность — все элементы до target (включая из того же окна, но до цели)
+        input_seq = items[:target_idx]
+        if len(input_seq) == 0:
+            continue
+
+        val_inputs.append(input_seq)
+        val_targets.append(target_item)
+        val_users.append(uid)
+
+    val_data = pd.DataFrame({
+        userid_col: val_users,
+        itemid_col: val_targets,
+        'history': val_inputs   # список индексов item_id
+    })
+
+    #  Адаптационная выборка (строго между T_adapt и T_test) 
+    adapt_data = all_data_sorted[
+        (all_data_sorted[time_col] > T_adapt) & (all_data_sorted[time_col] <= T_test)
+    ].copy()
+
+    #  Тестовые примеры (последнее взаимодействие после T_test) 
+    test_data = all_data_sorted[all_data_sorted[time_col] > T_test].copy()
     test_last = (
         test_data
         .sort_values([userid_col, time_col])
@@ -64,17 +102,20 @@ def prepare_data_and_description():
         .reset_index()
     )
 
-    # Описание данных, необходимое для модели и функций оценки
     data_description = {
         'users': data_index['users'].name,
         'items': data_index['items'].name,
         'order': time_col,
         'n_users': len(data_index['users']),
         'n_items': len(data_index['items']),
+        'T_valid': T_valid,
+        'T_adapt': T_adapt,
+        'T_test': T_test,
     }
 
     return (train_data, val_data, adapt_data, test_data, test_last,
             data_index, data_description, userid_col, itemid_col, time_col)
+ 
 
 
 def run_inference_pipeline(

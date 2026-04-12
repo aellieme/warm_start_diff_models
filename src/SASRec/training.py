@@ -162,57 +162,39 @@ def sasrec_model_scoring(model, data, data_description):
     return np.concatenate(scores, axis=0), user_order
 
 def validate_last_item(model, val_data, train_data, data_description, topn=10):
-    """
-    Оценка модели на val_data по last-item.
-    Для каждого пользователя:
-      - история = train_data + все взаимодействия из val_data кроме последнего
-      - цель = последнее взаимодействие из val_data
-    Возвращает HR@topn и MRR.
-    """
     model.eval()
     device = next(model.parameters()).device
     tensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
 
-    # Группируем val_data по пользователям
     userid = data_description['users']
     itemid = data_description['items']
-    time_col = data_description['order']
-
-    # Для каждого пользователя собираем все его взаимодействия из val_data, сортируем по времени
-    val_by_user = val_data.sort_values([userid, time_col]).groupby(userid)[itemid].apply(list)
-
-    # Также нужны train последовательности для каждого пользователя (вся история)
-    train_seq = data_to_sequences(train_data, data_description)  # уже есть функция
 
     hits = 0
     reciprocal_ranks = []
     n_users = 0
 
     with torch.no_grad():
-        for uid, val_items in val_by_user.items():
-            if len(val_items) == 0:
+        for _, row in val_data.iterrows():
+            uid = row[userid]
+            target = row[itemid]
+            history = row['history']   # список индексов item_id
+            if not history:
                 continue
-            # последний айтем - цель
-            target = val_items[-1]
-            # история: train_seq[uid] + все val_items кроме последнего
-            history = train_seq.get(uid, []) + val_items[:-1]
-            if len(history) == 0:
-                # нет истории - пропускаем (модель не может предсказать)
-                continue
-            # получаем предсказания
+
             seq_tensor = tensor(history)
             scores = model.score(seq_tensor).cpu().numpy()
-            if scores.ndim == 2 and scores.shape[0] == 1:
-                scores = scores[0]   # из (1, n_items) в (n_items,)
-            # downvote уже просмотренные айтемы (включая историю и target? target ещё не просмотрен)
-            # для чистоты downvote только историю
-            seen_items = set(history)
-            # но в scores индексы айтемов, downvote через -np.inf
-            for it in seen_items:
-                scores[it] = -np.inf
-            # top-n
+            if scores.ndim == 2:
+                scores = scores[0]
+
+            # маскируем уже просмотренные
+            seen = set(history)
+            for it in seen:
+                if it < len(scores):
+                    scores[it] = -np.inf
+
             top_idx = np.argpartition(scores, -topn)[-topn:]
             top_idx = top_idx[np.argsort(-scores[top_idx])]
+
             if target in top_idx[:topn]:
                 hits += 1
                 rank = np.where(top_idx == target)[0][0] + 1
@@ -224,3 +206,68 @@ def validate_last_item(model, val_data, train_data, data_description, topn=10):
     hr = hits / n_users if n_users > 0 else 0.0
     mrr = np.mean(reciprocal_ranks) if reciprocal_ranks else 0.0
     return hr, mrr
+
+
+# def validate_last_item(model, val_data, train_data, data_description, topn=10):
+#     """
+#     Оценка модели на val_data по last-item.
+#     Для каждого пользователя:
+#       - история = train_data + все взаимодействия из val_data кроме последнего
+#       - цель = последнее взаимодействие из val_data
+#     Возвращает HR@topn и MRR.
+#     """
+#     model.eval()
+#     device = next(model.parameters()).device
+#     tensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
+
+#     # Группируем val_data по пользователям
+#     userid = data_description['users']
+#     itemid = data_description['items']
+#     time_col = data_description['order']
+
+#     # Для каждого пользователя собираем все его взаимодействия из val_data, сортируем по времени
+#     val_by_user = val_data.sort_values([userid, time_col]).groupby(userid)[itemid].apply(list)
+
+#     # Также нужны train последовательности для каждого пользователя (вся история)
+#     train_seq = data_to_sequences(train_data, data_description)  # уже есть функция
+
+#     hits = 0
+#     reciprocal_ranks = []
+#     n_users = 0
+
+#     with torch.no_grad():
+#         for uid, val_items in val_by_user.items():
+#             if len(val_items) == 0:
+#                 continue
+#             # последний айтем - цель
+#             target = val_items[-1]
+#             # история: train_seq[uid] + все val_items кроме последнего
+#             history = train_seq.get(uid, []) + val_items[:-1]
+#             if len(history) == 0:
+#                 # нет истории - пропускаем (модель не может предсказать)
+#                 continue
+#             # получаем предсказания
+#             seq_tensor = tensor(history)
+#             scores = model.score(seq_tensor).cpu().numpy()
+#             if scores.ndim == 2 and scores.shape[0] == 1:
+#                 scores = scores[0]   # из (1, n_items) в (n_items,)
+#             # downvote уже просмотренные айтемы (включая историю и target? target ещё не просмотрен)
+#             # для чистоты downvote только историю
+#             seen_items = set(history)
+#             # но в scores индексы айтемов, downvote через -np.inf
+#             for it in seen_items:
+#                 scores[it] = -np.inf
+#             # top-n
+#             top_idx = np.argpartition(scores, -topn)[-topn:]
+#             top_idx = top_idx[np.argsort(-scores[top_idx])]
+#             if target in top_idx[:topn]:
+#                 hits += 1
+#                 rank = np.where(top_idx == target)[0][0] + 1
+#                 reciprocal_ranks.append(1.0 / rank)
+#             else:
+#                 reciprocal_ranks.append(0.0)
+#             n_users += 1
+
+#     hr = hits / n_users if n_users > 0 else 0.0
+#     mrr = np.mean(reciprocal_ranks) if reciprocal_ranks else 0.0
+#     return hr, mrr

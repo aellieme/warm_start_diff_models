@@ -33,7 +33,7 @@ def main():
     }
 
     print("Training SASRec...")
-    model, losses = build_sasrec_model(config, train_data, val_data, data_description, patience=20)
+    model, losses = build_sasrec_model(config, train_data, val_data, data_description, patience=10)
 
     # Сохранение модели
     model_filename = generate_model_name(config, suffix='best')
