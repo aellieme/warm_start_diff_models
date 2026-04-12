@@ -145,17 +145,8 @@ def run_inference_pipeline(
     time_col,
     topn=10
 ):
+    start_time = time.perf_counter()   
     train_users = set(train_data[userid_col].unique())
-# def run_inference_pipeline(
-#     model,
-#     history_data,          # DataFrame с train (+adapt) взаимодействиями
-#     test_examples,         # DataFrame с колонками: userid, itemid (target), 'history' (list)
-#     data_description,
-#     userid_col,
-#     itemid_col,
-#     time_col,
-#     topn=10
-# ):
     history_sorted = history_data.sort_values([userid_col, time_col])
     # Получаем последовательности из history_data (train+adapt) в виде словаря {user: list}
     train_seq_dict = data_to_sequences(history_sorted, data_description)
@@ -204,7 +195,8 @@ def run_inference_pipeline(
     precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
         actual, predicted, topN_list, data_description['n_items']
     )
-    return recs, user_order, (precisions, recalls, ndcgs, mrrs, covs), 0.0  # время можно добавить
+    inference_time = time.perf_counter() - start_time
+    return recs, user_order, (precisions, recalls, ndcgs, mrrs, covs), inference_time  
 
 # def run_inference_pipeline(
 #     model,
@@ -354,7 +346,7 @@ def print_example_user(
     sasrec_recs,
     train_data,
     adapt_data,
-    test_last,
+    test_examples,
     data_index,
     data_description,
     userid_col,
@@ -385,7 +377,7 @@ def print_example_user(
 
     user_train = train_data[train_data[userid_col] == example_user].sort_values(time_col)
     user_adapt = adapt_data[adapt_data[userid_col] == example_user].sort_values(time_col)
-    user_holdout = test_last[test_last[userid_col] == example_user]
+    user_holdout = test_examples[test_examples[userid_col] == example_user]
 
     user_position = filtered_user_order.index(example_user)
     user_recs = sasrec_recs[user_position]
