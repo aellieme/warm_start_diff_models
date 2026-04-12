@@ -196,6 +196,7 @@ def run_inference_pipeline(
         actual, predicted, topN_list, data_description['n_items']
     )
     inference_time = time.perf_counter() - start_time
+    print(f"DEBUG: inference_time = {inference_time:.10f}")
     return recs, user_order, (precisions, recalls, ndcgs, mrrs, covs), inference_time  
 
 # def run_inference_pipeline(
