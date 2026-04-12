@@ -15,8 +15,8 @@ from model import save_sasrec_model, get_model_path, generate_model_name
 
 BASE_CONFIG = {
     'num_epochs': 500,
-    'tune_epochs': 80,
-    'patience': 5,
+    'tune_epochs': 30,
+    'patience': 3,
     'maxlen': 200,
     'hidden_units': 128,
     'dropout_rate': 0.5,
@@ -51,6 +51,7 @@ def train_and_evaluate(config, train_data, val_data, data_description, max_epoch
 
     best_hr = 0.0
     no_improve = 0
+    val_every = 2
 
     for epoch in range(max_epochs):
         train_sasrec_epoch(
@@ -63,7 +64,7 @@ def train_and_evaluate(config, train_data, val_data, data_description, max_epoch
             no_improve = 0
         else:
             no_improve += 1
-            if no_improve >= patience:
+            if no_improve * val_every >= patience:
                 break
     return best_hr
 
