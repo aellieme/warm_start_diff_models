@@ -157,20 +157,20 @@ def main():
     from load_evaluate_pipeline import run_inference_pipeline
 
     # Baseline (только train)
-    recs_baseline, users_baseline, metrics_baseline, _ = run_inference_pipeline(
+    recs_baseline, users_baseline, metrics_baseline, time_base = run_inference_pipeline(
         final_model, train_data, train_data, test_examples,
         data_description, userid_col, itemid_col, time_col, topn=10
     )
     prec, rec, ndcg, mrr, cov = metrics_baseline
-    print(f"Baseline (train only): HR@10={rec[0]:.4f}, MRR={mrr[0]:.4f}, NDCG={ndcg[0]:.4f}, Cov={cov[0]:.4f}")
+    print(f"Baseline (train only): Recall@10={rec[0]:.4f}, MRR={mrr[0]:.4f}, NDCG={ndcg[0]:.4f}, Cov={cov[0]:.4f}, Latency = {time_base:.4f}")
 
     # С адаптацией (train+adapt)
     inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
-    recs_adapt, users_adapt, metrics_adapt, _ = run_inference_pipeline(
+    recs_adapt, users_adapt, metrics_adapt, time = run_inference_pipeline(
         final_model, inference_history, train_data, test_examples,
         data_description, userid_col, itemid_col, time_col, topn=10
     )
     prec_a, rec_a, ndcg_a, mrr_a, cov_a = metrics_adapt
-    print(f"With adaptation: HR@10={rec_a[0]:.4f}, MRR={mrr_a[0]:.4f}, NDCG={ndcg_a[0]:.4f}, Cov={cov_a[0]:.4f}")
+    print(f"With adaptation: Recall@10={rec_a[0]:.4f}, MRR={mrr_a[0]:.4f}, NDCG={ndcg_a[0]:.4f}, Cov={cov_a[0]:.4f}, Latency = {time:.4f}")
 if __name__ == "__main__":
     main()
