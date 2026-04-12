@@ -74,8 +74,8 @@ def prepare_data_and_description():
         target_item = items[target_idx]
         # Входная последовательность — все элементы до target (включая из того же окна, но до цели)
         input_seq = items[:target_idx]
-        if len(input_seq) == 0:
-            continue
+        # if len(input_seq) == 0:
+        #     continue
 
         val_inputs.append(input_seq)
         val_targets.append(target_item)
@@ -109,9 +109,8 @@ def prepare_data_and_description():
             continue
         target = items[-1]                     # последнее взаимодействие в тесте
         history = items[:-1]                   # все предыдущие в тестовом окне
-        # можно дополнить историей из адаптации/трейна позже в run_inference_pipeline
-        if len(history) == 0:
-            continue                           # холодный старт – исключаем
+        # if len(history) == 0:
+        #     continue                           # холодный старт – исключаем
         test_examples.append({
             userid_col: uid,
             itemid_col: target,
@@ -136,14 +135,26 @@ def prepare_data_and_description():
  
 def run_inference_pipeline(
     model,
-    history_data,          # DataFrame с train (+adapt) взаимодействиями
-    test_examples,         # DataFrame с колонками: userid, itemid (target), 'history' (list)
+    history_data,
+    train_data,         
+    test_examples,
     data_description,
     userid_col,
     itemid_col,
     time_col,
     topn=10
 ):
+    train_users = set(train_data[userid_col].unique())
+# def run_inference_pipeline(
+#     model,
+#     history_data,          # DataFrame с train (+adapt) взаимодействиями
+#     test_examples,         # DataFrame с колонками: userid, itemid (target), 'history' (list)
+#     data_description,
+#     userid_col,
+#     itemid_col,
+#     time_col,
+#     topn=10
+# ):
     history_sorted = history_data.sort_values([userid_col, time_col])
     # Получаем последовательности из history_data (train+adapt) в виде словаря {user: list}
     from data_utils import data_to_sequences
@@ -160,6 +171,8 @@ def run_inference_pipeline(
     with torch.no_grad():
         for _, row in test_examples.iterrows():
             uid = row[userid_col]
+            if uid not in train_users:   # исключаем новых пользователей
+                continue
             target = row[itemid_col]
             test_history = row['history']   # список (уже индексы)
             # полная история = train/adapt история + тестовая история (до последнего)
