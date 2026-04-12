@@ -11,12 +11,14 @@ from load_evaluate_pipeline import (
 )
 
 def main():
-    (train_data, val_data, adapt_data, test_data, test_last,
-     data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
+    # (train_data, val_data, adapt_data, test_data, test_last,
+    #  data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
+    (train_data, val_data, adapt_data, test_data, test_examples,
+        data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
 
     print(f"Train: {len(train_data)}, Val: {len(val_data)}, "
           f"Adapt: {len(adapt_data)}, Test: {len(test_data)}, "
-          f"len test_last: {len(test_last)}")
+          f"len test_examples: {len(test_examples)}")
 
     config = {
         'num_epochs': 500,
@@ -44,7 +46,7 @@ def main():
     # Baseline 
     print("\nbaseline")
     recs, users, metrics, inf_time = run_inference_pipeline(
-        model, train_data, train_data, test_last,
+        model, train_data, train_data, test_examples,
         data_description, userid_col, itemid_col, time_col, topn=10
     )
     precisions, recalls, ndcgs, mrrs, covs = metrics
@@ -58,7 +60,7 @@ def main():
     print("\nadaptation")
     inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
     recs_adapt, users_adapt, metrics_adapt, inf_time_adapt = run_inference_pipeline(
-        model, inference_history, train_data, test_last,
+        model, inference_history, train_data, test_examples,
         data_description, userid_col, itemid_col, time_col, topn=10
     )
     precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a = metrics_adapt
@@ -72,7 +74,7 @@ def main():
     example_user = users_adapt[1]
     print_example_user(
         example_user, users_adapt, recs_adapt,
-        train_data, adapt_data, test_last,
+        train_data, adapt_data, test_examples,
         data_index, data_description,
         userid_col, itemid_col, time_col
     )

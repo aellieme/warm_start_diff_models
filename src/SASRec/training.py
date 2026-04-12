@@ -165,9 +165,12 @@ def validate_last_item(model, val_data, train_data, data_description, topn=10):
     model.eval()
     device = next(model.parameters()).device
     tensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
+    from data_utils import data_to_sequences   
 
     userid = data_description['users']
     itemid = data_description['items']
+
+    train_seq_dict = data_to_sequences(train_data, data_description)
 
     hits = 0
     reciprocal_ranks = []
@@ -177,17 +180,21 @@ def validate_last_item(model, val_data, train_data, data_description, topn=10):
         for _, row in val_data.iterrows():
             uid = row[userid]
             target = row[itemid]
-            history = row['history']   # список индексов item_id
-            if not history:
+            test_history = row['history']   # из future_data
+            # Полная история = train + future (до таргета)
+            full_history = train_seq_dict.get(uid, []) + test_history
+            if len(full_history) == 0:
+                continue
+            # Пользователь должен быть в train 
+            if uid not in train_seq_dict:
                 continue
 
-            seq_tensor = tensor(history)
+            seq_tensor = tensor(full_history)
             scores = model.score(seq_tensor).cpu().numpy()
             if scores.ndim == 2:
                 scores = scores[0]
 
-            # маскируем уже просмотренные
-            seen = set(history)
+            seen = set(full_history)
             for it in seen:
                 if it < len(scores):
                     scores[it] = -np.inf
@@ -206,6 +213,52 @@ def validate_last_item(model, val_data, train_data, data_description, topn=10):
     hr = hits / n_users if n_users > 0 else 0.0
     mrr = np.mean(reciprocal_ranks) if reciprocal_ranks else 0.0
     return hr, mrr
+
+# def validate_last_item(model, val_data, train_data, data_description, topn=10):
+#     model.eval()
+#     device = next(model.parameters()).device
+#     tensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
+
+#     userid = data_description['users']
+#     itemid = data_description['items']
+
+#     hits = 0
+#     reciprocal_ranks = []
+#     n_users = 0
+
+#     with torch.no_grad():
+#         for _, row in val_data.iterrows():
+#             uid = row[userid]
+#             target = row[itemid]
+#             history = row['history']   # список индексов item_id
+#             if not history:
+#                 continue
+
+#             seq_tensor = tensor(history)
+#             scores = model.score(seq_tensor).cpu().numpy()
+#             if scores.ndim == 2:
+#                 scores = scores[0]
+
+#             # маскируем уже просмотренные
+#             seen = set(history)
+#             for it in seen:
+#                 if it < len(scores):
+#                     scores[it] = -np.inf
+
+#             top_idx = np.argpartition(scores, -topn)[-topn:]
+#             top_idx = top_idx[np.argsort(-scores[top_idx])]
+
+#             if target in top_idx[:topn]:
+#                 hits += 1
+#                 rank = np.where(top_idx == target)[0][0] + 1
+#                 reciprocal_ranks.append(1.0 / rank)
+#             else:
+#                 reciprocal_ranks.append(0.0)
+#             n_users += 1
+
+#     hr = hits / n_users if n_users > 0 else 0.0
+#     mrr = np.mean(reciprocal_ranks) if reciprocal_ranks else 0.0
+#     return hr, mrr
 
 
 # def validate_last_item(model, val_data, train_data, data_description, topn=10):

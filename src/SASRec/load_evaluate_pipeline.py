@@ -94,13 +94,31 @@ def prepare_data_and_description():
 
     #  Тестовые примеры (последнее взаимодействие после T_test) 
     test_data = all_data_sorted[all_data_sorted[time_col] > T_test].copy()
-    test_last = (
-        test_data
-        .sort_values([userid_col, time_col])
-        .groupby(userid_col)
-        .last()
-        .reset_index()
-    )
+    # test_last = (
+    #     test_data
+    #     .sort_values([userid_col, time_col])
+    #     .groupby(userid_col)
+    #     .last()
+    #     .reset_index()
+    # )
+    test_examples = []
+    for uid, user_test in test_data.groupby(userid_col):
+        user_test = user_test.sort_values(time_col)
+        items = user_test[itemid_col].tolist()
+        if len(items) == 0:
+            continue
+        target = items[-1]                     # последнее взаимодействие в тесте
+        history = items[:-1]                   # все предыдущие в тестовом окне
+        # можно дополнить историей из адаптации/трейна позже в run_inference_pipeline
+        if len(history) == 0:
+            continue                           # холодный старт – исключаем
+        test_examples.append({
+            userid_col: uid,
+            itemid_col: target,
+            'history': history
+        })
+
+    test_examples_df = pd.DataFrame(test_examples)
 
     data_description = {
         'users': data_index['users'].name,
@@ -113,93 +131,150 @@ def prepare_data_and_description():
         'T_test': T_test,
     }
 
-    return (train_data, val_data, adapt_data, test_data, test_last,
+    return (train_data, val_data, adapt_data, test_data, test_examples_df,
             data_index, data_description, userid_col, itemid_col, time_col)
  
-
-
 def run_inference_pipeline(
     model,
-    history_data,
-    train_data,
-    test_last,
+    history_data,          # DataFrame с train (+adapt) взаимодействиями
+    test_examples,         # DataFrame с колонками: userid, itemid (target), 'history' (list)
     data_description,
     userid_col,
     itemid_col,
     time_col,
     topn=10
 ):
-    """
-    Выполняет инференс и оценкe для заданной исторической последовательности.
-
-    Параметры
-    ---------
-    model : torch.nn.Module
-        Обученная модель SASRec.
-    history_data : pd.DataFrame
-        DataFrame с историей взаимодействий, используемый для построения предсказаний.
-        Должен содержать колонки userid_col, itemid_col, time_col.
-    train_data : pd.DataFrame
-        Обучающая выборка (необходима для определения множества пользователей, присутствовавших в обучении).
-    test_last : pd.DataFrame
-        DataFrame с целевыми (последними) взаимодействиями для каждого пользователя.
-    data_description : dict
-        Метаданные датасета (из prepare_data_and_description).
-    userid_col : str
-    itemid_col : str
-    time_col : str
-    topn : int, default=10
-        Размер списка рекомендаций.
-
-    Returns
-    -------
-    sasrec_recs : np.ndarray
-        Матрица рекомендаций (num_users, topn) с индексами айтемов.
-    filtered_user_order : list
-        Список идентификаторов пользователей в порядке, соответствующем строкам sasrec_recs.
-    metrics : tuple
-        Кортеж (precisions, recalls, ndcgs, mrrs, covs), где каждый элемент — список метрик для topn=[10].
-    inference_time : float
-        Время выполнения инференса (в секундах) без учёта вычисления метрик.
-    """
-    # Сортируем историю для корректной работы модели
     history_sorted = history_data.sort_values([userid_col, time_col])
+    # Получаем последовательности из history_data (train+adapt) в виде словаря {user: list}
+    from data_utils import data_to_sequences
+    train_seq_dict = data_to_sequences(history_sorted, data_description)
 
-    start_time = time.perf_counter()
+    model.eval()
+    device = next(model.parameters()).device
+    tensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
 
-    # Получение скоров от модели
-    scores, user_order = sasrec_model_scoring(model, history_sorted, data_description)
+    scores_list = []
+    user_order = []
+    targets_list = []
 
-    # Подавление уже просмотренных айтемов
-    downvote_seen_items(scores, history_sorted, data_description)
+    with torch.no_grad():
+        for _, row in test_examples.iterrows():
+            uid = row[userid_col]
+            target = row[itemid_col]
+            test_history = row['history']   # список (уже индексы)
+            # полная история = train/adapt история + тестовая история (до последнего)
+            full_history = train_seq_dict.get(uid, []) + test_history
+            if len(full_history) == 0:
+                continue
+            seq_tensor = tensor(full_history)
+            scores = model.score(seq_tensor).cpu().numpy()
+            if scores.ndim == 2:
+                scores = scores[0]
+            # маскируем все просмотренные (full_history)
+            seen = set(full_history)
+            for it in seen:
+                if it < len(scores):
+                    scores[it] = -np.inf
+            scores_list.append(scores)
+            user_order.append(uid)
+            targets_list.append(target)
 
-    # Определяем пользователей, которые есть и в обучении, и в целевом наборе
-    train_users = set(train_data[userid_col].unique())
-    valid_users = set(test_last[userid_col].unique()).intersection(train_users)
+    if not scores_list:
+        return np.array([]), [], ([], [], [], [], []), 0.0
 
-    # Индексы пользователей в порядке user_order, удовлетворяющие условию
-    valid_indices = [i for i, u in enumerate(user_order) if u in valid_users]
-    scores = scores[valid_indices]
-    filtered_user_order = [user_order[i] for i in valid_indices]
-
-    # Упорядочиваем целевые взаимодействия в том же порядке
-    holdout_ordered = test_last.set_index(userid_col).loc[filtered_user_order].reset_index()
-
-    # Формируем top-n рекомендации
+    scores = np.stack(scores_list)
     recs = topn_recommendations(scores, topn=topn)
 
-    inference_time = time.perf_counter() - start_time
-
-    # Подготовка данных для метрик
-    actual = [[row] for row in holdout_ordered[itemid_col].values]
+    actual = [[t] for t in targets_list]
     predicted = recs.tolist()
     topN_list = [topn]
-
     precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
         actual, predicted, topN_list, data_description['n_items']
     )
+    return recs, user_order, (precisions, recalls, ndcgs, mrrs, covs), 0.0  # время можно добавить
 
-    return recs, filtered_user_order, (precisions, recalls, ndcgs, mrrs, covs), inference_time
+# def run_inference_pipeline(
+#     model,
+#     history_data,
+#     train_data,
+#     test_last,
+#     data_description,
+#     userid_col,
+#     itemid_col,
+#     time_col,
+#     topn=10
+# ):
+#     """
+#     Выполняет инференс и оценкe для заданной исторической последовательности.
+
+#     Параметры
+#     ---------
+#     model : torch.nn.Module
+#         Обученная модель SASRec.
+#     history_data : pd.DataFrame
+#         DataFrame с историей взаимодействий, используемый для построения предсказаний.
+#         Должен содержать колонки userid_col, itemid_col, time_col.
+#     train_data : pd.DataFrame
+#         Обучающая выборка (необходима для определения множества пользователей, присутствовавших в обучении).
+#     test_last : pd.DataFrame
+#         DataFrame с целевыми (последними) взаимодействиями для каждого пользователя.
+#     data_description : dict
+#         Метаданные датасета (из prepare_data_and_description).
+#     userid_col : str
+#     itemid_col : str
+#     time_col : str
+#     topn : int, default=10
+#         Размер списка рекомендаций.
+
+#     Returns
+#     -------
+#     sasrec_recs : np.ndarray
+#         Матрица рекомендаций (num_users, topn) с индексами айтемов.
+#     filtered_user_order : list
+#         Список идентификаторов пользователей в порядке, соответствующем строкам sasrec_recs.
+#     metrics : tuple
+#         Кортеж (precisions, recalls, ndcgs, mrrs, covs), где каждый элемент — список метрик для topn=[10].
+#     inference_time : float
+#         Время выполнения инференса (в секундах) без учёта вычисления метрик.
+#     """
+#     # Сортируем историю для корректной работы модели
+#     history_sorted = history_data.sort_values([userid_col, time_col])
+
+#     start_time = time.perf_counter()
+
+#     # Получение скоров от модели
+#     scores, user_order = sasrec_model_scoring(model, history_sorted, data_description)
+
+#     # Подавление уже просмотренных айтемов
+#     downvote_seen_items(scores, history_sorted, data_description)
+
+#     # Определяем пользователей, которые есть и в обучении, и в целевом наборе
+#     train_users = set(train_data[userid_col].unique())
+#     valid_users = set(test_last[userid_col].unique()).intersection(train_users)
+
+#     # Индексы пользователей в порядке user_order, удовлетворяющие условию
+#     valid_indices = [i for i, u in enumerate(user_order) if u in valid_users]
+#     scores = scores[valid_indices]
+#     filtered_user_order = [user_order[i] for i in valid_indices]
+
+#     # Упорядочиваем целевые взаимодействия в том же порядке
+#     holdout_ordered = test_last.set_index(userid_col).loc[filtered_user_order].reset_index()
+
+#     # Формируем top-n рекомендации
+#     recs = topn_recommendations(scores, topn=topn)
+
+#     inference_time = time.perf_counter() - start_time
+
+#     # Подготовка данных для метрик
+#     actual = [[row] for row in holdout_ordered[itemid_col].values]
+#     predicted = recs.tolist()
+#     topN_list = [topn]
+
+#     precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
+#         actual, predicted, topN_list, data_description['n_items']
+#     )
+
+#     return recs, filtered_user_order, (precisions, recalls, ndcgs, mrrs, covs), inference_time
 
 
 def load_movies_metadata(data_dir='../data/info'):
