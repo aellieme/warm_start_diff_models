@@ -29,16 +29,27 @@ BASE_CONFIG = {
     'manual_seed': 111,
 }
 
+
 SEARCH_SPACE = {
-    'maxlen': [50, 100, 200],
-    'hidden_units': [64, 128, 256],
-    'dropout_rate': [0.2, 0.5, 0.8],
-    'num_blocks': [1, 2, 3],
-    'num_heads': [1, 2, 4],
-    'batch_size': [64, 128, 256],
-    'learning_rate': [1e-4, 3e-4, 1e-3, 3e-3],
-    'l2_emb': [0.0, 1e-5, 1e-4, 1e-3],
+    'maxlen': [200],                     # зафиксировать, так как 200 уже максимальное
+    'hidden_units': [256, 384, 512],     # чуть выше, чтобы проверить, не лучше ли
+    'dropout_rate': [0.1, 0.2, 0.3],     # вокруг 0.2
+    'num_blocks': [2, 3],                # 2 было лучшим, проверим 3
+    'num_heads': [2, 4],                 # 2 было лучшим, проверим 4
+    'batch_size': [128, 256],            # 128 лучше, но проверим 256
+    'learning_rate': [5e-4, 1e-3, 2e-3], # вокруг 1e-3
+    'l2_emb': [5e-5, 1e-4, 5e-4],        # вокруг 1e-4
 }
+# SEARCH_SPACE = {
+#     'maxlen': [50, 100, 200],
+#     'hidden_units': [64, 128, 256],
+#     'dropout_rate': [0.2, 0.5, 0.8],
+#     'num_blocks': [1, 2, 3],
+#     'num_heads': [1, 2, 4],
+#     'batch_size': [64, 128, 256],
+#     'learning_rate': [1e-4, 3e-4, 1e-3, 3e-3],
+#     'l2_emb': [0.0, 1e-5, 1e-4, 1e-3],
+# }
 
 
 def train_and_evaluate(config, train_data, val_data, data_description, max_epochs, patience):
@@ -93,16 +104,28 @@ def main():
 
     print(f"Train: {len(train_data)}, Val: {len(val_data)}")
 
+    # study = optuna.create_study(direction='minimize', sampler=optuna.samplers.TPESampler(seed=42))
     study = optuna.create_study(
         direction='minimize',
         sampler=optuna.samplers.TPESampler(seed=42),
         pruner=optuna.pruners.MedianPruner()
     )
+    study.enqueue_trial({
+        'maxlen': 200,
+        'hidden_units': 256,
+        'dropout_rate': 0.2,
+        'num_blocks': 2,
+        'num_heads': 2,
+        'batch_size': 128,
+        'learning_rate': 0.001,
+        'l2_emb': 0.0001,
+    })
+    
     print("Оптимизация")
     study.optimize(
         lambda trial: objective(trial, train_data, val_data, data_description),
         timeout=3600,
-        n_trials=100,
+        n_trials=50,
         show_progress_bar=True
     )
 
@@ -130,5 +153,24 @@ def main():
     print(f"Модель сохранена: {model_path}")
 
 
+    print("\n Оценка финальной модели на тесте")
+    from load_evaluate_pipeline import run_inference_pipeline
+
+    # Baseline (только train)
+    recs_baseline, users_baseline, metrics_baseline, _ = run_inference_pipeline(
+        final_model, train_data, train_data, test_examples,
+        data_description, userid_col, itemid_col, time_col, topn=10
+    )
+    prec, rec, ndcg, mrr, cov = metrics_baseline
+    print(f"Baseline (train only): HR@10={rec[0]:.4f}, MRR={mrr[0]:.4f}, NDCG={ndcg[0]:.4f}, Cov={cov[0]:.4f}")
+
+    # С адаптацией (train+adapt)
+    inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
+    recs_adapt, users_adapt, metrics_adapt, _ = run_inference_pipeline(
+        final_model, inference_history, train_data, test_examples,
+        data_description, userid_col, itemid_col, time_col, topn=10
+    )
+    prec_a, rec_a, ndcg_a, mrr_a, cov_a = metrics_adapt
+    print(f"With adaptation: HR@10={rec_a[0]:.4f}, MRR={mrr_a[0]:.4f}, NDCG={ndcg_a[0]:.4f}, Cov={cov_a[0]:.4f}")
 if __name__ == "__main__":
     main()
