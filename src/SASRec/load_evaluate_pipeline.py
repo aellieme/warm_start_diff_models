@@ -5,10 +5,11 @@ import numpy as np
 import torch
 from polara import get_movielens_data
 
-from data_utils import transform_indices
+from data_utils import transform_indices, data_to_sequences
 from evaluate_metrics import downvote_seen_items, topn_recommendations
 from evaluate_topk_dp import compute_all_metrics
 from training import sasrec_model_scoring
+
 
 def prepare_data_and_description():
     """
@@ -157,7 +158,6 @@ def run_inference_pipeline(
 # ):
     history_sorted = history_data.sort_values([userid_col, time_col])
     # Получаем последовательности из history_data (train+adapt) в виде словаря {user: list}
-    from data_utils import data_to_sequences
     train_seq_dict = data_to_sequences(history_sorted, data_description)
 
     model.eval()
