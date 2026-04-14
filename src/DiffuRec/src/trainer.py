@@ -74,6 +74,33 @@ def LSHT_inference(model_joint, args, data_loader):
         test_metrics_dict_mean[key_temp] = values_mean
     print(test_metrics_dict_mean)
 
+def evaluate_and_print(model, data_loader, args, logger, description="evaluation"):
+    """ инференс на data_loader, выводит время и метрики @10"""
+    device = args.device
+    model.eval()
+    with torch.no_grad():
+        all_actual = []
+        all_predicted = []
+        start_time = time.time()
+        for batch in data_loader:
+            batch = [x.to(device) for x in batch]
+            _, rep_diffu, _, _, _, _ = model(batch[0], batch[1], train_flag=False)
+            scores = model.diffu_rep_pre(rep_diffu)
+            k_max = max(args.metric_ks)
+            _, topk = torch.topk(scores, k=k_max, dim=-1)
+            for i in range(len(batch[1])):
+                all_actual.append([batch[1][i].item()])
+                all_predicted.append(topk[i].cpu().tolist())
+        inference_time = time.time() - start_time
+        num_users = len(all_actual)
+        print(f"{description} inference time: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
+        logger.info(f"{description} inference time: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
+        
+        # метрики только для k=10
+        _, recalls, ndcgs, mrrs, covs = compute_all_metrics(all_actual, all_predicted, [10], args.item_num)
+        rec, nd, mrr, cov = recalls[0], ndcgs[0], mrrs[0], covs[0]
+        print(f"k=10: Recall={rec:.4f}, MRR={mrr:.4f}, NDCG={nd:.4f}, Coverage={cov:.4f}")
+        logger.info(f"k=10: Recall={rec:.4f}, MRR={mrr:.4f}, NDCG={nd:.4f}, Coverage={cov:.4f}")
 
 def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint, args, logger):
     epochs = args.epochs
@@ -244,96 +271,72 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
     # if args.eval_interval > epochs:
     #     best_model = copy.deepcopy(model_joint)
     
-    # Тестирование на лучшей модели
+    # # Тестирование на лучшей модели
     
-    top_100_item = []   # для diversity_measure, если нужно
-    with torch.no_grad():
-        all_actual = []
-        all_predicted = []
-        start_time = time.time()
-        for test_batch in test_data_loader:
-            test_batch = [x.to(device) for x in test_batch]
-            _, rep_diffu, _, _, _, _ = best_model(test_batch[0], test_batch[1], train_flag=False)
-            scores_rec_diffu = best_model.diffu_rep_pre(rep_diffu)
-            k_max = max(args.metric_ks)
-            _, topk_indices = torch.topk(scores_rec_diffu, k=k_max, dim=-1)
-            for i in range(len(test_batch[1])):
-                all_actual.append([test_batch[1][i].item()])
-                all_predicted.append(topk_indices[i].cpu().tolist())
-            # Для diversity_measure (если нужно) собираем top-100
-            if args.diversity_measure:
-                _, top100 = torch.topk(scores_rec_diffu, k=100, dim=-1)
-                top_100_item.append(top100.cpu())
-        inference_time = time.time() - start_time
-        num_users = len(all_actual)
-        print(f"Inference latency: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
-        logger.info(f"Inference latency: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
-        # Вычисляем метрики
-        precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
-            all_actual, all_predicted, args.metric_ks, args.item_num
-        )
-        test_metrics_dict_mean = {}
-        for k, rec, nd, mrr, cov in zip(args.metric_ks, recalls, ndcgs, mrrs, covs):
-            if k == 10:
-                test_metrics_dict_mean[f'Recall@{k}'] = round(rec, 4)
-                test_metrics_dict_mean[f'NDCG@{k}'] = round(nd, 4)
-                test_metrics_dict_mean[f'MRR@{k}'] = round(mrr, 4)
-                test_metrics_dict_mean[f'Coverage@{k}'] = round(cov, 4)
-
-        
-        print('Test------------------------------------------------------')
-        logger.info('Test------------------------------------------------------')
-        print(test_metrics_dict_mean)
-        logger.info(test_metrics_dict_mean)
-    # top_100_item = []
+    # top_100_item = []   # для diversity_measure, если нужно
     # with torch.no_grad():
-    #     test_metrics_dict = {'HR@5': [], 'NDCG@5': [], 'HR@10': [], 'NDCG@10': [], 'HR@20': [], 'NDCG@20': []}
-    #     test_metrics_dict_mean = {}
+    #     all_actual = []
+    #     all_predicted = []
+    #     start_time = time.time()
     #     for test_batch in test_data_loader:
     #         test_batch = [x.to(device) for x in test_batch]
-    #         scores_rec, rep_diffu, _, _, _, _ = best_model(test_batch[0], test_batch[1], train_flag=False)
-    #         scores_rec_diffu = best_model.diffu_rep_pre(rep_diffu)   ### Inner Production
-    #         # scores_rec_diffu = best_model.routing_rep_pre(rep_diffu)   ### routing
-            
-    #         _, indices = torch.topk(scores_rec_diffu, k=100)
-    #         top_100_item.append(indices)
+    #         _, rep_diffu, _, _, _, _ = best_model(test_batch[0], test_batch[1], train_flag=False)
+    #         scores_rec_diffu = best_model.diffu_rep_pre(rep_diffu)
+    #         k_max = max(args.metric_ks)
+    #         _, topk_indices = torch.topk(scores_rec_diffu, k=k_max, dim=-1)
+    #         for i in range(len(test_batch[1])):
+    #             all_actual.append([test_batch[1][i].item()])
+    #             all_predicted.append(topk_indices[i].cpu().tolist())
+    #         # Для diversity_measure (если нужно) собираем top-100
+        #     if args.diversity_measure:
+        #         _, top100 = torch.topk(scores_rec_diffu, k=100, dim=-1)
+        #         top_100_item.append(top100.cpu())
+        # inference_time = time.time() - start_time
+        # num_users = len(all_actual)
+        # print(f"Inference latency: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
+        # logger.info(f"Inference latency: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
+        # # Вычисляем метрики
+        # precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
+        #     all_actual, all_predicted, args.metric_ks, args.item_num
+        # )
+        # test_metrics_dict_mean = {}
+        # for k, rec, nd, mrr, cov in zip(args.metric_ks, recalls, ndcgs, mrrs, covs):
+        #     if k == 10:
+        #         test_metrics_dict_mean[f'Recall@{k}'] = round(rec, 4)
+        #         test_metrics_dict_mean[f'NDCG@{k}'] = round(nd, 4)
+        #         test_metrics_dict_mean[f'MRR@{k}'] = round(mrr, 4)
+        #         test_metrics_dict_mean[f'Coverage@{k}'] = round(cov, 4)
 
-    #         metrics = hrs_and_ndcgs_k(scores_rec_diffu, test_batch[1], metric_ks)
-    #         for k, v in metrics.items():
-    #             test_metrics_dict[k].append(v)
-    
-    # for key_temp, values_temp in test_metrics_dict.items():
-    #     values_mean = round(np.mean(values_temp) * 100, 4)
-    #     test_metrics_dict_mean[key_temp] = values_mean
-    # print('Test------------------------------------------------------')
-    # logger.info('Test------------------------------------------------------')
-    # print(test_metrics_dict_mean)
-    # logger.info(test_metrics_dict_mean)
-    # print('Best Eval---------------------------------------------------------')
-    # logger.info('Best Eval---------------------------------------------------------')
-    print(best_metrics_dict)
-    print(best_epoch)
+        
+        # print('Test------------------------------------------------------')
+        # logger.info('Test------------------------------------------------------')
+        # print(test_metrics_dict_mean)
+        # logger.info(test_metrics_dict_mean)
+
+
+    # print(best_metrics_dict)
+    # print(best_epoch)
     logger.info(best_metrics_dict)
     logger.info(best_epoch)
 
     print(args)
 
-    if args.diversity_measure:
-        path_data = '../datasets/data/category/' + args.dataset +'/id_category_dict.pkl'
-        with open(path_data, 'rb') as f:
-            id_category_dict = pickle.load(f)
-        id_top_100 = torch.cat(top_100_item, dim=0).tolist()
-        category_list_100 = []
-        for id_top_100_temp in id_top_100:
-            category_temp_list = [] 
-            for id_temp in id_top_100_temp:
-                category_temp_list.append(id_category_dict[id_temp])
-            category_list_100.append(category_temp_list)
-        category_list_100.append(category_list_100)
-        path_data_category = '../datasets/data/category/' + args.dataset +'/DiffuRec_top100_category.pkl'
-        with open(path_data_category, 'wb') as f:
-            pickle.dump(category_list_100, f)
+    # if args.diversity_measure:
+    #     path_data = '../datasets/data/category/' + args.dataset +'/id_category_dict.pkl'
+    #     with open(path_data, 'rb') as f:
+    #         id_category_dict = pickle.load(f)
+    #     id_top_100 = torch.cat(top_100_item, dim=0).tolist()
+    #     category_list_100 = []
+    #     for id_top_100_temp in id_top_100:
+    #         category_temp_list = [] 
+    #         for id_temp in id_top_100_temp:
+    #             category_temp_list.append(id_category_dict[id_temp])
+    #         category_list_100.append(category_temp_list)
+    #     category_list_100.append(category_list_100)
+    #     path_data_category = '../datasets/data/category/' + args.dataset +'/DiffuRec_top100_category.pkl'
+    #     with open(path_data_category, 'wb') as f:
+    #         pickle.dump(category_list_100, f)
             
 
-    return best_model, test_metrics_dict_mean
+    return best_model, None
     

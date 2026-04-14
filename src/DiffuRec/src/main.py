@@ -17,6 +17,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 
+from trainer import evaluate_and_print
 # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 
@@ -146,6 +147,8 @@ def load_and_split_gts(quantiles=(0.7, 0.8, 0.9)):
     """
     Global Temporal Split 
     """
+    val_all_seq = {}
+    adapt_seq = {}
     # 1. Загрузка MovieLens-1M с временными метками
     df = get_movielens_data(include_time=True) #, data_dir='../datasets/raw/ml-1m')
     
@@ -194,6 +197,8 @@ def load_and_split_gts(quantiles=(0.7, 0.8, 0.9)):
         
         # --- Тестовое окно (ts > T_test) ---
         val_window_all = [item for item, ts in zip(items, timestamps) if T_valid < ts <= T_adapt]
+        if val_window_all:
+            val_all_seq[uid] = val_window_all   
         test_window = [(item, ts) for item, ts in zip(items, timestamps) if ts > T_test]
         if test_window:
             target_item = test_window[-1][0]                     # последний в тестовом окне
@@ -201,6 +206,13 @@ def load_and_split_gts(quantiles=(0.7, 0.8, 0.9)):
             # полная входная последовательность: обучение + адаптация + тестовая история
             full_input = train_items + val_window_all + adapt_items + test_history
             test_examples[uid] = (full_input, [target_item])
+        
+
+        
+        # --- Адаптационная история ---
+        adapt_items = [item for item, ts in zip(items, timestamps) if T_adapt < ts <= T_test]
+        if adapt_items:
+            adapt_seq[uid] = adapt_items  
         
         # Сохраняем обучающую и адаптационную последовательности (для полноты)
         if train_items:
@@ -214,6 +226,7 @@ def load_and_split_gts(quantiles=(0.7, 0.8, 0.9)):
         if len(val_window) > 0:
             last_in_window = val_window.iloc[-1]['movieid']
             assert target[0] == last_in_window, f"!!Target mismatch for user {uid}"
+
     print("Validation targets are last items in window (ok)")
     # 6. Преобразование в формат, ожидаемый классами Data_Val и Data_Test
     # Для валидации: u2seq = полная входная последовательность, u2answer = цель
@@ -232,6 +245,8 @@ def load_and_split_gts(quantiles=(0.7, 0.8, 0.9)):
         # Дополнительные поля, чтобы Data_Val/Test могли восстановить полную историю
         'val_seq': val_u2seq,
         'test_seq': test_u2seq,
+        'val_all_seq': val_all_seq,
+        'adapt_seq': adapt_seq,
     }
     return data_raw
 
@@ -263,6 +278,28 @@ def main(args):
         'test': data_raw['test'],
         'smap': data_raw['smap']
         }
+    
+        # Создаём baseline-последовательности (без адаптации)
+    baseline_test_seq = {}
+    for uid in data_raw['test_seq'].keys():
+        full_seq = data_raw['test_seq'][uid]          # train + val_all + adapt + test_history
+        adapt_items = set(data_raw['adapt_seq'].get(uid, []))
+        # Удаляем адаптационные айтемы, сохраняя порядок
+        baseline_seq = [item for item in full_seq if item not in adapt_items]
+        baseline_test_seq[uid] = baseline_seq
+
+    data_raw_for_test_baseline = {
+        'train': baseline_test_seq,
+        'val': {uid: [] for uid in baseline_test_seq},   # пустые дополнительные истории
+        'test': data_raw['test'],
+        'smap': data_raw['smap']
+    }
+    baseline_test_data = Data_Test(data_raw_for_test_baseline['train'],
+                                data_raw_for_test_baseline['val'],
+                                data_raw_for_test_baseline['test'], args)
+    baseline_test_loader = baseline_test_data.get_pytorch_dataloaders()
+        
+    
     # cold_hot_long_short(data_raw, args.dataset)
     args = item_num_create(args, len(data_raw['smap']))
 
@@ -288,7 +325,10 @@ def main(args):
     rec_diffu_joint_model = Att_Diffuse_model(diffu_rec, args)
     
     best_model, test_results = model_train(tra_data_loader, val_data_loader, test_data_loader, rec_diffu_joint_model, args, logger)
-
+    # Baseline инференс
+    evaluate_and_print(best_model, baseline_test_loader, args, logger, description="baseline")
+    # Adaptation инференс (уже есть test_data_loader)
+    evaluate_and_print(best_model, test_data_loader, args, logger, description="adaptation")
 
     if args.long_head:
         cold_hot_dict, len_seq_dict, split_hotcold, split_length, list_len, list_num = cold_hot_long_short(data_raw, args.dataset)
