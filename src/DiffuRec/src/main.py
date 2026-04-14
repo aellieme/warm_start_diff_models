@@ -193,12 +193,13 @@ def load_and_split_gts(quantiles=(0.7, 0.8, 0.9)):
             val_examples[uid] = (full_input, [target_item])
         
         # --- Тестовое окно (ts > T_test) ---
+        val_window_all = [item for item, ts in zip(items, timestamps) if T_valid < ts <= T_adapt]
         test_window = [(item, ts) for item, ts in zip(items, timestamps) if ts > T_test]
         if test_window:
             target_item = test_window[-1][0]                     # последний в тестовом окне
             test_history = [item for item, _ in test_window[:-1]] # все до последнего
             # полная входная последовательность: обучение + адаптация + тестовая история
-            full_input = train_items + adapt_items + test_history
+            full_input = train_items + val_window_all + adapt_items + test_history
             test_examples[uid] = (full_input, [target_item])
         
         # Сохраняем обучающую и адаптационную последовательности (для полноты)
@@ -257,7 +258,8 @@ def main(args):
     # Для теста: история = test_seq, дополнительная история (u2seq_add) = пусто
     data_raw_for_test = {
         'train': data_raw['test_seq'],
-        'val': {},      # не используется
+        # 'val': data_raw['val']
+        'val': {uid: [] for uid in data_raw['test_seq']},
         'test': data_raw['test'],
         'smap': data_raw['smap']
         }
