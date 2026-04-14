@@ -149,10 +149,11 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
             # Формируем словарь для логирования (precision не нужен)
             metrics_dict = {}
             for k, rec, nd, mrr, cov in zip(topN_list, recalls, ndcgs, mrrs, covs):
-                metrics_dict[f'Recall@{k}'] = rec
-                metrics_dict[f'NDCG@{k}'] = nd
-                metrics_dict[f'MRR@{k}'] = mrr
-                metrics_dict[f'Coverage@{k}'] = cov
+                if k == 10:
+                    metrics_dict[f'Recall@{k}'] = rec
+                    metrics_dict[f'NDCG@{k}'] = nd
+                    metrics_dict[f'MRR@{k}'] = mrr
+                    metrics_dict[f'Coverage@{k}'] = cov
             
             # Обновление best_metrics_dict и early stopping 
             flag_update = 0
@@ -273,10 +274,12 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
         )
         test_metrics_dict_mean = {}
         for k, rec, nd, mrr, cov in zip(args.metric_ks, recalls, ndcgs, mrrs, covs):
-            test_metrics_dict_mean[f'Recall@{k}'] = round(rec * 100, 4)
-            test_metrics_dict_mean[f'NDCG@{k}'] = round(nd * 100, 4)
-            test_metrics_dict_mean[f'MRR@{k}'] = round(mrr * 100, 4)
-            test_metrics_dict_mean[f'Coverage@{k}'] = round(cov * 100, 4)
+            if k == 10:
+                test_metrics_dict_mean[f'Recall@{k}'] = round(rec, 4)
+                test_metrics_dict_mean[f'NDCG@{k}'] = round(nd, 4)
+                test_metrics_dict_mean[f'MRR@{k}'] = round(mrr, 4)
+                test_metrics_dict_mean[f'Coverage@{k}'] = round(cov, 4)
+
         
         print('Test------------------------------------------------------')
         logger.info('Test------------------------------------------------------')
