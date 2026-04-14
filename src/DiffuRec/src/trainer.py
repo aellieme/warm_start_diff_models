@@ -7,6 +7,8 @@ import copy
 import time
 import pickle
 
+from evaluate_topk_dp import compute_all_metrics
+
 
 def optimizers(model, args):
     if args.optimizer.lower() == 'adam':
@@ -83,8 +85,13 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
         model_joint = nn.DataParallel(model_joint)
     optimizer = optimizers(model_joint, args)
     lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.decay_step, gamma=args.gamma)
-    best_metrics_dict = {'Best_HR@5': 0, 'Best_NDCG@5': 0, 'Best_HR@10': 0, 'Best_NDCG@10': 0, 'Best_HR@20': 0, 'Best_NDCG@20': 0}
-    best_epoch = {'Best_epoch_HR@5': 0, 'Best_epoch_NDCG@5': 0, 'Best_epoch_HR@10': 0, 'Best_epoch_NDCG@10': 0, 'Best_epoch_HR@20': 0, 'Best_epoch_NDCG@20': 0}
+    
+    best_metrics_dict = {}      # будет заполняться динамически для всех метрик (логирование)
+    best_epoch = {}             # аналогично
+    best_recall10 = -1.0        # для early stopping
+    best_model = None
+    # best_metrics_dict = {'Best_HR@5': 0, 'Best_NDCG@5': 0, 'Best_HR@10': 0, 'Best_NDCG@10': 0, 'Best_HR@20': 0, 'Best_NDCG@20': 0}
+    # best_epoch = {'Best_epoch_HR@5': 0, 'Best_epoch_NDCG@5': 0, 'Best_epoch_HR@10': 0, 'Best_epoch_NDCG@10': 0, 'Best_epoch_HR@20': 0, 'Best_epoch_NDCG@20': 0}
     bad_count = 0
     
     for epoch_temp in range(epochs):        
@@ -113,71 +120,194 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
             print('start predicting: ', datetime.datetime.now())
             logger.info('start predicting: {}'.format(datetime.datetime.now()))
             model_joint.eval()
+            
+            # Собираем все предсказания и истинные метки по батчам
+            all_actual = []      # список списков (каждый список содержит целевой айтем)
+            all_predicted = []   # список списков индексов top‑k_max (k_max = max(metric_ks))
+            
             with torch.no_grad():
-                metrics_dict = {'HR@5': [], 'NDCG@5': [], 'HR@10': [], 'NDCG@10': [], 'HR@20': [], 'NDCG@20': []}
-                # metrics_dict_mean = {}
                 for val_batch in val_data_loader:
                     val_batch = [x.to(device) for x in val_batch]
-                    scores_rec, rep_diffu, _, _, _, _ = model_joint(val_batch[0], val_batch[1], train_flag=False)
-                    scores_rec_diffu = model_joint.diffu_rep_pre(rep_diffu)    ### inner_production
-                    # scores_rec_diffu = model_joint.routing_rep_pre(rep_diffu)   ### routing_rep_pre
-                    metrics = hrs_and_ndcgs_k(scores_rec_diffu, val_batch[1], metric_ks)
-                    for k, v in metrics.items():
-                        metrics_dict[k].append(v)
-                        
-            for key_temp, values_temp in metrics_dict.items():
-                values_mean = round(np.mean(values_temp) * 100, 4)
-                if values_mean > best_metrics_dict['Best_' + key_temp]:
-                    flag_update = 1
-                    bad_count = 0
-                    best_metrics_dict['Best_' + key_temp] = values_mean
-                    best_epoch['Best_epoch_' + key_temp] = epoch_temp
+                    _, rep_diffu, _, _, _, _ = model_joint(val_batch[0], val_batch[1], train_flag=False)
+                    scores_rec_diffu = model_joint.diffu_rep_pre(rep_diffu)   # [batch_size, num_items]
+                    # Получаем top‑k_max индексов для каждого пользователя в батче
+                    k_max = max(args.metric_ks)
+                    _, topk_indices = torch.topk(scores_rec_diffu, k=k_max, dim=-1)  # [batch_size, k_max]
                     
-            if flag_update == 0:
-                bad_count += 1
-            else:
+                    # Сохраняем
+                    for i in range(len(val_batch[1])):
+                        all_actual.append([val_batch[1][i].item()])
+                        all_predicted.append(topk_indices[i].cpu().tolist())
+            
+            # Вычисляем метрики
+            topN_list = args.metric_ks
+            n_items = args.item_num   # общее количество айтемов (без учёта padding)
+            precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
+                all_actual, all_predicted, topN_list, n_items
+            )
+            
+            # Формируем словарь для логирования (precision не нужен)
+            metrics_dict = {}
+            for k, rec, nd, mrr, cov in zip(topN_list, recalls, ndcgs, mrrs, covs):
+                metrics_dict[f'Recall@{k}'] = rec
+                metrics_dict[f'NDCG@{k}'] = nd
+                metrics_dict[f'MRR@{k}'] = mrr
+                metrics_dict[f'Coverage@{k}'] = cov
+            
+            # Обновление best_metrics_dict и early stopping 
+            flag_update = 0
+            # Обновление best_metrics_dict для логирования (все метрики)
+            for key_temp, values_temp in metrics_dict.items():
+                if 'Best_' + key_temp not in best_metrics_dict or values_temp > best_metrics_dict['Best_' + key_temp]:
+                    best_metrics_dict['Best_' + key_temp] = values_temp
+                    best_epoch['Best_epoch_' + key_temp] = epoch_temp
+
+            # Early stopping только по recall@10
+            recall10 = metrics_dict.get('Recall@10', 0.0)
+            if recall10 > best_recall10:
+                best_recall10 = recall10
+                bad_count = 0
+                best_model = copy.deepcopy(model_joint)
+                print(f"New best recall@10: {recall10:.4f}")
+                # Также выводим все лучшие метрики
                 print(best_metrics_dict)
                 print(best_epoch)
                 logger.info(best_metrics_dict)
                 logger.info(best_epoch)
-                best_model = copy.deepcopy(model_joint)
+            else:
+                bad_count += 1
+
             if bad_count >= args.patience:
                 break
+            # for key_temp, values_temp in metrics_dict.items():
+            #     values_mean = values_temp  # уже число
+            #     if values_mean > best_metrics_dict.get('Best_' + key_temp, -1):
+            #         flag_update = 1
+            #         bad_count = 0
+            #         best_metrics_dict['Best_' + key_temp] = values_mean
+            #         best_epoch['Best_epoch_' + key_temp] = epoch_temp
+            
+            # if flag_update == 0:
+            #     bad_count += 1
+            # else:
+            #     print(best_metrics_dict)
+            #     print(best_epoch)
+            #     logger.info(best_metrics_dict)
+            #     logger.info(best_epoch)
+            #     best_model = copy.deepcopy(model_joint)
+            
+            # if bad_count >= args.patience:
+            #     break
+        
+        # if epoch_temp != 0 and epoch_temp % args.eval_interval == 0:
+        #     print('start predicting: ', datetime.datetime.now())
+        #     logger.info('start predicting: {}'.format(datetime.datetime.now()))
+        #     model_joint.eval()
+        #     with torch.no_grad():
+        #         metrics_dict = {'HR@5': [], 'NDCG@5': [], 'HR@10': [], 'NDCG@10': [], 'HR@20': [], 'NDCG@20': []}
+        #         # metrics_dict_mean = {}
+        #         for val_batch in val_data_loader:
+        #             val_batch = [x.to(device) for x in val_batch]
+        #             scores_rec, rep_diffu, _, _, _, _ = model_joint(val_batch[0], val_batch[1], train_flag=False)
+        #             scores_rec_diffu = model_joint.diffu_rep_pre(rep_diffu)    ### inner_production
+        #             # scores_rec_diffu = model_joint.routing_rep_pre(rep_diffu)   ### routing_rep_pre
+        #             metrics = hrs_and_ndcgs_k(scores_rec_diffu, val_batch[1], metric_ks)
+        #             for k, v in metrics.items():
+        #                 metrics_dict[k].append(v)
+                        
+        #     for key_temp, values_temp in metrics_dict.items():
+        #         values_mean = round(np.mean(values_temp) * 100, 4)
+        #         if values_mean > best_metrics_dict['Best_' + key_temp]:
+        #             flag_update = 1
+        #             bad_count = 0
+        #             best_metrics_dict['Best_' + key_temp] = values_mean
+        #             best_epoch['Best_epoch_' + key_temp] = epoch_temp
+                    
+        #     if flag_update == 0:
+        #         bad_count += 1
+        #     else:
+        #         print(best_metrics_dict)
+        #         print(best_epoch)
+        #         logger.info(best_metrics_dict)
+        #         logger.info(best_epoch)
+        #         best_model = copy.deepcopy(model_joint)
+        #     if bad_count >= args.patience:
+        #         break
             
     
     logger.info(best_metrics_dict)
     logger.info(best_epoch)
-        
-    if args.eval_interval > epochs:
+    # Гарантируем, что best_model не None (если улучшений не было, берём последнюю модель)
+    if best_model is None:
         best_model = copy.deepcopy(model_joint)
+    # if args.eval_interval > epochs:
+    #     best_model = copy.deepcopy(model_joint)
     
+    # Тестирование на лучшей модели
     
-    top_100_item = []
+    top_100_item = []   # для diversity_measure, если нужно
     with torch.no_grad():
-        test_metrics_dict = {'HR@5': [], 'NDCG@5': [], 'HR@10': [], 'NDCG@10': [], 'HR@20': [], 'NDCG@20': []}
-        test_metrics_dict_mean = {}
+        all_actual = []
+        all_predicted = []
+        start_time = time.time()
         for test_batch in test_data_loader:
             test_batch = [x.to(device) for x in test_batch]
-            scores_rec, rep_diffu, _, _, _, _ = best_model(test_batch[0], test_batch[1], train_flag=False)
-            scores_rec_diffu = best_model.diffu_rep_pre(rep_diffu)   ### Inner Production
-            # scores_rec_diffu = best_model.routing_rep_pre(rep_diffu)   ### routing
+            _, rep_diffu, _, _, _, _ = best_model(test_batch[0], test_batch[1], train_flag=False)
+            scores_rec_diffu = best_model.diffu_rep_pre(rep_diffu)
+            k_max = max(args.metric_ks)
+            _, topk_indices = torch.topk(scores_rec_diffu, k=k_max, dim=-1)
+            for i in range(len(test_batch[1])):
+                all_actual.append([test_batch[1][i].item()])
+                all_predicted.append(topk_indices[i].cpu().tolist())
+            # Для diversity_measure (если нужно) собираем top-100
+            if args.diversity_measure:
+                _, top100 = torch.topk(scores_rec_diffu, k=100, dim=-1)
+                top_100_item.append(top100.cpu())
+        inference_time = time.time() - start_time
+        num_users = len(all_actual)
+        print(f"Inference latency: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
+        logger.info(f"Inference latency: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
+        # Вычисляем метрики
+        precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
+            all_actual, all_predicted, args.metric_ks, args.item_num
+        )
+        test_metrics_dict_mean = {}
+        for k, rec, nd, mrr, cov in zip(args.metric_ks, recalls, ndcgs, mrrs, covs):
+            test_metrics_dict_mean[f'Recall@{k}'] = round(rec * 100, 4)
+            test_metrics_dict_mean[f'NDCG@{k}'] = round(nd * 100, 4)
+            test_metrics_dict_mean[f'MRR@{k}'] = round(mrr * 100, 4)
+            test_metrics_dict_mean[f'Coverage@{k}'] = round(cov * 100, 4)
+        
+        print('Test------------------------------------------------------')
+        logger.info('Test------------------------------------------------------')
+        print(test_metrics_dict_mean)
+        logger.info(test_metrics_dict_mean)
+    # top_100_item = []
+    # with torch.no_grad():
+    #     test_metrics_dict = {'HR@5': [], 'NDCG@5': [], 'HR@10': [], 'NDCG@10': [], 'HR@20': [], 'NDCG@20': []}
+    #     test_metrics_dict_mean = {}
+    #     for test_batch in test_data_loader:
+    #         test_batch = [x.to(device) for x in test_batch]
+    #         scores_rec, rep_diffu, _, _, _, _ = best_model(test_batch[0], test_batch[1], train_flag=False)
+    #         scores_rec_diffu = best_model.diffu_rep_pre(rep_diffu)   ### Inner Production
+    #         # scores_rec_diffu = best_model.routing_rep_pre(rep_diffu)   ### routing
             
-            _, indices = torch.topk(scores_rec_diffu, k=100)
-            top_100_item.append(indices)
+    #         _, indices = torch.topk(scores_rec_diffu, k=100)
+    #         top_100_item.append(indices)
 
-            metrics = hrs_and_ndcgs_k(scores_rec_diffu, test_batch[1], metric_ks)
-            for k, v in metrics.items():
-                test_metrics_dict[k].append(v)
+    #         metrics = hrs_and_ndcgs_k(scores_rec_diffu, test_batch[1], metric_ks)
+    #         for k, v in metrics.items():
+    #             test_metrics_dict[k].append(v)
     
-    for key_temp, values_temp in test_metrics_dict.items():
-        values_mean = round(np.mean(values_temp) * 100, 4)
-        test_metrics_dict_mean[key_temp] = values_mean
-    print('Test------------------------------------------------------')
-    logger.info('Test------------------------------------------------------')
-    print(test_metrics_dict_mean)
-    logger.info(test_metrics_dict_mean)
-    print('Best Eval---------------------------------------------------------')
-    logger.info('Best Eval---------------------------------------------------------')
+    # for key_temp, values_temp in test_metrics_dict.items():
+    #     values_mean = round(np.mean(values_temp) * 100, 4)
+    #     test_metrics_dict_mean[key_temp] = values_mean
+    # print('Test------------------------------------------------------')
+    # logger.info('Test------------------------------------------------------')
+    # print(test_metrics_dict_mean)
+    # logger.info(test_metrics_dict_mean)
+    # print('Best Eval---------------------------------------------------------')
+    # logger.info('Best Eval---------------------------------------------------------')
     print(best_metrics_dict)
     print(best_epoch)
     logger.info(best_metrics_dict)
