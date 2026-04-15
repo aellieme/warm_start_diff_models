@@ -129,8 +129,8 @@ def main():
     final_args = Namespace(**vars(base_args))
     for key, value in best_params.items():
         setattr(final_args, key, value)
-    final_args.epochs = 500
-    final_args.eval_interval = 20
+    final_args.epochs = 60
+    final_args.eval_interval = 10
     final_args.patience = 5
 
     tra_data_final = Data_Train(data_raw['train'], final_args)
