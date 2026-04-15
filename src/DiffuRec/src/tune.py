@@ -37,7 +37,7 @@ def compute_recall10_on_validation(model, val_loader, args):
 
 def objective(trial, base_args, data_raw):
     lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
-    batch_size = trial.suggest_categorical('batch_size', [256, 512, 1024])
+    batch_size = trial.suggest_categorical('batch_size', [512, 1024])
     hidden_size = trial.suggest_categorical('hidden_size', [64, 128, 256])
     dropout = trial.suggest_float('dropout', 0.1, 0.5)
     emb_dropout = trial.suggest_float('emb_dropout', 0.1, 0.5)
@@ -104,7 +104,7 @@ def main():
         metric_ks=[10],
         eval_interval=20,
         patience=5,
-        epochs=60,
+        epochs=40,
         description='Diffu_norm_score',
         long_head=False,
         diversity_measure=False,
@@ -129,7 +129,7 @@ def main():
     final_args = Namespace(**vars(base_args))
     for key, value in best_params.items():
         setattr(final_args, key, value)
-    final_args.epochs = 60
+    final_args.epochs = 40
     final_args.eval_interval = 10
     final_args.patience = 5
 
@@ -160,5 +160,11 @@ def main():
     evaluate_and_print(best_model_final, baseline_loader, final_args, logger, description="baseline")
     evaluate_and_print(best_model_final, test_loader_final, final_args, logger, description="adaptation")
 
+    print("\nFinal hyperparameters used in training")
+    for key in ['lr', 'batch_size', 'hidden_size', 'dropout', 'emb_dropout', 'num_blocks', 
+                'diffusion_steps', 'lambda_uncertainty', 'noise_schedule', 'schedule_sampler_name',
+                'epochs', 'eval_interval', 'patience']:
+        print(f"{key}: {getattr(final_args, key)}")
+    
 if __name__ == '__main__':
     main()
