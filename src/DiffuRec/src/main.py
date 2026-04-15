@@ -22,7 +22,7 @@ from trainer import evaluate_and_print
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', default='amazon_beauty', help='Dataset name: toys, amazon_beauty, steam, ml-1m')
+parser.add_argument('--dataset', default='ml-1m', help='Dataset name: toys, amazon_beauty, steam, ml-1m')
 parser.add_argument('--log_file', default='log/', help='log dir path')
 parser.add_argument('--random_seed', type=int, default=1997, help='Random seed')  
 parser.add_argument('--max_len', type=int, default=50, help='The max length of sequence')
@@ -34,7 +34,7 @@ parser.add_argument('--dropout', type=float, default=0.1, help='Dropout of repre
 parser.add_argument('--emb_dropout', type=float, default=0.3, help='Dropout of item embedding')
 parser.add_argument("--hidden_act", default="gelu", type=str) # gelu relu
 parser.add_argument('--num_blocks', type=int, default=4, help='Number of Transformer blocks')
-parser.add_argument('--epochs', type=int, default=500, help='Number of epochs for training')  ## 500
+parser.add_argument('--epochs', type=int, default=60, help='Number of epochs for training')  ## 500
 parser.add_argument('--decay_step', type=int, default=100, help='Decay step for StepLR')
 parser.add_argument('--gamma', type=float, default=0.1, help='Gamma for StepLR')
 parser.add_argument('--metric_ks', nargs='+', type=int, default=[5, 10, 20], help='ks for Metric@k')

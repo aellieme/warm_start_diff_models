@@ -58,7 +58,7 @@ def objective(trial, base_args, data_raw):
     args.lambda_uncertainty = lambda_uncertainty
     args.noise_schedule = noise_schedule
     args.schedule_sampler_name = schedule_sampler_name
-    args.epochs = 20
+    args.epochs = 7
     args.eval_interval = 5
     args.patience = 3
 
@@ -104,7 +104,7 @@ def main():
         metric_ks=[10],
         eval_interval=20,
         patience=5,
-        epochs=500,
+        epochs=60,
         description='Diffu_norm_score',
         long_head=False,
         diversity_measure=False,
