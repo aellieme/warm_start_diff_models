@@ -11,7 +11,7 @@ from training import (
     validate_last_item,
 )
 from model import save_sasrec_model, get_model_path, generate_model_name
-
+from load_evaluate_pipeline import run_inference_pipeline
 
 BASE_CONFIG = {
     'num_epochs': 500,
@@ -99,9 +99,10 @@ def objective(trial, train_data, val_data, data_description):
 
 
 def main():
-    (train_data, val_data, adapt_data, test_data, test_examples,
-     data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
-
+    # (train_data, val_data, adapt_data, test_data, test_examples,
+    #  data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
+    (train_data, val_data, adapt_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col,
+        val_seq_dict) = prepare_data_and_description()
     print(f"Train: {len(train_data)}, Val: {len(val_data)}")
 
     # study = optuna.create_study(direction='minimize', sampler=optuna.samplers.TPESampler(seed=42))
@@ -154,12 +155,11 @@ def main():
 
 
     print("\n Оценка финальной модели на тесте")
-    from load_evaluate_pipeline import run_inference_pipeline
 
     # Baseline (только train)
     recs_baseline, users_baseline, metrics_baseline, time_base = run_inference_pipeline(
         final_model, train_data, train_data, test_examples,
-        data_description, userid_col, itemid_col, time_col, topn=10
+        data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
     )
     prec, rec, ndcg, mrr, cov = metrics_baseline
     print(f"Baseline (train only): Recall@10={rec[0]:.4f}, MRR={mrr[0]:.4f}, NDCG={ndcg[0]:.4f}, Cov={cov[0]:.4f}, Latency = {time_base:.4f}")
@@ -168,7 +168,7 @@ def main():
     inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
     recs_adapt, users_adapt, metrics_adapt, time = run_inference_pipeline(
         final_model, inference_history, train_data, test_examples,
-        data_description, userid_col, itemid_col, time_col, topn=10
+        data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
     )
     prec_a, rec_a, ndcg_a, mrr_a, cov_a = metrics_adapt
     print(f"With adaptation: Recall@10={rec_a[0]:.4f}, MRR={mrr_a[0]:.4f}, NDCG={ndcg_a[0]:.4f}, Cov={cov_a[0]:.4f}, Latency = {time:.4f}")

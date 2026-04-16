@@ -39,6 +39,14 @@ def prepare_data_and_description():
 
     #  Данные после T_valid (для валидации, адаптации, теста) 
     future_data = all_data_sorted[all_data_sorted[time_col] > T_valid].copy()
+    
+    val_window_data = future_data[future_data[time_col] <= T_adapt].copy()
+    val_seq_dict = (
+        val_window_data.sort_values([userid_col, time_col])
+        .groupby(userid_col)[itemid_col].apply(list)
+        .to_dict()
+    )
+    
 
     # Валидационные примеры (цель — последнее взаимодействие до T_adapt)
     val_inputs, val_targets, val_users = [], [], []
@@ -107,9 +115,13 @@ def prepare_data_and_description():
         'T_adapt': T_adapt,
         'T_test': T_test,
     }
-
+    
     return (train_data, val_data, adapt_data, test_data, test_examples_df,
-            data_index, data_description, userid_col, itemid_col, time_col)
+        data_index, data_description, userid_col, itemid_col, time_col,
+        val_seq_dict)
+    # return (train_data, val_data, adapt_data, test_data, test_examples_df,
+            # data_index, data_description, userid_col, itemid_col, time_col)
+ 
  
 def run_inference_pipeline(
     model,
@@ -120,8 +132,20 @@ def run_inference_pipeline(
     userid_col,
     itemid_col,
     time_col,
+    val_seq_dict,      # новый аргумент
     topn=10
 ):
+# def run_inference_pipeline(
+#     model,
+#     history_data,
+#     train_data,         
+#     test_examples,
+#     data_description,
+#     userid_col,
+#     itemid_col,
+#     time_col,
+#     topn=10
+# ):
     start_time = time.perf_counter()   
     train_users = set(train_data[userid_col].unique())
     history_sorted = history_data.sort_values([userid_col, time_col])
@@ -144,7 +168,11 @@ def run_inference_pipeline(
             target = row[itemid_col]
             test_history = row['history']   
             # полная история = train/adapt  + тест до таргета
-            full_history = train_seq_dict.get(uid, []) + test_history
+            # Полная история = train/adapt (из history_data) + валидационные + тестовые (до цели)
+            train_history = train_seq_dict.get(uid, [])
+            val_history = val_seq_dict.get(uid, [])
+            full_history = train_history + val_history + test_history
+            # full_history = train_seq_dict.get(uid, []) + test_history
             if len(full_history) == 0:
                 continue
             seq_tensor = tensor(full_history)

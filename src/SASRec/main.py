@@ -13,8 +13,10 @@ from load_evaluate_pipeline import (
 def main():
     # (train_data, val_data, adapt_data, test_data, test_last,
     #  data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
-    (train_data, val_data, adapt_data, test_data, test_examples,
-        data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
+    (train_data, val_data, adapt_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col,
+        val_seq_dict) = prepare_data_and_description()
+    # (train_data, val_data, adapt_data, test_data, test_examples,
+    #     data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
 
     print(f"Train: {len(train_data)}, Val: {len(val_data)}, "
           f"Adapt: {len(adapt_data)}, Test: {len(test_data)}, "
@@ -47,7 +49,7 @@ def main():
     print("\nbaseline")
     recs, users, metrics, inf_time = run_inference_pipeline(
         model, train_data, train_data, test_examples,
-        data_description, userid_col, itemid_col, time_col, topn=10
+        data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
     )
     precisions, recalls, ndcgs, mrrs, covs = metrics
 
@@ -61,7 +63,7 @@ def main():
     inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
     recs_adapt, users_adapt, metrics_adapt, inf_time_adapt = run_inference_pipeline(
         model, inference_history, train_data, test_examples,
-        data_description, userid_col, itemid_col, time_col, topn=10
+        data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
     )
     precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a = metrics_adapt
 
