@@ -60,7 +60,7 @@ def objective(trial, base_args, dataset, device):
     })
     # Обновляем world.config 
     world.config.update(config)
-    world.TRAIN_epochs = 100  
+    world.TRAIN_epochs = 20 
 
     out_dims = eval(base_args.dims) + [base_args.recdim]
     in_dims = out_dims[::-1]
