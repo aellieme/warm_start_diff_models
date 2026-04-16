@@ -22,7 +22,8 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 from transformers import GPT2Config, GPT2LMHeadModel, BertConfig, BertModel
 
-from datasets import CausalLMDataset, CausalLMPredictionDataset, PaddingCollateFn, MaskedLMDataset, MaskedLMPredictionDataset
+from datasets import CausalLMDataset, CausalLMPredictionDataset, PaddingCollateFn, MaskedLMDataset, MaskedLMPredictionDataset, LastEvaluationDataset
+# from datasets import CausalLMDataset, CausalLMPredictionDataset, PaddingCollateFn, MaskedLMDataset, MaskedLMPredictionDataset
 from metrics import Evaluator
 from modules import SeqRecHuggingface, SeqRec
 from models import SASRec, BERT4Rec
@@ -50,8 +51,8 @@ def main(config):
     #     task = None
 
     # train, validation, validation_full, test, item_count = prepare_data(config)
-    train, validation, validation_full, adapt, test, item_count = prepare_data(config)
-    train_loader, eval_loader = create_dataloaders(train, validation_full, config)
+    train, validation, adapt, test, item_count = prepare_data(config)
+    train_loader, eval_loader = create_dataloaders(train, validation, config)
     model = create_model(config, item_count=item_count)
     start_time = time.time()
     trainer, seqrec_module = training(model, train_loader, eval_loader, config)
@@ -60,21 +61,29 @@ def main(config):
 
     if config.test_metrics:
         start_time_inf = time.perf_counter()
-        recs = predict(trainer, seqrec_module, train, config)
+        recs = predict(trainer, seqrec_module, train, config, test_data=test, last_evaluation=True)
+        # recs = predict(trainer, seqrec_module, train, config)
         baseline_latency = time.perf_counter() - start_time_inf
     else:
         start_time_inf = time.perf_counter()
-        recs = predict(trainer, seqrec_module, train[train.user_id.isin(validation.user_id.unique())], config)
+        # recs = predict(trainer, seqrec_module, train[train.user_id.isin(validation.user_id.unique())], config,last_evaluation=True )
+        recs = predict(trainer, seqrec_module, train[train.user_id.isin(validation.user_id.unique())], config, test_data=validation, last_evaluation=True)
+        val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
+        evaluate(recs, val_last, train, config, prefix='val_last')
         baseline_latency = time.perf_counter() - start_time_inf
     
     if hasattr(config, 'optuna_metrics'):
-        val_metrics = evaluate(recs, validation[validation.time_idx == 0], train,  config, prefix='val')
+        # val_metrics = evaluate(recs, validation[validation.time_idx == 0], train,  config, prefix='val')
+        val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
+        val_metrics = evaluate(recs, val_last, train, config, prefix='val_last')
         return val_metrics[val_metrics['metric_name'] == config.optuna_metrics]['metric_value'].values
     else:
         evaluate(recs, validation, train,  config, prefix='val')
         
     if config.test_metrics:
-        metrics_baseline = evaluate(recs, test, train,  config, prefix='test')
+        # metrics_baseline = evaluate(recs, test, train,  config, prefix='test')
+        test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
+        metrics_baseline = evaluate(recs, test_last, train, config, prefix='test_last')
         
         if adapt is not None and len(adapt) > 0: #адаптация
             print("\nStarting adaptation\n")
@@ -85,25 +94,42 @@ def main(config):
             
             start_time_adapt = time.perf_counter()
             #генерируем рекомендации на основе обновл истории
-            recs_adapt = predict(trainer, seqrec_module, train_adapt, config)
+            # recs_adapt = predict(trainer, seqrec_module, train_adapt, config, last_evaluation=True)
+            recs_adapt = predict(trainer, seqrec_module, train_adapt, config, test_data=test, last_evaluation=True)
             adapt_latency = time.perf_counter() - start_time_adapt
             
             #оцениваем на тех же тестовых данных
             print("\nAdaptation metrics on test")
-            metrics_adapt = evaluate(recs_adapt, test, train_adapt, config, prefix='test_adapt')
+            # metrics_adapt = evaluate(recs_adapt, test, train_adapt, config, prefix='test_adapt')
+            metrics_adapt = evaluate(recs_adapt, test_last, train_adapt, config, prefix='test_adapt_last')
             
+            
+            baseline_prefix = 'test_last_' if config.get('test_metrics', True) else 'val_last_'
             summary = {
-            'Recall@10 (Baseline)': metrics_baseline.get('test_recall@10', 0),
-            'NDCG@10 (Baseline)': metrics_baseline.get('test_ndcg@10', 0),
-            'Coverage (Baseline)': metrics_baseline.get('test_coverage@10', 0),
-            'MRR (Baseline)': metrics_baseline.get('test_mrr@10', 0),
-            'Recall (adaptation)': metrics_adapt.get('test_adapt_recall@10', 0),
-            'NDCG (adaptation)': metrics_adapt.get('test_adapt_ndcg@10', 0),
-            'Coverage (adaptation)': metrics_adapt.get('test_adapt_coverage@10', 0),
-            'MRR (adaptation)': metrics_adapt.get('test_adapt_mrr@10', 0),
-            'Latency (baseline, s)': baseline_latency,
-            'Latency (adaptation, s)': adapt_latency,
+                f'Recall@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}recall@10', 0),
+                f'NDCG@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}ndcg@10', 0),
+                f'Coverage (Baseline)': metrics_baseline.get(f'{baseline_prefix}coverage@10', 0),
+                f'MRR (Baseline)': metrics_baseline.get(f'{baseline_prefix}mrr@10', 0),
+                'Recall (adaptation)': metrics_adapt.get('test_adapt_last_recall@10', 0),
+                'NDCG (adaptation)': metrics_adapt.get('test_adapt_last_ndcg@10', 0),
+                'Coverage (adaptation)': metrics_adapt.get('test_adapt_last_coverage@10', 0),
+                'MRR (adaptation)': metrics_adapt.get('test_adapt_last_mrr@10', 0),
+                'Latency (baseline, s)': baseline_latency,
+                'Latency (adaptation, s)': adapt_latency,
             }
+            
+            # summary = {
+            # 'Recall@10 (Baseline)': metrics_baseline.get('test_recall@10', 0),
+            # 'NDCG@10 (Baseline)': metrics_baseline.get('test_ndcg@10', 0),
+            # 'Coverage (Baseline)': metrics_baseline.get('test_coverage@10', 0),
+            # 'MRR (Baseline)': metrics_baseline.get('test_mrr@10', 0),
+            # 'Recall (adaptation)': metrics_adapt.get('test_adapt_recall@10', 0),
+            # 'NDCG (adaptation)': metrics_adapt.get('test_adapt_ndcg@10', 0),
+            # 'Coverage (adaptation)': metrics_adapt.get('test_adapt_coverage@10', 0),
+            # 'MRR (adaptation)': metrics_adapt.get('test_adapt_mrr@10', 0),
+            # 'Latency (baseline, s)': baseline_latency,
+            # 'Latency (adaptation, s)': adapt_latency,
+            # }
 
             summary_df = pd.DataFrame([summary])
             print(summary_df.to_string(index=False))
@@ -157,7 +183,8 @@ def prepare_data(config):
     item_count = data.item_id.max()
     print(f'item count {item_count}')
 
-    return train, validation, validation_full, adapt, test, item_count
+    return train, validation, adapt, test, item_count
+    # return train, validation, validation_full, adapt, test, item_count
 
 
 def create_dataloaders(train, validation, config):
@@ -175,14 +202,27 @@ def create_dataloaders(train, validation, config):
     validation = validation[validation.user_id.isin(users_with_enough)]
     
     train_dataset = MaskedLMDataset(train, **config['dataset']) if config.model == 'BERT4Rec' else CausalLMDataset(train, **config['dataset'])
-    eval_dataset = MaskedLMPredictionDataset(validation, max_length=config.dataset.max_length, validation_mode=True) if config.model == 'BERT4Rec' else CausalLMPredictionDataset(validation, max_length=config.dataset.max_length, validation_mode=True)
+    max_len = config.dataset.max_length
+    if config.generation:
+        max_len = max_len - max(config.evaluator.top_k)
+    eval_dataset = LastEvaluationDataset(
+        train_data=train[train.user_id.isin(validation.user_id.unique())],
+        test_data=validation,
+        max_length=max_len,
+        user_col='user_id', item_col='item_id', time_col='time_idx'
+    )
+    collate_fn = PaddingCollateFn(left_padding=config.generation)
+    # eval_dataset = MaskedLMPredictionDataset(validation, max_length=config.dataset.max_length, validation_mode=True) if config.model == 'BERT4Rec' else CausalLMPredictionDataset(validation, max_length=config.dataset.max_length, validation_mode=True)
 
     train_loader = DataLoader(train_dataset, batch_size=config.dataloader.batch_size,
                               shuffle=True, num_workers=config.dataloader.num_workers,
                               collate_fn=PaddingCollateFn())
     eval_loader = DataLoader(eval_dataset, batch_size=config.dataloader.test_batch_size,
                              shuffle=False, num_workers=config.dataloader.num_workers,
-                             collate_fn=PaddingCollateFn())
+                             collate_fn=collate_fn)
+    # eval_loader = DataLoader(eval_dataset, batch_size=config.dataloader.test_batch_size,
+    #                          shuffle=False, num_workers=config.dataloader.num_workers,
+    #                          collate_fn=PaddingCollateFn())
 
     return train_loader, eval_loader
 
@@ -231,14 +271,47 @@ def training(model, train_loader, eval_loader, config):
 
     return trainer, seqrec_module
 
+def predict(trainer, seqrec_module, data, config, test_data=None, last_evaluation=False):
+    if last_evaluation and test_data is not None:
+        #  Last Evaluation
+        max_len = config.dataset.max_length
+        if config.generation:
+            max_len = max_len - max(config.evaluator.top_k)
+        dataset = LastEvaluationDataset(
+            train_data=data,
+            test_data=test_data,
+            max_length=max_len,
+            user_col='user_id',
+            item_col='item_id',
+            time_col='time_idx'
+        )
+        collate_fn = PaddingCollateFn(left_padding=config.generation)
+        loader = DataLoader(
+            dataset,
+            shuffle=False,
+            collate_fn=collate_fn,
+            batch_size=config.dataloader.test_batch_size,
+            num_workers=config.dataloader.num_workers
+        )
+        
+        if config.model == 'GPT-2':
+            seqrec_module.set_predict_mode(
+                generate=config.generation,
+                mode=config.mode,
+                **config.generation_params
+            )
+        
+        seqrec_module.predict_top_k = max(config.evaluator.top_k)
+        preds = trainer.predict(model=seqrec_module, dataloaders=loader)
+        recs = preds2recs(preds)
+        print('recs shape', recs.shape)
+        return recs
 
-def predict(trainer, seqrec_module, data, config):
-
+    # Стандартный режим (без изменений)
     if config.model == 'GPT-2':
         if config.generation:
             predict_dataset = CausalLMPredictionDataset(
                 data, max_length=config.dataset.max_length - max(config.evaluator.top_k))
-            
             predict_loader = DataLoader(
                 predict_dataset, shuffle=False,
                 collate_fn=PaddingCollateFn(left_padding=True),
@@ -272,10 +345,8 @@ def predict(trainer, seqrec_module, data, config):
 
     seqrec_module.predict_top_k = max(config.evaluator.top_k)
     preds = trainer.predict(model=seqrec_module, dataloaders=predict_loader)
-
     recs = preds2recs(preds)
     print('recs shape', recs.shape)
-
     return recs
 
 

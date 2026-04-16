@@ -77,6 +77,7 @@ class CausalLMDataset(LMDataset):
         return {'input_ids': input_ids, 'labels': labels}
     
 
+
 class CausalLMPredictionDataset(LMDataset):
 
     def __init__(self, df, max_length=128, validation_mode=False,
@@ -220,3 +221,39 @@ class PaddingCollateFn:
             collated_batch['attention_mask'] = attention_mask.to(dtype=torch.float32)
 
         return collated_batch
+
+class LastEvaluationDataset(Dataset):
+    """Dataset for Last Evaluation: context = train_seq + test_seq[:-1], target = test_seq[-1]."""
+    def __init__(self, train_data, test_data, max_length=128, user_col='user_id', item_col='item_id', time_col='time_idx'):
+        self.max_length = max_length
+        self.user_col = user_col
+        self.item_col = item_col
+        self.time_col = time_col
+        
+        # группируем train и test последовательности по пользователям
+        train_seqs = train_data.sort_values(time_col).groupby(user_col)[item_col].agg(list).to_dict()
+        test_seqs = test_data.sort_values(time_col).groupby(user_col)[item_col].agg(list).to_dict()
+        
+        self.samples = []
+        for user in set(train_seqs.keys()) & set(test_seqs.keys()):
+            train_seq = train_seqs[user]
+            test_seq = test_seqs[user]
+            if len(test_seq) < 1:
+                continue
+            context = train_seq + test_seq[:-1]
+            target = test_seq[-1]
+            # обрезаем контекст до max_length
+            if len(context) > max_length:
+                context = context[-max_length:]
+            self.samples.append({
+                'user_id': user,
+                'input_ids': np.array(context),
+                'target': target,
+                'full_history': context  # для фильтрации уже виденных айтемов
+            })
+    
+    def __len__(self):
+        return len(self.samples)
+    
+    def __getitem__(self, idx):
+        return self.samples[idx]

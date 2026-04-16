@@ -35,8 +35,8 @@ def main(config):
     #     task = None
 
     # train, validation, validation_full, test, item_count = prepare_data(config)
-    train, validation, validation_full, adapt, test, item_count = prepare_data(config)
-    train_loader, eval_loader = create_dataloaders(train, validation_full, config)
+    train, validation, adapt, test, item_count = prepare_data(config)
+    train_loader, eval_loader = create_dataloaders(train, validation, config)
     model = create_model(config, item_count=item_count)
     start_time = time.time()
     trainer, seqrec_module = training(model, train_loader, eval_loader, config)
