@@ -1,4 +1,3 @@
-# tune.py
 import optuna
 import torch
 import numpy as np
@@ -70,8 +69,12 @@ def objective(trial, base_args, data_raw):
     tra_loader = tra_data.get_pytorch_dataloaders()
     val_loader = val_data.get_pytorch_dataloaders()
     test_loader = test_data.get_pytorch_dataloaders()
+    try:
+        diffu_rec = create_model_diffu(args)
+    except AssertionError:
+        return -1e9   # плохое значение, trial не будет выбран
 
-    diffu_rec = create_model_diffu(args)
+    # diffu_rec = create_model_diffu(args)
     model = Att_Diffuse_model(diffu_rec, args)
     model = model.to(args.device)
 
@@ -104,7 +107,7 @@ def main():
         metric_ks=[10],
         eval_interval=20,
         patience=5,
-        epochs=40,
+        epochs=80,
         description='Diffu_norm_score',
         long_head=False,
         diversity_measure=False,
@@ -121,7 +124,7 @@ def main():
 
     study = optuna.create_study(direction='maximize', study_name='diffurec_tuning')
     objective_partial = partial(objective, base_args=base_args, data_raw=data_raw)
-    study.optimize(objective_partial, n_trials=15, timeout=3600)  # 15 trials или 1 час
+    study.optimize(objective_partial, n_trials=15, timeout=4500)  # 15 trials или 1 час
 
     best_params = study.best_params
     print("Best hyperparameters:", best_params)
@@ -129,7 +132,7 @@ def main():
     final_args = Namespace(**vars(base_args))
     for key, value in best_params.items():
         setattr(final_args, key, value)
-    final_args.epochs = 40
+    final_args.epochs = 80
     final_args.eval_interval = 10
     final_args.patience = 5
 
@@ -159,7 +162,6 @@ def main():
 
     evaluate_and_print(best_model_final, baseline_loader, final_args, logger, description="baseline")
     evaluate_and_print(best_model_final, test_loader_final, final_args, logger, description="adaptation")
-
     print("\nFinal hyperparameters used in training")
     for key in ['lr', 'batch_size', 'hidden_size', 'dropout', 'emb_dropout', 'num_blocks', 
                 'diffusion_steps', 'lambda_uncertainty', 'noise_schedule', 'schedule_sampler_name',
