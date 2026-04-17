@@ -134,7 +134,7 @@ def train_and_evaluate(trial):
 
 def main():
     study = optuna.create_study(direction='maximize', pruner=optuna.pruners.MedianPruner())
-    study.optimize(train_and_evaluate, n_trials=20, timeout=3600)  # 20 попыток или 1 час
+    study.optimize(train_and_evaluate, n_trials=25, timeout=5500)  # 20 попыток или 1 час
 
     # Лучшие параметры
     best_params = study.best_params
