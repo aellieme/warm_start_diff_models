@@ -20,14 +20,13 @@ DATA_PATH = f'../../data/{DATASET}/'
 BATCH_SIZE = 400
 EPOCHS = 1000                          
 TOP_N = [10, 20, 50, 100]
-TST_W_VAL = True  #валидацию отдельно
+TST_W_VAL = True  
 CUDA = True
 GPU = '0'
 SAVE_PATH = './saved_models/'
 LOG_NAME = 'tune'
 ROUND = 1
 
-# Устройство
 os.environ["CUDA_VISIBLE_DEVICES"] = GPU
 device = torch.device("cuda:0" if CUDA else "cpu")
 
@@ -85,7 +84,6 @@ def train_and_evaluate(trial):
     emb_size = trial.suggest_int('emb_size', 8, 32)
     dims = [1000]
 
-    # Перезагружаем данные с новыми w_min/w_max (только train_data)
     global train_data, train_dataset, train_loader
     train_data, _, _, _, _, _ = data_utils.data_load(train_path, valid_path, test_path, w_min, w_max)
     train_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data.toarray()))
