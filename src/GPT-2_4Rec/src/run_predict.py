@@ -58,9 +58,12 @@ def main(config):
     )
 
     print("\nBaseline inference")
-    start_time_inf = time.perf_counter()
     # recs = predict(trainer, seqrec_module, train, config)
-    recs = predict(trainer, seqrec_module, train, config, test_data=test, last_evaluation=True)
+    history_before_test = pd.concat([train, validation], ignore_index=True)
+    history_before_test = add_time_idx(history_before_test)
+    start_time_inf = time.perf_counter()
+    recs = predict(trainer, seqrec_module, history_before_test, config, test_data=test, last_evaluation=True)
+    # recs = predict(trainer, seqrec_module, train, config, test_data=test, last_evaluation=True)
     baseline_latency = time.perf_counter() - start_time_inf
     print(f"Baseline inference latency: {baseline_latency:.4f} seconds")
 
@@ -76,11 +79,10 @@ def main(config):
 
     if adapt is not None and len(adapt) > 0:
         print("\nStarting adaptation")
-        train_adapt = pd.concat([train, adapt], ignore_index=True)
+        train_adapt = pd.concat([train, validation, adapt], ignore_index=True)
         train_adapt = add_time_idx(train_adapt)
 
         start_time_adapt = time.perf_counter()
-        # recs_adapt = predict(trainer, seqrec_module, train_adapt, config)
         recs_adapt = predict(trainer, seqrec_module, train_adapt, config, test_data=test, last_evaluation=True)
         adapt_latency = time.perf_counter() - start_time_adapt
         print(f"Adaptation inference latency: {adapt_latency:.4f} seconds")

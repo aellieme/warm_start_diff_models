@@ -17,6 +17,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 import torch
+from polara import get_movielens_data
 
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
@@ -60,8 +61,12 @@ def main(config):
     print('training_time', training_time)
 
     if config.test_metrics:
+        history_before_test = pd.concat([train, validation], ignore_index=True)
+        history_before_test = add_time_idx(history_before_test)
         start_time_inf = time.perf_counter()
-        recs = predict(trainer, seqrec_module, train, config, test_data=test, last_evaluation=True)
+        recs = predict(trainer, seqrec_module, history_before_test, config, test_data=test, last_evaluation=True)
+
+        # recs = predict(trainer, seqrec_module, train, config, test_data=test, last_evaluation=True)
         # recs = predict(trainer, seqrec_module, train, config)
         baseline_latency = time.perf_counter() - start_time_inf
     else:
@@ -89,12 +94,13 @@ def main(config):
             print("\nStarting adaptation\n")
             
             #объединяем train и adapt, пересчитываем time_idx
-            train_adapt = pd.concat([train, adapt], ignore_index=True)
-            train_adapt = add_time_idx(train_adapt)   # пересортировка и новый time_idx
+            # train_adapt = pd.concat([train, adapt], ignore_index=True)
+            # train_adapt = add_time_idx(train_adapt)   # пересортировка и новый time_idx
+            train_adapt = pd.concat([train, validation, adapt], ignore_index=True)
+            train_adapt = add_time_idx(train_adapt)
             
             start_time_adapt = time.perf_counter()
             #генерируем рекомендации на основе обновл истории
-            # recs_adapt = predict(trainer, seqrec_module, train_adapt, config, last_evaluation=True)
             recs_adapt = predict(trainer, seqrec_module, train_adapt, config, test_data=test, last_evaluation=True)
             adapt_latency = time.perf_counter() - start_time_adapt
             
@@ -133,18 +139,10 @@ def main(config):
 
             summary_df = pd.DataFrame([summary])
             print(summary_df.to_string(index=False))
-    # if task is not None:
-    #     task.get_logger().report_single_value('training_time', training_time)
-    #     task.upload_artifact('recs', recs)
-    #     task.close()
     torch.save(seqrec_module.model.state_dict(), "best_model.pt")
 
 def prepare_data(config):
-    
-    # from csv
-    # data = pd.read_csv(config.data_path)
-    from polara import get_movielens_data
-    data = get_movielens_data(include_time=True)   # загружаем датасет
+    data = get_movielens_data(include_time=True)   
     data = data.rename(columns={'userid': 'user_id', 'movieid': 'item_id'})
     
     
