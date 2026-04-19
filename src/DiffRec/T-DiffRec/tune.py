@@ -123,27 +123,27 @@ def train_and_evaluate(trial):
             if recall10 > best_recall:
                 best_recall = recall10
                 best_epoch = epoch
-                # сохраняем лучшую модель в память (не на диск)
+                # сохраняем лучшую модель в память 
                 best_model_state = model.state_dict()
         # Логирование
         trial.report(best_recall, epoch)
         if trial.should_prune():
             raise optuna.TrialPruned()
-    # Возвращаем лучший recall@10
+    #лучший recall@10
     return best_recall
 
 def main():
     study = optuna.create_study(direction='maximize', pruner=optuna.pruners.MedianPruner())
-    study.optimize(train_and_evaluate, n_trials=25, timeout=5500)  # 20 попыток или 1 час
+    study.optimize(train_and_evaluate, n_trials=25, timeout=5500)  
 
     # Лучшие параметры
     best_params = study.best_params
     steps = best_params['steps']
     print("Best hyperparameters:", best_params)
 
-    #  Обучение финальной модели с лучшими параметрами 
-    print("\nTraining final model with best parameters...")
-    # Перезагружаем данные с лучшими w_min/w_max
+    #обучение финальной модели с лучшими параметрами 
+    print("\nTraining final model with best parameters")
+    #gерезагружаем данные с лучшими w_min/w_max
     w_min = best_params['w_min']
     w_max = best_params['w_max']
     train_data, train_data_ori, valid_y_data, test_y_data, n_user, n_item = data_utils.data_load(
