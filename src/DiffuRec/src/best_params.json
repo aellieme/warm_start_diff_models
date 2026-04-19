@@ -1,0 +1,12 @@
+{
+    "lr": 0.009488604563332758,
+    "batch_size": 1024,
+    "hidden_size": 64,
+    "dropout": 0.30552183670021005,
+    "emb_dropout": 0.476122846906854,
+    "num_blocks": 3,
+    "diffusion_steps": 32,
+    "lambda_uncertainty": 0.0009388060060111426,
+    "noise_schedule": "cosine",
+    "schedule_sampler_name": "lossaware"
+}
