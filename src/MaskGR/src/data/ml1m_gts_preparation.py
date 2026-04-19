@@ -14,8 +14,8 @@ from polara.datasets.movielens import get_movielens_data
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data.tfrecord_utils import create_tfrecord
-from src.data.sid_generation import RKMeansSIDGenerator
+from src.sid.sid_generator import RKMeansSIDGenerator
+from src.data.data_utils import get_item_texts_ml1m
 
 
 def load_movielens_1m():
@@ -115,6 +115,9 @@ def prepare_ml1m_gts(
         movie_row = movies_df[movies_df['movieid'] == orig_id].iloc[0]
         item_texts[idx] = f"{movie_row['title']} ({movie_row['genres']})"
 
+    # Подготовка текстов для генератора SID (словарь {item_idx: text})
+    item_text_map = {i: item_texts[i] for i in range(num_items)}
+
     sid_gen = RKMeansSIDGenerator(
         num_layers=sid_num_layers,
         codebook_size=sid_codebook_size,
@@ -122,7 +125,11 @@ def prepare_ml1m_gts(
         seed=seed
     )
     all_item_ids = list(range(num_items))
-    item_sid_dict = sid_gen.generate_sids(all_item_ids, item_texts)
+    item_sid_dict = sid_gen.generate_sids(all_item_ids, item_text_map)
+    # item_sid_dict = sid_gen.generate_sids(all_item_ids, item_text_map)
+
+    # all_item_ids = list(range(num_items))
+    # item_sid_dict = sid_gen.generate_sids(all_item_ids, item_texts)
     print("SID generation complete.")
 
     # build examples for train, adapt, test
@@ -140,11 +147,13 @@ def prepare_ml1m_gts(
                 item_ids = item_ids[-max_seq_len:]
                 sids = sids[-max_seq_len:]
                 timestamps = timestamps[-max_seq_len:]
+            item_text_list = [item_texts[i] for i in item_ids]
             examples.append({
                 'user_id': int(user),
                 'item_ids': item_ids,
                 'sids': sids,
-                'timestamps': timestamps
+                'timestamps': timestamps,
+                'item_text': item_text_list
             })
         return examples
 
@@ -169,11 +178,13 @@ def prepare_ml1m_gts(
             item_ids = item_ids[-max_seq_len:]
             sids = sids[-max_seq_len:]
             timestamps = timestamps[-max_seq_len:]
+        item_text_list = [item_texts[i] for i in item_ids]
         val_examples.append({
             'user_id': int(user),
             'item_ids': item_ids,
             'sids': sids,
-            'timestamps': timestamps
+            'timestamps': timestamps,
+            'item_text': item_text_list
         })
     print(f"Validation users (strict): {len(val_examples)}")
 
@@ -190,18 +201,40 @@ def prepare_ml1m_gts(
             item_ids = item_ids[-max_seq_len:]
             sids = sids[-max_seq_len:]
             timestamps = timestamps[-max_seq_len:]
+        item_text_list = [item_texts[i] for i in item_ids]
         test_examples.append({
             'user_id': int(user),
             'item_ids': item_ids,
             'sids': sids,
-            'timestamps': timestamps
+            'timestamps': timestamps,
+            'item_text': item_text_list
         })
     print(f"Test users: {len(test_examples)}")
 
     # write TFRecord files
+    def serialize_example(user_id, item_id_list, item_text_list):
+        feature = {
+            'user_id': tf.train.Feature(int64_list=tf.train.Int64List(value=[user_id])),
+            'item_id': tf.train.Feature(int64_list=tf.train.Int64List(value=item_id_list)),
+            'item_text': tf.train.Feature(bytes_list=tf.train.BytesList(value=item_text_list)),
+        }
+        example_proto = tf.train.Example(features=tf.train.Features(feature=feature))
+        return example_proto.SerializeToString()
+
     def write_tfrecord(examples, split_name):
+        """Запись списка примеров в сжатый TFRecord файл."""
         output_path = os.path.join(output_dir, split_name, 'part_0.tfrecord.gz')
-        create_tfrecord(examples, output_path)
+        options = tf.io.TFRecordOptions(compression_type="GZIP")
+        with tf.io.TFRecordWriter(output_path, options=options) as writer:
+            for ex in examples:
+                # Преобразуем тексты в байты
+                item_texts_bytes = [text.encode('utf-8') for text in ex['item_text']]
+                serialized = serialize_example(
+                    ex['user_id'],
+                    ex['item_ids'],
+                    item_texts_bytes
+                )
+                writer.write(serialized)
         print(f"Written {len(examples)} examples to {output_path}")
 
     write_tfrecord(train_examples, 'training')
