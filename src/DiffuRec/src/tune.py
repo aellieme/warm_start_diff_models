@@ -35,7 +35,7 @@ def compute_recall10_on_validation(model, val_loader, args):
     return recalls[0]
 
 def objective(trial, base_args, data_raw):
-    lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
+    lr = trial.suggest_float('lr', 5e-4, 1e-2, log=True)
     batch_size = trial.suggest_categorical('batch_size', [512, 1024])
     hidden_size = trial.suggest_categorical('hidden_size', [64, 128, 256])
     dropout = trial.suggest_float('dropout', 0.1, 0.5)
