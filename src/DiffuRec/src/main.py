@@ -254,6 +254,7 @@ def load_and_split_gts(quantiles=(0.7, 0.8, 0.9)):
 
 def main(args):    
     fix_random_seed_as(args.random_seed)
+    torch.backends.cudnn.benchmark = True
     # path_data = '../datasets/data/' + args.dataset + '/dataset.pkl'
     # with open(path_data, 'rb') as f:
     #     data_raw = pickle.load(f)

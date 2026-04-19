@@ -42,7 +42,7 @@ class Data_Train():
 
     def get_pytorch_dataloaders(self):
         dataset = TrainDataset(self.id_seq, self.max_len)
-        return data_utils.DataLoader(dataset, batch_size=self.batch_size, shuffle=True, pin_memory=True)
+        return data_utils.DataLoader(dataset, batch_size=self.batch_size, shuffle=True, pin_memory=True, num_workers=4)
 
 
 class ValDataset(data_utils.Dataset):
@@ -75,7 +75,7 @@ class Data_Val():
 
     def get_pytorch_dataloaders(self):
         dataset = ValDataset(self.u2seq, self.u2answer, self.max_len)
-        dataloader = data_utils.DataLoader(dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
+        dataloader = data_utils.DataLoader(dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True, num_workers=4)
         return dataloader
 
 
@@ -111,7 +111,7 @@ class Data_Test():
 
     def get_pytorch_dataloaders(self):
         dataset = TestDataset(self.u2seq, self.u2seq_add, self.u2answer, self.max_len)
-        dataloader = data_utils.DataLoader(dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
+        dataloader = data_utils.DataLoader(dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True, num_workers=4)
         return dataloader
 
 
@@ -142,5 +142,5 @@ class Data_CHLS():
 
     def get_pytorch_dataloaders(self):
         dataset = CHLSDataset(self.data, self.max_len)
-        dataloader = data_utils.DataLoader(dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
+        dataloader = data_utils.DataLoader(dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True, num_workers=4)
         return dataloader
