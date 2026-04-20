@@ -10,6 +10,10 @@ import dill as pkl
 import time
 from sklearn.metrics import roc_auc_score
 
+import pandas as pd
+from evaluate_topk_dp import recall_at_k, ndcg_at_k, mrr, coverage
+import time
+
 
 def del_tensor_ele(arr,index):
     arr1 = arr[0:index]
@@ -46,13 +50,38 @@ def get_exclusive(t1, t2):
     t1_exclusive = t1[(t1.view(1, -1) != t2.view(-1, 1)).all(dim=0)]
     return t1_exclusive
 
+def load_movie_titles(movielens_path='./src/data/info/movies.dat'):
+    """
+    Load movie titles from MovieLens-1M movies.dat file.
+    Returns dict: movieid (original) -> title
+    """
+    import os
+    if not os.path.exists(movielens_path):
+        alt_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'info', 'movies.dat')
+        if os.path.exists(alt_path):
+            movielens_path = alt_path
+        else:
+            print(f"Warning: Could not find movies.dat at {movielens_path} or {alt_path}. Titles will not be shown.")
+            return None
+    movies = pd.read_csv(movielens_path, sep='::', engine='python', 
+                         names=['movieid', 'title', 'genres'], encoding='latin-1')
+    return dict(zip(movies['movieid'], movies['title']))
+# def load_movie_titles(movielens_path='./ml-1m/movies.dat'):
+#     """
+#     Load movie titles from MovieLens-1M movies.dat file.
+#     Returns dict: movieid (original) -> title
+#     """
+#     movies = pd.read_csv(movielens_path, sep='::', engine='python', 
+#                          names=['movieid', 'title', 'genres'], encoding='latin-1')
+#     return dict(zip(movies['movieid'], movies['title']))
     
 # source:book----range[1,interval+1);target:movie[interval+1, itemnum + 1)
 def sample_function_T_DiffCDR_TI(random_min, random_max, random_source_min, random_source_max, user_train_mix, user_train_source, user_train_target, user_train_ti_mix, user_train_ti_source, user_train_ti_target, usernum, itemnum, batch_size, w_min, w_max, reweight_version, result_queue):        
         
     def sample():
         user = np.random.randint(1, usernum + 1)
-        while len(user_train_mix[user]) <= 1 or len(user_train_source[user]) <= 1 or len(user_train_target[user]) <= 1: 
+        # while len(user_train_mix[user]) <= 1 or len(user_train_source[user]) <= 1 or len(user_train_target[user]) <= 1: 
+        while len(user_train_mix[user]) < 1 or len(user_train_target[user]) < 1:
             user = np.random.randint(1, usernum + 1)
 
         # init the tensor
@@ -134,11 +163,15 @@ def sample_function_V13_final_please_Diff_TI(random_min, random_max, random_sour
     
     def sample():      
         user = np.random.randint(1, usernum + 1)
-        while len(user_train_mix[user]) < 1 or len(user_train_source[user]) < 1 or len(user_train_target[user]) < 1: 
+        # while len(user_train_mix[user]) < 1 or len(user_train_source[user]) < 1 or len(user_train_target[user]) < 1: 
+        while len(user_train_mix[user]) < 1 or len(user_train_target[user]) < 1:
             user = np.random.randint(1, usernum + 1)
+            # user = np.random.randint(1, usernum + 1)
         
         user_train_mix_u = np.array(user_train_mix[user])
         user_train_source_u = np.array(user_train_source[user])
+        if len(user_train_source_u) == 0:
+            user_train_source_u = np.array([0])  
         user_train_target_u = np.array(user_train_target[user])
 
         seq_mix = np.zeros([maxlen], dtype=np.int32)
@@ -261,9 +294,6 @@ class WarpSampler_V13_final_please_Diff_TI(object):
             p.terminate()
             p.join()   
             
-            
-            
-     
             
             
 def data_partition(version, fname, dataset_name, maxlen):
@@ -541,7 +571,120 @@ def compute_auc(scores):
     auc = num_hit / (num_pos * len(score_neg))
     return auc
 
-
+# def evaluate_GTS(model, dataset_dict, args, k_list=[5,10,20,50,100], print_examples=False):
+def evaluate_GTS(model, dataset_dict, args, k_list=[10,20,50,100], print_examples=False, use_adaptation=True):
+    """
+    Evaluate PDRec model on MovieLens with GTS protocol.
+    Uses metrics from evaluate_topk_dp.py.
+    """
+    with torch.no_grad():
+        print('Start evaluation with GTS protocol...')
+        user_train = dataset_dict['user_train']
+        user_valid_target = dataset_dict['user_valid_target']
+        user_test_target = dataset_dict['user_test_target']
+        user_adapt = dataset_dict['user_adapt']
+        user_valid_seq = dataset_dict['user_valid_seq']
+        user_test_seq = dataset_dict['user_test_seq']
+        itemnum = dataset_dict['itemnum']
+        item_decoder = dataset_dict['item_decoder']
+        
+        # Load movie titles if needed
+        if print_examples:
+            try:
+                movie_titles = load_movie_titles()
+            except:
+                print("Warning: Could not load movie titles. Printing internal IDs.")
+                movie_titles = None
+        
+        # Prepare all items for ranking (1..itemnum)
+        all_items = torch.arange(1, itemnum+1, device=args.device)
+        
+        # For validation (optional, here we evaluate on test)
+        # Collect predictions and actuals
+        all_actuals = []
+        all_preds = []
+        latencies = []
+        
+        users_to_eval = list(user_test_target.keys())
+        valid_user = 0
+        for u in users_to_eval:
+            if len(user_train.get(u, [])) == 0:
+                continue
+            # Build full context: train + adapt + test_input_seq
+            train_seq = user_train.get(u, [])
+            adapt_seq = user_adapt.get(u, [])
+            test_seq = user_test_seq.get(u, [])
+            # full_seq = train_seq + adapt_seq + test_seq
+            if use_adaptation:
+                full_seq = train_seq + adapt_seq + test_seq
+            else:
+                full_seq = train_seq + test_seq
+            full_seq = full_seq[-args.maxlen:]  # truncate
+            
+            if len(full_seq) == 0:
+                # If no history, cannot predict (skip)
+                continue
+            
+            # Prepare input tensor
+            seq_tensor = torch.tensor([full_seq], device=args.device)  # (1, maxlen)
+            
+            # Measure latency
+            start_time = time.time()
+            scores = model.predict(torch.tensor([u], device=args.device), seq_tensor, all_items.unsqueeze(0))
+            latency = time.time() - start_time
+            latencies.append(latency)
+            
+            # Get top-k recommendations
+            _, indices = torch.topk(scores[0], max(k_list))
+            recommended_items = indices.cpu().numpy()
+            
+            true_item = user_test_target[u][0]
+            all_actuals.append([true_item])
+            all_preds.append(recommended_items)
+            
+            valid_user += 1
+            if valid_user % 100 == 0:
+                print(f'Processed {valid_user} users...')
+        
+        # Compute metrics for each k
+        results = {}
+        for k in k_list:
+            results[f'recall@{k}'] = recall_at_k(all_actuals, all_preds, k)
+            results[f'ndcg@{k}'] = ndcg_at_k(all_actuals, all_preds, k)
+            results[f'mrr@{k}'] = mrr(all_actuals, all_preds, k)
+        
+        results['coverage'] = coverage(all_preds, itemnum)  # coverage@k for max k
+        results['latency_mean'] = np.mean(latencies) * 1000  # ms
+        results['latency_std'] = np.std(latencies) * 1000
+        
+        # Print example recommendations for first few users
+        if print_examples and len(users_to_eval) > 0:
+            sample_u = users_to_eval[0]
+            train_seq = user_train.get(sample_u, [])
+            adapt_seq = user_adapt.get(sample_u, [])
+            test_seq = user_test_seq.get(sample_u, [])
+            full_seq = train_seq + adapt_seq + test_seq
+            full_seq = full_seq[-args.maxlen:]
+            seq_tensor = torch.tensor([full_seq], device=args.device)
+            scores = model.predict(torch.tensor([sample_u], device=args.device), seq_tensor, all_items.unsqueeze(0))
+            _, indices = torch.topk(scores[0], 10)
+            recs = indices.cpu().numpy()
+            true_item = user_test_target[sample_u][0]
+            print(f"\nExample recommendations for user {sample_u} (original id: {dataset_dict['user_decoder'][sample_u]}):")
+            if movie_titles:
+                true_title = movie_titles.get(item_decoder[true_item], str(true_item))
+                print(f"True next item: {true_title}")
+                print("Top-10 recommendations:")
+                for i, iid in enumerate(recs, 1):
+                    orig_id = item_decoder[iid]
+                    title = movie_titles.get(orig_id, str(orig_id))
+                    print(f"  {i}. {title}")
+            else:
+                print(f"True item (internal): {true_item}")
+                print(f"Top-10: {recs}")
+        
+        print(f"Evaluation completed on {valid_user} users.")
+        return results
 # TODO: merge evaluate functions for test and val set
 # evaluate on test set
 def evaluate_PDRec(model, dataset, args, user_list):
@@ -694,3 +837,49 @@ def evaluate_T_DiffRec_TI(model, diffusion, dataset, args, random_min, random_ma
                 print('process test user {}'.format(valid_user))
                 
     return NDCG_1 / valid_user, NDCG_5 / valid_user, NDCG_10 / valid_user, NDCG_20 / valid_user, NDCG_50 / valid_user, HT_1 / valid_user, HT_5 / valid_user, HT_10 / valid_user, HT_20 / valid_user, HT_50 / valid_user, AUC / valid_user
+
+class WarpSamplerGTS:
+    def __init__(self, user_train, user_adapt, batch_size, maxlen, n_workers=1):
+        # Используем только пользователей с историей
+        self.users = [u for u in user_train if len(user_train[u]) >= 1]
+        self.user_train = user_train
+        self.user_adapt = user_adapt
+        self.batch_size = batch_size
+        self.maxlen = maxlen
+        self.result_queue = Queue(maxsize=n_workers * 10)
+        self.processors = []
+        for _ in range(n_workers):
+            p = Process(target=self._sample_loop, args=(self.result_queue,))
+            p.daemon = True
+            p.start()
+            self.processors.append(p)
+    
+    def _sample_loop(self, queue):
+        while True:
+            batch_users = np.random.choice(self.users, self.batch_size, replace=True)
+            batch_seq = []
+            batch_pos = []
+            batch_neg = []
+            for u in batch_users:
+                seq = self.user_train[u][-self.maxlen:]  # только обучающая история (без адаптации для обучения)
+                if len(seq) < 2:
+                    continue
+                # Для простоты: позитив - последний элемент, негатив - случайный
+                pos = seq[-1]
+                neg = np.random.randint(1, max(self.user_train.keys())+1)  # упрощённо, потом можно улучшить
+                batch_seq.append(seq[:-1])
+                batch_pos.append(pos)
+                batch_neg.append(neg)
+            # Паддинг
+            seq_padded = torch.nn.utils.rnn.pad_sequence([torch.tensor(s) for s in batch_seq], batch_first=True, padding_value=0)
+            pos_tensor = torch.tensor(batch_pos)
+            neg_tensor = torch.tensor(batch_neg)
+            queue.put((batch_users, seq_padded, pos_tensor, neg_tensor))
+    
+    def next_batch(self):
+        return self.result_queue.get()
+    
+    def close(self):
+        for p in self.processors:
+            p.terminate()
+            p.join()

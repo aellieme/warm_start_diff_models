@@ -16,12 +16,14 @@ from models.DNN import DNN
 import models.gaussian_diffusion as gd
 from utils.utils import *
 
+from matplotlib.font_manager import FontManager
+from data_gts import MovieLensGTSProcessor
 
 # -*- coding: UTF-8 -*-
 plt.switch_backend('agg')
 np.set_printoptions(suppress=True)
 np.set_printoptions(threshold=2000)
-from matplotlib.font_manager import FontManager
+
 fm = FontManager()
 mat_fonts = set(f.name for f in fm.ttflist)
 print(mat_fonts)
@@ -130,16 +132,59 @@ with open(os.path.join(result_path, 'args.txt'), 'w') as f:
 args.result_path = result_path
         
 if __name__ == '__main__':
-    dataset = data_partition(args.version, args.dataset, args.cross_dataset, args.maxlen)
-    [user_train_mix, user_train_source, user_train_target, user_valid_target, user_test_target, user_train_mix_sequence_for_target, user_train_source_sequence_for_target, usernum, itemnum, interval, user_train_ti_mix, user_train_ti_source, user_train_ti_target, user_valid_ti_target, user_test_ti_target] = dataset
+
+    processor = MovieLensGTSProcessor(
+        valid_quantile=0.7, adapt_quantile=0.8, test_quantile=0.9, maxlen=args.maxlen
+    )
+    dataset_dict = processor.load_and_process()
+    
+    
+    user_train_mix = dataset_dict['user_train_mix']
+    user_train_source = dataset_dict['user_train_source']
+    user_train_target = dataset_dict['user_train']
+    user_valid_target = dataset_dict['user_valid_target']
+    user_test_target = dataset_dict['user_test_target']
+    user_train_mix_sequence_for_target = dataset_dict['user_train_mix_sequence_for_target']
+    user_train_source_sequence_for_target = dataset_dict['user_train_source_sequence_for_target']
+    usernum = dataset_dict['usernum']
+    itemnum = dataset_dict['itemnum']
+    interval = dataset_dict['interval']
+    user_train_ti_mix = dataset_dict['user_train_ti_mix']
+    user_train_ti_source = dataset_dict['user_train_ti_source']
+    user_train_ti_target = dataset_dict['user_train_ti_target']
+    user_valid_ti_target = dataset_dict['user_valid_ti_target']
+    user_test_ti_target = dataset_dict['user_test_ti_target']
+
+    # Сохраняем остальные данные для оценки
+    user_adapt = dataset_dict['user_adapt']
+    user_valid_seq = dataset_dict['user_valid_seq']
+    user_test_seq = dataset_dict['user_test_seq']
+    item_decoder = dataset_dict['item_decoder']
+    user_decoder = dataset_dict['user_decoder']
+
+    # Извлечение нужных компонент
+    user_train = dataset_dict['user_train']
+    user_valid_target = dataset_dict['user_valid_target']
+    user_test_target = dataset_dict['user_test_target']
+    user_adapt = dataset_dict['user_adapt']
+    user_valid_seq = dataset_dict['user_valid_seq']
+    user_test_seq = dataset_dict['user_test_seq']
+    usernum = dataset_dict['usernum']
+    itemnum = dataset_dict['itemnum']
+    item_decoder = dataset_dict['item_decoder']
+    user_decoder = dataset_dict['user_decoder']
+    # dataset = data_partition(args.version, args.dataset, args.cross_dataset, args.maxlen)
+    # [user_train_mix, user_train_source, user_train_target, user_valid_target, user_test_target, user_train_mix_sequence_for_target, user_train_source_sequence_for_target, usernum, itemnum, interval, user_train_ti_mix, user_train_ti_source, user_train_ti_target, user_valid_ti_target, user_test_ti_target] = dataset
 
     print("the user number is:", usernum)
     print("the item number is:", itemnum)
 
     cc_source = 0.0
     for u in user_train_target:
-        if len(user_train_target[u]) > 0:
-            cc_source = cc_source + len(user_train_target[u])
+        if len(user_train_target.get(u, [])) < 1:
+            continue
+        # if len(user_train_target[u]) > 0:
+            # cc_source = cc_source + len(user_train_target[u])
     print('average sequence length in source domain: %.2f' % (cc_source / len(user_train_target)))
 
     
@@ -163,6 +208,13 @@ if __name__ == '__main__':
         random_source_max = itemnum + 1
         print("The min is {} and the max is {} in amazon_book".format(random_min, random_max))
         print("The min is {} and the max is {} in source domain".format(random_source_min, random_source_max))
+    elif args.dataset == 'movielens':
+        item_number = itemnum
+        random_min = 1
+        random_max = itemnum + 1
+        random_source_min = 1      # source не используется, но для совместимости задаём тот же диапазон
+        random_source_max = itemnum + 1
+        print("The min is {} and the max is {} in movielens".format(random_min, random_max))
     candidate_min_user = math.floor(item_number * args.candidate_min_percentage_user / 100)
     candidate_max_user = math.ceil(item_number * args.candidate_max_percentage_user / 100)
     item_list = torch.arange(start=random_min, end=random_max, step=1, device='cuda', requires_grad=False)
@@ -172,9 +224,12 @@ if __name__ == '__main__':
 
     #     ipdb.set_trace()
     user_list = []
-    for u_i in range(1, usernum):
-        if len(user_train_source[u_i]) >= 1 and len(user_train_target[u_i]) >= 2: 
-            user_list.append(u_i)    
+    for u_i in range(1, usernum+1):
+        # for u_i in range(1, usernum + 1):
+        if len(user_train_target.get(u_i, [])) >= 2:
+            user_list.append(u_i)
+        # if len(user_train_source[u_i]) >= 1 and len(user_train_target[u_i]) >= 2: 
+        #     user_list.append(u_i)    
     num_batch = math.ceil(len(user_list) / args.batch_size) # 908
     if args.base_model == 'GRU4Rec':
         model = GRU4Rec_withNeg_Dist(usernum, itemnum, args).cuda() # no ReLU activation in original SASRec implementation?
@@ -266,6 +321,24 @@ if __name__ == '__main__':
         args.log_name='log'
         args.round=1
 #     ipdb.set_trace()
+    elif args.dataset == 'movielens':
+        model_diff_path = './Checkpoint/movielens.pth'
+        args.lr_diff = 5e-5
+        args.weight_decay_diff = 0.5
+        args.dims = '[1000]'
+        args.emb_size = 10
+        args.mean_type = 'x0'
+        args.steps = 10
+        args.noise_scale = 0.01
+        args.noise_min = 0.0005
+        args.noise_max = 0.005
+        args.sampling_steps = 0
+        args.reweight = 1
+        args.w_min = 0.5
+        args.w_max = 1.0
+        args.reweight_version = 'AllOne'
+        args.log_name = 'log'
+        args.round = 1
     model_diff = torch.load(model_diff_path).to('cuda')
     model_diff.eval()
 
@@ -277,7 +350,8 @@ if __name__ == '__main__':
     weight_matrix = torch.zeros([usernum+1, itemnum+1], device='cuda')
     with torch.no_grad():
         for u in range(1, usernum + 1):
-            if len(user_train_mix[u]) < 1 or len(user_train_source[u]) < 1 or len(user_train_target[u]) < 1: 
+            # if len(user_train_mix[u]) < 1 or len(user_train_source[u]) < 1 or len(user_train_target[u]) < 1: 
+            if len(user_train_target.get(u, [])) < 1:
                 continue
             # init the tensor  
             corpus_target_temp = np.zeros([itemnum+1], dtype=np.float32)
@@ -380,23 +454,57 @@ if __name__ == '__main__':
 
         model.eval()
         # Speed-up evaluation
+        
         if epoch > 50:
-            print('Evaluating', end='')
-            t_test = evaluate_PDRec(model, dataset, args, user_list)
+            print('Evaluating without adaptation...')
+            res_no_adapt = evaluate_GTS(model, dataset_dict, args,
+                                        k_list=[10,20,50],
+                                        print_examples=(epoch % 20 == 0),
+                                        use_adaptation=False)
+            print('Evaluating with adaptation...')
+            res_with_adapt = evaluate_GTS(model, dataset_dict, args,
+                                        k_list=[10,20,50],
+                                        print_examples=(epoch % 20 == 0),
+                                        use_adaptation=True)
             t3 = time.time()
-            print('epoch:%d, epoch_time: %.4f(s), total_time: %.4f(s), test:\n' % (epoch, t3-t1, t3-t0))
-            print('        test: NDCG@1: %.4f, NDCG@5: %.4f, NDCG@10: %.4f, NDCG@20: %.4f, NDCG@50: %.4f, HR@1: %.4f, HR@5: %.4f, HR@10: %.4f, HR@20: %.4f, HR@50: %.4f, AUC: %.4f, loss: %.4f\n' % (t_test[0], t_test[1], t_test[2], t_test[3], t_test[4], t_test[5], t_test[6], t_test[7], t_test[8], t_test[9], t_test[10], t_test[11]))
-            
+            log_msg = (f"epoch:{epoch} time:{t3-t1:.2f}s\n"
+                    f"Without adapt: Recall@10={res_no_adapt['recall@10']:.4f}, NDCG@10={res_no_adapt['ndcg@10']:.4f}, "
+                    f"Coverage={res_no_adapt['coverage']:.4f}, Latency={res_no_adapt['latency_mean']:.2f}ms\n"
+                    f"With adapt:    Recall@10={res_with_adapt['recall@10']:.4f}, NDCG@10={res_with_adapt['ndcg@10']:.4f}, "
+                    f"Coverage={res_with_adapt['coverage']:.4f}, Latency={res_with_adapt['latency_mean']:.2f}ms\n")
+            print(log_msg)
             with io.open(result_path + 'test_performance.txt', 'a', encoding='utf-8') as file:
-                file.write('epoch:%d, epoch_time: %.4f(s), total_time: %.4f(s), test:\n' % (epoch, t3-t1, t3-t0))
-                file.write('        NDCG@1: %.4f, NDCG@5: %.4f, NDCG@10: %.4f, NDCG@20: %.4f, NDCG@50: %.4f, HR@1: %.4f, HR@5: %.4f, HR@10: %.4f, HR@20: %.4f, HR@50: %.4f, AUC: %.4f, loss: %.4f\n' % (t_test[0], t_test[1], t_test[2], t_test[3], t_test[4], t_test[5], t_test[6], t_test[7], t_test[8], t_test[9], t_test[10], t_test[11]))
-                
-            early_stopping(epoch, model, result_path, t_test)
+                file.write(log_msg)
+
+            current_ndcg = res_with_adapt['ndcg@10']  # для early stopping используем метрику с адаптацией
+            early_stopping(epoch, model, result_path, current_ndcg)
             if early_stopping.early_stop:
                 print("Save in path:", result_path)
-                print("Early stopping in the epoch {}, NDCG@1: {:.4f}, NDCG@5: {:.4f}, NDCG@10: {:.4f}, NDCG@20: {:.4f}, NDCG@50: {:.4f}, HR@1: {:.4f}, HR@5: {:.4f}, HR@10: {:.4f}, HR@20: {:.4f}, HR@50: {:.4f}, AUC: {:.4f}".format(early_stopping.save_epoch, early_stopping.best_performance[0], early_stopping.best_performance[1], early_stopping.best_performance[2], early_stopping.best_performance[3], early_stopping.best_performance[4], early_stopping.best_performance[5], early_stopping.best_performance[6], early_stopping.best_performance[7], early_stopping.best_performance[8], early_stopping.best_performance[9], early_stopping.best_performance[10]))
+                # print("Early stopping in the epoch {}, NDCG@1: {:.4f}, NDCG@5: {:.4f}, NDCG@10: {:.4f}, NDCG@20: {:.4f}, NDCG@50: {:.4f}, HR@1: {:.4f}, HR@5: {:.4f}, HR@10: {:.4f}, HR@20: {:.4f}, HR@50: {:.4f}, AUC: {:.4f}".format(early_stopping.save_epoch, early_stopping.best_performance[0], early_stopping.best_performance[1], early_stopping.best_performance[2], early_stopping.best_performance[3], early_stopping.best_performance[4], early_stopping.best_performance[5], early_stopping.best_performance[6], early_stopping.best_performance[7], early_stopping.best_performance[8], early_stopping.best_performance[9], early_stopping.best_performance[10]))
+                
+                print(f"Early stopping at epoch {early_stopping.save_epoch}, best NDCG@10 = {early_stopping.best_performance:.4f}")
                 with io.open(result_path + 'save_model.txt', 'a', encoding='utf-8') as file:
-                    file.write("Early stopping in the epoch {}, NDCG@1: {:.4f}, NDCG@5: {:.4f}, NDCG@10: {:.4f}, NDCG@20: {:.4f}, NDCG@50: {:.4f}, HR@1: {:.4f}, HR@5: {:.4f}, HR@10: {:.4f}, HR@20: {:.4f}, HR@50: {:.4f}, AUC: {:.4f}\n".format(early_stopping.save_epoch, early_stopping.best_performance[0], early_stopping.best_performance[1], early_stopping.best_performance[2], early_stopping.best_performance[3], early_stopping.best_performance[4], early_stopping.best_performance[5], early_stopping.best_performance[6], early_stopping.best_performance[7], early_stopping.best_performance[8], early_stopping.best_performance[9], early_stopping.best_performance[10]))
+                    file.write(f"Early stopping at epoch {early_stopping.save_epoch}, best NDCG@10 = {early_stopping.best_performance:.4f}\n")# with io.open(result_path + 'save_model.txt', 'a', encoding='utf-8') as file:
+                #     file.write("Early stopping in the epoch {}, NDCG@1: {:.4f}, NDCG@5: {:.4f}, NDCG@10: {:.4f}, NDCG@20: {:.4f}, NDCG@50: {:.4f}, HR@1: {:.4f}, HR@5: {:.4f}, HR@10: {:.4f}, HR@20: {:.4f}, HR@50: {:.4f}, AUC: {:.4f}\n".format(early_stopping.save_epoch, early_stopping.best_performance[0], early_stopping.best_performance[1], early_stopping.best_performance[2], early_stopping.best_performance[3], early_stopping.best_performance[4], early_stopping.best_performance[5], early_stopping.best_performance[6], early_stopping.best_performance[7], early_stopping.best_performance[8], early_stopping.best_performance[9], early_stopping.best_performance[10]))
                 break
+        
+        # if epoch > 50:
+        #     print('Evaluating', end='')
+        #     t_test = evaluate_PDRec(model, dataset_dict, args, user_list)
+        #     t3 = time.time()
+        #     print('epoch:%d, epoch_time: %.4f(s), total_time: %.4f(s), test:\n' % (epoch, t3-t1, t3-t0))
+        #     print('        test: NDCG@1: %.4f, NDCG@5: %.4f, NDCG@10: %.4f, NDCG@20: %.4f, NDCG@50: %.4f, HR@1: %.4f, HR@5: %.4f, HR@10: %.4f, HR@20: %.4f, HR@50: %.4f, AUC: %.4f, loss: %.4f\n' % (t_test[0], t_test[1], t_test[2], t_test[3], t_test[4], t_test[5], t_test[6], t_test[7], t_test[8], t_test[9], t_test[10], t_test[11]))
+            
+        #     with io.open(result_path + 'test_performance.txt', 'a', encoding='utf-8') as file:
+        #         file.write('epoch:%d, epoch_time: %.4f(s), total_time: %.4f(s), test:\n' % (epoch, t3-t1, t3-t0))
+        #         file.write('        NDCG@1: %.4f, NDCG@5: %.4f, NDCG@10: %.4f, NDCG@20: %.4f, NDCG@50: %.4f, HR@1: %.4f, HR@5: %.4f, HR@10: %.4f, HR@20: %.4f, HR@50: %.4f, AUC: %.4f, loss: %.4f\n' % (t_test[0], t_test[1], t_test[2], t_test[3], t_test[4], t_test[5], t_test[6], t_test[7], t_test[8], t_test[9], t_test[10], t_test[11]))
+                
+        #     early_stopping(epoch, model, result_path, t_test)
+        #     if early_stopping.early_stop:
+        #         print("Save in path:", result_path)
+        #         print("Early stopping in the epoch {}, NDCG@1: {:.4f}, NDCG@5: {:.4f}, NDCG@10: {:.4f}, NDCG@20: {:.4f}, NDCG@50: {:.4f}, HR@1: {:.4f}, HR@5: {:.4f}, HR@10: {:.4f}, HR@20: {:.4f}, HR@50: {:.4f}, AUC: {:.4f}".format(early_stopping.save_epoch, early_stopping.best_performance[0], early_stopping.best_performance[1], early_stopping.best_performance[2], early_stopping.best_performance[3], early_stopping.best_performance[4], early_stopping.best_performance[5], early_stopping.best_performance[6], early_stopping.best_performance[7], early_stopping.best_performance[8], early_stopping.best_performance[9], early_stopping.best_performance[10]))
+        #         with io.open(result_path + 'save_model.txt', 'a', encoding='utf-8') as file:
+        #             file.write("Early stopping in the epoch {}, NDCG@1: {:.4f}, NDCG@5: {:.4f}, NDCG@10: {:.4f}, NDCG@20: {:.4f}, NDCG@50: {:.4f}, HR@1: {:.4f}, HR@5: {:.4f}, HR@10: {:.4f}, HR@20: {:.4f}, HR@50: {:.4f}, AUC: {:.4f}\n".format(early_stopping.save_epoch, early_stopping.best_performance[0], early_stopping.best_performance[1], early_stopping.best_performance[2], early_stopping.best_performance[3], early_stopping.best_performance[4], early_stopping.best_performance[5], early_stopping.best_performance[6], early_stopping.best_performance[7], early_stopping.best_performance[8], early_stopping.best_performance[9], early_stopping.best_performance[10]))
+        #         break
     
     sampler.close()

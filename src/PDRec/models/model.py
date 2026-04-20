@@ -34,31 +34,53 @@ class EarlyStopping_onetower:
         self.version = args.version
         self.dataset = args.dataset
         self.base_model = args.base_model
-
-    def __call__(self, epoch, model, result_path, t_test):
-
+    def __call__(self, epoch, model, result_path, current_metric):
         if self.ndcg_max is None:
-            self.ndcg_max = t_test[2]
-            self.best_performance = t_test
+            self.ndcg_max = current_metric
+            self.best_performance = current_metric
             self.save_epoch = epoch
-            self.save_checkpoint(epoch, model, result_path, t_test)
-        elif t_test[2] < self.ndcg_max:
+            self.save_checkpoint(epoch, model, result_path, current_metric)
+        elif current_metric < self.ndcg_max:
             self.counter += 1
             print(f'In the epoch: {epoch}, EarlyStopping counter: {self.counter} out of {self.patience}')
-            if self.counter >= self.patience and epoch>=self.epoch:
+            if self.counter >= self.patience and epoch >= self.epoch:
                 self.early_stop = True
         else:
-            self.best_performance = t_test
+            self.best_performance = current_metric
             self.save_epoch = epoch
-            self.save_checkpoint(epoch, model, result_path, t_test)
+            self.save_checkpoint(epoch, model, result_path, current_metric)
             self.counter = 0
+    # def __call__(self, epoch, model, result_path, t_test):
 
-    def save_checkpoint(self, epoch, model, result_path, t_test):
-        print(f'Validation loss in {epoch} decreased {self.ndcg_max:.4f} --> {t_test[2]:.4f}.  Saving model ...\n')
+    #     if self.ndcg_max is None:
+    #         self.ndcg_max = t_test[2]
+    #         self.best_performance = t_test
+    #         self.save_epoch = epoch
+    #         self.save_checkpoint(epoch, model, result_path, t_test)
+    #     elif t_test[2] < self.ndcg_max:
+    #         self.counter += 1
+    #         print(f'In the epoch: {epoch}, EarlyStopping counter: {self.counter} out of {self.patience}')
+    #         if self.counter >= self.patience and epoch>=self.epoch:
+    #             self.early_stop = True
+    #     else:
+    #         self.best_performance = t_test
+    #         self.save_epoch = epoch
+    #         self.save_checkpoint(epoch, model, result_path, t_test)
+    #         self.counter = 0
+
+    def save_checkpoint(self, epoch, model, result_path, current_metric):
+        print(f'Validation NDCG@10 improved to {current_metric:.4f}. Saving model ...\n')
         with io.open(result_path + 'save_model.txt', 'a', encoding='utf-8') as file:
-            file.write("NDCG@10 in epoch {} decreased {:.4f} --> {:.4f}, the HR@10 is {:.4f}, the AUC is {:.4f}, the loss_rec is {:.4f}. Saving model...\n".format(epoch, self.ndcg_max, t_test[2], t_test[7], t_test[10], t_test[11]))
-        torch.save(model.state_dict(), os.path.join(result_path, 'checkpoint.pt')) 
-        self.ndcg_max = t_test[2]
+            file.write(f"Epoch {epoch}: NDCG@10 = {current_metric:.4f}\n")
+        torch.save(model.state_dict(), os.path.join(result_path, 'checkpoint.pt'))
+        self.ndcg_max = current_metric
+
+    # def save_checkpoint(self, epoch, model, result_path, t_test):
+    #     print(f'Validation loss in {epoch} decreased {self.ndcg_max:.4f} --> {t_test[2]:.4f}.  Saving model ...\n')
+    #     with io.open(result_path + 'save_model.txt', 'a', encoding='utf-8') as file:
+    #         file.write("NDCG@10 in epoch {} decreased {:.4f} --> {:.4f}, the HR@10 is {:.4f}, the AUC is {:.4f}, the loss_rec is {:.4f}. Saving model...\n".format(epoch, self.ndcg_max, t_test[2], t_test[7], t_test[10], t_test[11]))
+    #     torch.save(model.state_dict(), os.path.join(result_path, 'checkpoint.pt')) 
+    #     self.ndcg_max = t_test[2]
 
 class PointWiseFeedForward(torch.nn.Module):
     def __init__(self, hidden_units, dropout_rate):
