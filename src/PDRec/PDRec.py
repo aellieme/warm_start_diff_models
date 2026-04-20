@@ -247,15 +247,15 @@ if __name__ == '__main__':
     adam_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.98))
 
     # set the early stop
-    early_stopping = EarlyStopping_onetower(args, verbose=True)  # 关于 EarlyStopping 的代码可先看博客后面的内容
+    early_stopping = EarlyStopping_onetower(args)  # 关于 EarlyStopping 的代码可先看博客后面的内容
 
     # set the learning rate scheduler
     if args.lrscheduler == 'Steplr': # 
-        learningrate_scheduler = torch.optim.lr_scheduler.StepLR(adam_optimizer, step_size=args.decay, gamma=args.lr_decay_rate, verbose=True)
+        learningrate_scheduler = torch.optim.lr_scheduler.StepLR(adam_optimizer, step_size=args.decay, gamma=args.lr_decay_rate)
     elif args.lrscheduler == 'ExponentialLR': # 
-        learningrate_scheduler = torch.optim.lr_scheduler.ExponentialLR(adam_optimizer, gamma=args.lr_decay_rate, last_epoch=-1, verbose=True)
+        learningrate_scheduler = torch.optim.lr_scheduler.ExponentialLR(adam_optimizer, gamma=args.lr_decay_rate, last_epoch=-1)
     elif args.lrscheduler == 'CosineAnnealingLR':
-        learningrate_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(adam_optimizer, T_max=args.num_epochs, eta_min=0, last_epoch=-1, verbose=True)
+        learningrate_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(adam_optimizer, T_max=args.num_epochs, eta_min=0, last_epoch=-1)
 
         
     ### Build Gaussian Diffusion ###
