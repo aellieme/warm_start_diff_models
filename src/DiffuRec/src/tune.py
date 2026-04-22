@@ -58,7 +58,7 @@ def objective(trial, base_args, data_raw):
     args.noise_schedule = noise_schedule
     args.schedule_sampler_name = schedule_sampler_name
     args.epochs = 7
-    args.eval_interval = 5
+    args.eval_interval = 7
     args.patience = 3
 
     fix_random_seed_as(args.random_seed)

@@ -118,12 +118,10 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
     optimizer = optimizers(model_joint, args)
     lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.decay_step, gamma=args.gamma)
     
-    best_metrics_dict = {}      # будет заполняться динамически для всех метрик (логирование)
+    best_metrics_dict = {}      # логирование, будет заполняться динамически для всех метрик
     best_epoch = {}             # аналогично
     best_recall10 = -1.0        # для early stopping
     best_model = None
-    # best_metrics_dict = {'Best_HR@5': 0, 'Best_NDCG@5': 0, 'Best_HR@10': 0, 'Best_NDCG@10': 0, 'Best_HR@20': 0, 'Best_NDCG@20': 0}
-    # best_epoch = {'Best_epoch_HR@5': 0, 'Best_epoch_NDCG@5': 0, 'Best_epoch_HR@10': 0, 'Best_epoch_NDCG@10': 0, 'Best_epoch_HR@20': 0, 'Best_epoch_NDCG@20': 0}
     bad_count = 0
     
     for epoch_temp in range(epochs):        
@@ -146,6 +144,7 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
                 print('[%d/%d] Loss: %.4f' % (index_temp, len(tra_data_loader), loss_all.item()))
                 logger.info('[%d/%d] Loss: %.4f' % (index_temp, len(tra_data_loader), loss_all.item()))
         print("loss in epoch {}: {}".format(epoch_temp, loss_all.item()))
+        plotter.update(epoch=epoch_temp, loss=loss_all.item())
         lr_scheduler.step()
 
         if epoch_temp != 0 and epoch_temp % args.eval_interval == 0:
@@ -209,13 +208,15 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
                 logger.info(best_epoch)
             else:
                 bad_count += 1
-            plotter.update(
-                epoch=epoch_temp,
-                loss=loss_all.item(),
-                recall=recall10
-            )
-            # Сохранять график каждые eval_interval для отслеживания прогресса
+            # plotter.update(
+            #     epoch=epoch_temp,
+            #     loss=loss_all.item(),
+            #     val_recall=recall10
+            # )
+            plotter.update(epoch=epoch_temp, val_recall=recall10)
             plotter.plot(save=True, show=False, suffix=f'_epoch{epoch_temp}')
+            # Сохранять график каждые eval_interval для отслеживания прогресса
+            # plotter.plot(save=True, show=False, suffix=f'_epoch{epoch_temp}')
             if bad_count >= args.patience:
                 break
             # for key_temp, values_temp in metrics_dict.items():
