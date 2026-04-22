@@ -142,15 +142,14 @@ def cold_hot_long_short(data_raw, dataset_name):
             len_seq_dict['long'].append(temp_seq)
     return cold_hot_dict, len_seq_dict, split_num, [len_short, len_midshort, len_midlong, len_long], len_list, list(item_num_count.values())
 
-
-def load_and_split_gts(quantiles=(0.7, 0.8, 0.9)):
+def load_and_split_gts(quantiles=(0.7, 0.8)):
     """
     Global Temporal Split 
+    quantiles: (validation_quantile, test_quantile)
+    Default: 70% train, 10% validation (70-80), 20% test (>80)
     """
-    val_all_seq = {}
-    adapt_seq = {}
     # 1. Загрузка MovieLens-1M с временными метками
-    df = get_movielens_data(include_time=True) #, data_dir='../datasets/raw/ml-1m')
+    df = get_movielens_data(include_time=True)
     
     # 2. Сквозная переиндексация пользователей и айтемов
     user_enc = LabelEncoder()
@@ -164,172 +163,285 @@ def load_and_split_gts(quantiles=(0.7, 0.8, 0.9)):
     
     # 4. Вычисление глобальных квантилей
     T_valid = df['timestamp'].quantile(quantiles[0])   # 70%
-    T_adapt = df['timestamp'].quantile(quantiles[1])   # 80%
-    T_test  = df['timestamp'].quantile(quantiles[2])   # 90%
+    T_test  = df['timestamp'].quantile(quantiles[1])   # 80%
     
     # 5. Разделение по пользователям
-    train_data = {}      # обучающая история (до T_valid)
-    adapt_data = {}      # адаптационная история (T_adapt < ts <= T_test)
-    val_examples = {}    # валидация: вход = train + валидационная история, цель = последний в окне (T_valid, T_adapt]
-    test_examples = {}   # тест: вход = train + adapt + тестовая история, цель = последний в окне (T_test, inf)
+    train_data = {}
+    val_examples = {}
+    test_examples = {}
     
     for uid, group in df.groupby('userid'):
         group = group.sort_values('timestamp')
         items = group['movieid'].tolist()
         timestamps = group['timestamp'].tolist()
         
-        # --- Обучающая история (всё до T_valid) ---
+        # Обучающая история (всё до T_valid)
         train_items = [item for item, ts in zip(items, timestamps) if ts <= T_valid]
         
-        # --- Адаптационная история (между T_adapt и T_test) ---
-        adapt_items = [item for item, ts in zip(items, timestamps) if T_adapt < ts <= T_test]
-        
-        # --- Валидационное окно (T_valid < ts <= T_adapt) ---
-        val_window = [(item, ts) for item, ts in zip(items, timestamps) if T_valid < ts <= T_adapt]
+        # Валидационное окно (T_valid < ts <= T_test)
+        val_window = [(item, ts) for item, ts in zip(items, timestamps) if T_valid < ts <= T_test]
         if val_window:
-            # target = последний айтем в валидационном окне
             target_item = val_window[-1][0]
-            # входная последовательность из валидационного окна (все до target)
             val_history = [item for item, _ in val_window[:-1]]
-            # полная входная последовательность для модели: обучение + валидационная история
             full_input = train_items + val_history
             val_examples[uid] = (full_input, [target_item])
         
-        # --- Тестовое окно (ts > T_test) ---
-        val_window_all = [item for item, ts in zip(items, timestamps) if T_valid < ts <= T_adapt]
-        if val_window_all:
-            val_all_seq[uid] = val_window_all   
+        # Тестовое окно (ts > T_test)
         test_window = [(item, ts) for item, ts in zip(items, timestamps) if ts > T_test]
         if test_window:
-            target_item = test_window[-1][0]                     # последний в тестовом окне
-            test_history = [item for item, _ in test_window[:-1]] # все до последнего
-            # полная входная последовательность: обучение + адаптация + тестовая история
-            full_input = train_items + val_window_all + adapt_items + test_history
+            target_item = test_window[-1][0]
+            test_history = [item for item, _ in test_window[:-1]]
+            # Полная входная последовательность: обучение + валидационная история + тестовая история
+            val_history_for_test = [item for item, _ in val_window]  # вся история валидации (без таргета)
+            full_input = train_items + val_history_for_test + test_history
             test_examples[uid] = (full_input, [target_item])
         
-
-        
-        # --- Адаптационная история ---
-        adapt_items = [item for item, ts in zip(items, timestamps) if T_adapt < ts <= T_test]
-        if adapt_items:
-            adapt_seq[uid] = adapt_items  
-        
-        # Сохраняем обучающую и адаптационную последовательности (для полноты)
         if train_items:
             train_data[uid] = train_items
-        if adapt_items:
-            adapt_data[uid] = adapt_items
     
-    for uid, (full_input, target) in val_examples.items():
-        group = df[df['userid'] == uid].sort_values('timestamp')
-        val_window = group[(group['timestamp'] > T_valid) & (group['timestamp'] <= T_adapt)]
-        if len(val_window) > 0:
-            last_in_window = val_window.iloc[-1]['movieid']
-            assert target[0] == last_in_window, f"!!Target mismatch for user {uid}"
-
-    print("Validation targets are last items in window (ok)")
-    # 6. Преобразование в формат, ожидаемый классами Data_Val и Data_Test
-    # Для валидации: u2seq = полная входная последовательность, u2answer = цель
+    # Преобразование в формат, ожидаемый классами Data_Val и Data_Test
     val_u2seq = {uid: val_examples[uid][0] for uid in val_examples}
     val_u2answer = {uid: val_examples[uid][1] for uid in val_examples}
     
-    # Для теста: u2seq = полная входная последовательность, u2answer = цель
     test_u2seq = {uid: test_examples[uid][0] for uid in test_examples}
     test_u2answer = {uid: test_examples[uid][1] for uid in test_examples}
     
     data_raw = {
-        'train': train_data,          # используется только для обучения модели (через Data_Train)
-        'val': val_u2answer,          # для Data_Val нужен словарь u2answer
-        'test': test_u2answer,        # для Data_Test нужен словарь u2answer
+        'train': train_data,
+        'val': val_u2answer,
+        'test': test_u2answer,
         'smap': smap,
-        # Дополнительные поля, чтобы Data_Val/Test могли восстановить полную историю
         'val_seq': val_u2seq,
         'test_seq': test_u2seq,
-        'val_all_seq': val_all_seq,
-        'adapt_seq': adapt_seq,
     }
     return data_raw
+# def load_and_split_gts(quantiles=(0.7, 0.8, 0.9)):
+#     """
+#     Global Temporal Split 
+#     """
+#     val_all_seq = {}
+#     adapt_seq = {}
+#     # 1. Загрузка MovieLens-1M с временными метками
+#     df = get_movielens_data(include_time=True) #, data_dir='../datasets/raw/ml-1m')
+    
+#     # 2. Сквозная переиндексация пользователей и айтемов
+#     user_enc = LabelEncoder()
+#     item_enc = LabelEncoder()
+#     df['userid'] = user_enc.fit_transform(df['userid'])
+#     df['movieid'] = item_enc.fit_transform(df['movieid'])
+#     smap = {idx: original for idx, original in enumerate(item_enc.classes_)}
+    
+#     # 3. Глобальная сортировка по времени
+#     df = df.sort_values('timestamp').reset_index(drop=True)
+    
+#     # 4. Вычисление глобальных квантилей
+#     T_valid = df['timestamp'].quantile(quantiles[0])   # 70%
+#     T_adapt = df['timestamp'].quantile(quantiles[1])   # 80%
+#     T_test  = df['timestamp'].quantile(quantiles[2])   # 90%
+    
+#     # 5. Разделение по пользователям
+#     train_data = {}      # обучающая история (до T_valid)
+#     adapt_data = {}      # адаптационная история (T_adapt < ts <= T_test)
+#     val_examples = {}    # валидация: вход = train + валидационная история, цель = последний в окне (T_valid, T_adapt]
+#     test_examples = {}   # тест: вход = train + adapt + тестовая история, цель = последний в окне (T_test, inf)
+    
+#     for uid, group in df.groupby('userid'):
+#         group = group.sort_values('timestamp')
+#         items = group['movieid'].tolist()
+#         timestamps = group['timestamp'].tolist()
+        
+#         # --- Обучающая история (всё до T_valid) ---
+#         train_items = [item for item, ts in zip(items, timestamps) if ts <= T_valid]
+        
+#         # --- Адаптационная история (между T_adapt и T_test) ---
+#         adapt_items = [item for item, ts in zip(items, timestamps) if T_adapt < ts <= T_test]
+        
+#         # --- Валидационное окно (T_valid < ts <= T_adapt) ---
+#         val_window = [(item, ts) for item, ts in zip(items, timestamps) if T_valid < ts <= T_adapt]
+#         if val_window:
+#             # target = последний айтем в валидационном окне
+#             target_item = val_window[-1][0]
+#             # входная последовательность из валидационного окна (все до target)
+#             val_history = [item for item, _ in val_window[:-1]]
+#             # полная входная последовательность для модели: обучение + валидационная история
+#             full_input = train_items + val_history
+#             val_examples[uid] = (full_input, [target_item])
+        
+#         # --- Тестовое окно (ts > T_test) ---
+#         val_window_all = [item for item, ts in zip(items, timestamps) if T_valid < ts <= T_adapt]
+#         if val_window_all:
+#             val_all_seq[uid] = val_window_all   
+#         test_window = [(item, ts) for item, ts in zip(items, timestamps) if ts > T_test]
+#         if test_window:
+#             target_item = test_window[-1][0]                     # последний в тестовом окне
+#             test_history = [item for item, _ in test_window[:-1]] # все до последнего
+#             # полная входная последовательность: обучение + адаптация + тестовая история
+#             full_input = train_items + val_window_all + adapt_items + test_history
+#             test_examples[uid] = (full_input, [target_item])
+        
 
+        
+#         # --- Адаптационная история ---
+#         adapt_items = [item for item, ts in zip(items, timestamps) if T_adapt < ts <= T_test]
+#         if adapt_items:
+#             adapt_seq[uid] = adapt_items  
+        
+#         # Сохраняем обучающую и адаптационную последовательности (для полноты)
+#         if train_items:
+#             train_data[uid] = train_items
+#         if adapt_items:
+#             adapt_data[uid] = adapt_items
+    
+#     for uid, (full_input, target) in val_examples.items():
+#         group = df[df['userid'] == uid].sort_values('timestamp')
+#         val_window = group[(group['timestamp'] > T_valid) & (group['timestamp'] <= T_adapt)]
+#         if len(val_window) > 0:
+#             last_in_window = val_window.iloc[-1]['movieid']
+#             assert target[0] == last_in_window, f"!!Target mismatch for user {uid}"
+
+#     print("Validation targets are last items in window (ok)")
+#     # 6. Преобразование в формат, ожидаемый классами Data_Val и Data_Test
+#     # Для валидации: u2seq = полная входная последовательность, u2answer = цель
+#     val_u2seq = {uid: val_examples[uid][0] for uid in val_examples}
+#     val_u2answer = {uid: val_examples[uid][1] for uid in val_examples}
+    
+#     # Для теста: u2seq = полная входная последовательность, u2answer = цель
+#     test_u2seq = {uid: test_examples[uid][0] for uid in test_examples}
+#     test_u2answer = {uid: test_examples[uid][1] for uid in test_examples}
+    
+#     data_raw = {
+#         'train': train_data,          # используется только для обучения модели (через Data_Train)
+#         'val': val_u2answer,          # для Data_Val нужен словарь u2answer
+#         'test': test_u2answer,        # для Data_Test нужен словарь u2answer
+#         'smap': smap,
+#         # Дополнительные поля, чтобы Data_Val/Test могли восстановить полную историю
+#         'val_seq': val_u2seq,
+#         'test_seq': test_u2seq,
+#         'val_all_seq': val_all_seq,
+#         'adapt_seq': adapt_seq,
+#     }
+#     return data_raw
 
 
 def main(args):    
     fix_random_seed_as(args.random_seed)
     torch.backends.cudnn.benchmark = True
-    # path_data = '../datasets/data/' + args.dataset + '/dataset.pkl'
-    # with open(path_data, 'rb') as f:
-    #     data_raw = pickle.load(f)
-    data_raw = load_and_split_gts(quantiles=(0.7, 0.8, 0.9))
+    data_raw = load_and_split_gts(quantiles=(0.7, 0.8))
     
     print("Train users:", len(data_raw['train']))
-    print("Sample sequence length:", len(list(data_raw['train'].values())[0]))
     print("Item vocab size:", len(data_raw['smap']))
     
+    args = item_num_create(args, len(data_raw['smap']))
+    
+    # Подготовка данных для валидации
     data_raw_for_val = {
-        'train': data_raw['val_seq'],   # подменяем: для валидации история — это полная последовательность
+        'train': data_raw['val_seq'],
         'val': data_raw['val'],
         'test': data_raw['test'],
         'smap': data_raw['smap']
-        }
-
-    # Для теста: история = test_seq, дополнительная история (u2seq_add) = пусто
+    }
+    
+    # Подготовка данных для теста
     data_raw_for_test = {
         'train': data_raw['test_seq'],
-        # 'val': data_raw['val']
         'val': {uid: [] for uid in data_raw['test_seq']},
         'test': data_raw['test'],
         'smap': data_raw['smap']
-        }
-    
-        # Создаём baseline-последовательности (без адаптации)
-    baseline_test_seq = {}
-    for uid in data_raw['test_seq'].keys():
-        full_seq = data_raw['test_seq'][uid]          # train + val_all + adapt + test_history
-        adapt_items = set(data_raw['adapt_seq'].get(uid, []))
-        # Удаляем адаптационные айтемы, сохраняя порядок
-        baseline_seq = [item for item in full_seq if item not in adapt_items]
-        baseline_test_seq[uid] = baseline_seq
-
-    data_raw_for_test_baseline = {
-        'train': baseline_test_seq,
-        'val': {uid: [] for uid in baseline_test_seq},   # пустые дополнительные истории
-        'test': data_raw['test'],
-        'smap': data_raw['smap']
     }
-    baseline_test_data = Data_Test(data_raw_for_test_baseline['train'],
-                                data_raw_for_test_baseline['val'],
-                                data_raw_for_test_baseline['test'], args)
-    baseline_test_loader = baseline_test_data.get_pytorch_dataloaders()
-        
     
-    # cold_hot_long_short(data_raw, args.dataset)
-    args = item_num_create(args, len(data_raw['smap']))
-
-    tra_data = Data_Train(data_raw['train'], args)   # обучение без изменений
-
-    # ВАЖНО: для валидации передаём подменённый словарь
+    tra_data = Data_Train(data_raw['train'], args)
     val_data = Data_Val(data_raw_for_val['train'], data_raw_for_val['val'], args)
-
-    # Для теста передаём подменённый словарь (u2seq = test_seq, u2seq_add = пустой)
-    # Data_Test ожидает три аргумента: data_train, data_val, data_test.
     test_data = Data_Test(data_raw_for_test['train'], data_raw_for_test['val'], data_raw_for_test['test'], args)
-    
-    # args = item_num_create(args, len(data_raw['smap']))
-    # tra_data = Data_Train(data_raw['train'], args)
-    # val_data = Data_Val(data_raw['train'], data_raw['val'], args)
-    # test_data = Data_Test(data_raw['train'], data_raw['val'], data_raw['test'], args)
-    
     
     tra_data_loader = tra_data.get_pytorch_dataloaders()
     val_data_loader = val_data.get_pytorch_dataloaders()
     test_data_loader = test_data.get_pytorch_dataloaders()
+    
     diffu_rec = create_model_diffu(args)
     rec_diffu_joint_model = Att_Diffuse_model(diffu_rec, args)
     
     best_model, test_results = model_train(tra_data_loader, val_data_loader, test_data_loader, rec_diffu_joint_model, args, logger)
+    
+    evaluate_and_print(best_model, test_data_loader, args, logger, description="test")
+
+# def main(args):    
+#     fix_random_seed_as(args.random_seed)
+#     torch.backends.cudnn.benchmark = True
+#     # path_data = '../datasets/data/' + args.dataset + '/dataset.pkl'
+#     # with open(path_data, 'rb') as f:
+#     #     data_raw = pickle.load(f)
+#     data_raw = load_and_split_gts(quantiles=(0.7, 0.8, 0.9))
+    
+#     print("Train users:", len(data_raw['train']))
+#     print("Sample sequence length:", len(list(data_raw['train'].values())[0]))
+#     print("Item vocab size:", len(data_raw['smap']))
+    
+#     data_raw_for_val = {
+#         'train': data_raw['val_seq'],   # подменяем: для валидации история — это полная последовательность
+#         'val': data_raw['val'],
+#         'test': data_raw['test'],
+#         'smap': data_raw['smap']
+#         }
+
+#     # Для теста: история = test_seq, дополнительная история (u2seq_add) = пусто
+#     data_raw_for_test = {
+#         'train': data_raw['test_seq'],
+#         # 'val': data_raw['val']
+#         'val': {uid: [] for uid in data_raw['test_seq']},
+#         'test': data_raw['test'],
+#         'smap': data_raw['smap']
+#         }
+    
+#         # Создаём baseline-последовательности (без адаптации)
+#     baseline_test_seq = {}
+#     for uid in data_raw['test_seq'].keys():
+#         full_seq = data_raw['test_seq'][uid]          # train + val_all + adapt + test_history
+#         adapt_items = set(data_raw['adapt_seq'].get(uid, []))
+#         # Удаляем адаптационные айтемы, сохраняя порядок
+#         baseline_seq = [item for item in full_seq if item not in adapt_items]
+#         baseline_test_seq[uid] = baseline_seq
+
+#     data_raw_for_test_baseline = {
+#         'train': baseline_test_seq,
+#         'val': {uid: [] for uid in baseline_test_seq},   # пустые дополнительные истории
+#         'test': data_raw['test'],
+#         'smap': data_raw['smap']
+#     }
+#     baseline_test_data = Data_Test(data_raw_for_test_baseline['train'],
+#                                 data_raw_for_test_baseline['val'],
+#                                 data_raw_for_test_baseline['test'], args)
+#     baseline_test_loader = baseline_test_data.get_pytorch_dataloaders()
+        
+    
+#     # cold_hot_long_short(data_raw, args.dataset)
+#     args = item_num_create(args, len(data_raw['smap']))
+
+#     tra_data = Data_Train(data_raw['train'], args)   # обучение без изменений
+
+#     # ВАЖНО: для валидации передаём подменённый словарь
+#     val_data = Data_Val(data_raw_for_val['train'], data_raw_for_val['val'], args)
+
+#     # Для теста передаём подменённый словарь (u2seq = test_seq, u2seq_add = пустой)
+#     # Data_Test ожидает три аргумента: data_train, data_val, data_test.
+#     test_data = Data_Test(data_raw_for_test['train'], data_raw_for_test['val'], data_raw_for_test['test'], args)
+    
+#     # args = item_num_create(args, len(data_raw['smap']))
+#     # tra_data = Data_Train(data_raw['train'], args)
+#     # val_data = Data_Val(data_raw['train'], data_raw['val'], args)
+#     # test_data = Data_Test(data_raw['train'], data_raw['val'], data_raw['test'], args)
+    
+    
+#     tra_data_loader = tra_data.get_pytorch_dataloaders()
+#     val_data_loader = val_data.get_pytorch_dataloaders()
+#     test_data_loader = test_data.get_pytorch_dataloaders()
+#     diffu_rec = create_model_diffu(args)
+#     rec_diffu_joint_model = Att_Diffuse_model(diffu_rec, args)
+    
+#     best_model, test_results = model_train(tra_data_loader, val_data_loader, test_data_loader, rec_diffu_joint_model, args, logger)
     # Baseline инференс
-    evaluate_and_print(best_model, baseline_test_loader, args, logger, description="baseline")
-    # Adaptation инференс (уже есть test_data_loader)
-    evaluate_and_print(best_model, test_data_loader, args, logger, description="adaptation")
+    # evaluate_and_print(best_model, baseline_test_loader, args, logger, description="baseline")
+    # # Adaptation инференс (уже есть test_data_loader)
+    # evaluate_and_print(best_model, test_data_loader, args, logger, description="adaptation")
 
     if args.long_head:
         cold_hot_dict, len_seq_dict, split_hotcold, split_length, list_len, list_num = cold_hot_long_short(data_raw, args.dataset)

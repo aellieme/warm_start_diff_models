@@ -119,7 +119,8 @@ def main():
         hidden_act='gelu',       
     )
     fix_random_seed_as(base_args.random_seed)
-    data_raw = load_and_split_gts(quantiles=(0.7, 0.8, 0.9))
+    # data_raw = load_and_split_gts(quantiles=(0.7, 0.8, 0.9))
+    data_raw = load_and_split_gts(quantiles=(0.7, 0.8))
     base_args = item_num_create(base_args, len(data_raw['smap']))
 
     study = optuna.create_study(direction='maximize', study_name='diffurec_tuning')
@@ -150,18 +151,34 @@ def main():
 
     best_model_final, _ = model_train(tra_loader_final, val_loader_final, test_loader_final, model_final, final_args, logger)
 
-    print("\nFinal evaluation ")
-    baseline_test_seq = {}
-    for uid in data_raw['test_seq'].keys():
-        full_seq = data_raw['test_seq'][uid]
-        adapt_items = set(data_raw.get('adapt_seq', {}).get(uid, []))
-        baseline_seq = [item for item in full_seq if item not in adapt_items]
-        baseline_test_seq[uid] = baseline_seq
-    baseline_test_data = Data_Test(baseline_test_seq, {uid: [] for uid in baseline_test_seq}, data_raw['test'], final_args)
-    baseline_loader = baseline_test_data.get_pytorch_dataloaders()
+    print("\nFinal evaluation")
+    evaluate_and_print(best_model_final, test_loader_final, final_args, logger, description="test")
+    # tra_data_final = Data_Train(data_raw['train'], final_args)
+    # val_data_final = Data_Val(data_raw['val_seq'], data_raw['val'], final_args)
+    # test_data_final = Data_Test(data_raw['test_seq'], {uid: [] for uid in data_raw['test_seq']}, data_raw['test'], final_args)
 
-    evaluate_and_print(best_model_final, baseline_loader, final_args, logger, description="baseline")
-    evaluate_and_print(best_model_final, test_loader_final, final_args, logger, description="adaptation")
+    # tra_loader_final = tra_data_final.get_pytorch_dataloaders()
+    # val_loader_final = val_data_final.get_pytorch_dataloaders()
+    # test_loader_final = test_data_final.get_pytorch_dataloaders()
+
+    # diffu_rec_final = create_model_diffu(final_args)
+    # model_final = Att_Diffuse_model(diffu_rec_final, final_args)
+    # model_final = model_final.to(final_args.device)
+
+    # best_model_final, _ = model_train(tra_loader_final, val_loader_final, test_loader_final, model_final, final_args, logger)
+
+    # print("\nFinal evaluation ")
+    # baseline_test_seq = {}
+    # for uid in data_raw['test_seq'].keys():
+    #     full_seq = data_raw['test_seq'][uid]
+    #     adapt_items = set(data_raw.get('adapt_seq', {}).get(uid, []))
+    #     baseline_seq = [item for item in full_seq if item not in adapt_items]
+    #     baseline_test_seq[uid] = baseline_seq
+    # baseline_test_data = Data_Test(baseline_test_seq, {uid: [] for uid in baseline_test_seq}, data_raw['test'], final_args)
+    # baseline_loader = baseline_test_data.get_pytorch_dataloaders()
+
+    # evaluate_and_print(best_model_final, baseline_loader, final_args, logger, description="baseline")
+    # evaluate_and_print(best_model_final, test_loader_final, final_args, logger, description="adaptation")
     print("\nFinal hyperparameters used in training")
     for key in ['lr', 'batch_size', 'hidden_size', 'dropout', 'emb_dropout', 'num_blocks', 
                 'diffusion_steps', 'lambda_uncertainty', 'noise_schedule', 'schedule_sampler_name',

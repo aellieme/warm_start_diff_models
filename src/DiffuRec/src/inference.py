@@ -61,63 +61,88 @@ args_dict = checkpoint['args']
 args = Namespace(**args_dict)
 
 fix_random_seed_as(args.random_seed)
-data_raw = load_and_split_gts(quantiles=(0.7, 0.8, 0.9))
+# data_raw = load_and_split_gts(quantiles=(0.7, 0.8, 0.9))
+data_raw = load_and_split_gts(quantiles=(0.7, 0.8))
 args = item_num_create(args, len(data_raw['smap']))
 
-test_data = Data_Test(data_raw['test_seq'], {uid: [] for uid in data_raw['test_seq']}, data_raw['test'], args)
-test_loader = test_data.get_pytorch_dataloaders()
-
-baseline_test_seq = {}
-for uid in data_raw['test_seq'].keys():
-    full_seq = data_raw['test_seq'][uid]
-    adapt_items = set(data_raw.get('adapt_seq', {}).get(uid, []))
-    baseline_seq = [item for item in full_seq if item not in adapt_items]
-    baseline_test_seq[uid] = baseline_seq
-baseline_test_data = Data_Test(baseline_test_seq, {uid: [] for uid in baseline_test_seq}, data_raw['test'], args)
-baseline_loader = baseline_test_data.get_pytorch_dataloaders()
-
+# После загрузки чекпоинта и args
 diffu_rec = create_model_diffu(args)
 model = Att_Diffuse_model(diffu_rec, args)
 model.load_state_dict(checkpoint['model_state_dict'])
 model = model.to(args.device)
 model.eval()
 
-print("\n Inference using saved model")
-evaluate_and_print(model, baseline_loader, args, logger, description="baseline")
-evaluate_and_print(model, test_loader, args, logger, description="adaptation")
-
-#  Демонстрация для случайного пользователя
+# Загрузка метаданных и словаря
 movie_dict = load_movies_metadata()
 smap = data_raw['smap']
 
+# Один тестовый лоадер
+test_data = Data_Test(data_raw['test_seq'], {uid: [] for uid in data_raw['test_seq']}, data_raw['test'], args)
+test_loader = test_data.get_pytorch_dataloaders()
+
+print("\nInference using saved model")
+evaluate_and_print(model, test_loader, args, logger, description="test")
+
+# Демонстрация
 test_users = list(data_raw['test_seq'].keys())
 if test_users:
     rand_uid = random.choice(test_users)
     print(f"\n--- Пример для пользователя {rand_uid} ---")
-    
     full_seq = data_raw['test_seq'][rand_uid]
-    adapt_items = set(data_raw.get('adapt_seq', {}).get(rand_uid, []))
-    baseline_history = [item for item in full_seq if item not in adapt_items]
     target = data_raw['test'][rand_uid][0]
-    
-    recs_baseline = recommend_for_user(model, baseline_history, target, args, topk=10)
-    recs_adapt = recommend_for_user(model, full_seq, target, args, topk=10)
-    
-    print("\nИстория (baseline, последние 10):")
-    for idx in baseline_history[-10:]:
+    recs = recommend_for_user(model, full_seq, target, args, topk=10)
+    print("\nИстория (последние 10):")
+    for idx in full_seq[-10:]:
         print(f"  {decode_item(idx, smap, movie_dict)}")
-    
     print(f"\nПравильный ответ: {decode_item(target, smap, movie_dict)}")
-    
-    print("\nРекомендации baseline (top-10):")
-    for rank, rec in enumerate(recs_baseline, 1):
-        print(f"  {rank}. {decode_item(rec, smap, movie_dict)}")
-    
-    print("\nРекомендации c адаптацией (top-10):")
-    for rank, rec in enumerate(recs_adapt, 1):
+    print("\nРекомендации (top-10):")
+    for rank, rec in enumerate(recs, 1):
         print(f"  {rank}. {decode_item(rec, smap, movie_dict)}")
 else:
     print("Нет пользователей для демонстрации")
+
+# diffu_rec = create_model_diffu(args)
+# model = Att_Diffuse_model(diffu_rec, args)
+# model.load_state_dict(checkpoint['model_state_dict'])
+# model = model.to(args.device)
+# model.eval()
+
+# print("\n Inference using saved model")
+# evaluate_and_print(model, baseline_loader, args, logger, description="baseline")
+# evaluate_and_print(model, test_loader, args, logger, description="adaptation")
+
+# #  Демонстрация для случайного пользователя
+# movie_dict = load_movies_metadata()
+# smap = data_raw['smap']
+
+# test_users = list(data_raw['test_seq'].keys())
+# if test_users:
+#     rand_uid = random.choice(test_users)
+#     print(f"\n--- Пример для пользователя {rand_uid} ---")
+    
+#     full_seq = data_raw['test_seq'][rand_uid]
+#     adapt_items = set(data_raw.get('adapt_seq', {}).get(rand_uid, []))
+#     baseline_history = [item for item in full_seq if item not in adapt_items]
+#     target = data_raw['test'][rand_uid][0]
+    
+#     recs_baseline = recommend_for_user(model, baseline_history, target, args, topk=10)
+#     recs_adapt = recommend_for_user(model, full_seq, target, args, topk=10)
+    
+#     print("\nИстория (baseline, последние 10):")
+#     for idx in baseline_history[-10:]:
+#         print(f"  {decode_item(idx, smap, movie_dict)}")
+    
+#     print(f"\nПравильный ответ: {decode_item(target, smap, movie_dict)}")
+    
+#     print("\nРекомендации baseline (top-10):")
+#     for rank, rec in enumerate(recs_baseline, 1):
+#         print(f"  {rank}. {decode_item(rec, smap, movie_dict)}")
+    
+#     print("\nРекомендации c адаптацией (top-10):")
+#     for rank, rec in enumerate(recs_adapt, 1):
+#         print(f"  {rank}. {decode_item(rec, smap, movie_dict)}")
+# else:
+#     print("Нет пользователей для демонстрации")
 
 params_json_path = latest_model_path.replace('.pt', '.json').replace('model_', 'params_')
 if os.path.exists(params_json_path):
