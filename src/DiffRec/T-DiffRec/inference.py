@@ -28,7 +28,7 @@ import data_utils
 from copy import deepcopy
 
 import random
-random_seed = 1
+random_seed = 42
 torch.manual_seed(random_seed) # cpu
 torch.cuda.manual_seed(random_seed) # gpu
 np.random.seed(random_seed) # numpy

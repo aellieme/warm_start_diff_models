@@ -18,6 +18,14 @@ from models.DNN import DNN
 import time
 from plotting import TrainingPlotter
 
+import random
+random_seed = 42
+torch.manual_seed(random_seed)
+torch.cuda.manual_seed(random_seed)
+np.random.seed(random_seed)
+random.seed(random_seed)
+torch.backends.cudnn.deterministic = True
+
 DATASET = 'ml-1m'                     
 DATA_PATH = f'../../data/{DATASET}/'
 BATCH_SIZE = 400
