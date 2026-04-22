@@ -49,7 +49,7 @@ train_data, train_data_ori, valid_y_data, test_y_data, n_user, n_item = data_uti
     train_path, valid_path, test_path, w_min=0.1, w_max=1.0   # временные w_min/w_max, будут заменены при тюнинге
 )
 train_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data.toarray()))
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True, num_workers=4)
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True, num_workers=2)
 test_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False)
 if TST_W_VAL:
     tv_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data.toarray()) + torch.FloatTensor(valid_y_data.toarray()))
@@ -98,7 +98,7 @@ def train_and_evaluate(trial):
     global train_data, train_dataset, train_loader
     train_data, _, _, _, _, _ = data_utils.data_load(train_path, valid_path, test_path, w_min, w_max)
     train_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data.toarray()))
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True, num_workers=2)
 
     # диффузия
     mean_type = gd.ModelMeanType.START_X
@@ -160,7 +160,7 @@ def main():
     train_data, train_data_ori, valid_y_data, test_y_data, n_user, n_item = data_utils.data_load(
         train_path, valid_path, test_path, w_min, w_max)
     train_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data.toarray()))
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True, num_workers=2)
     # диффузия
     diffusion = gd.GaussianDiffusion(gd.ModelMeanType.START_X, 'linear-var',
                                      best_params['noise_scale'], best_params['noise_min'], best_params['noise_max'],

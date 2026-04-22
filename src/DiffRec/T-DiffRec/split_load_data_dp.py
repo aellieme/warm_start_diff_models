@@ -136,7 +136,7 @@ def initialize_data():
     print(df.head(3))
 
     splitter = GlobalTemporalSplitter(df)
-    data = splitter.split(train_p=0.7, val_p=0.1, adapt_p=0.1)
+    data = splitter.split(train_p=0.7, val_p=0.1)
     splitter.save_splits(data, DATA_DIR)
     print('Dataset prepared, splits saved to', DATA_DIR)
 

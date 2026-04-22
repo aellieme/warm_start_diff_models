@@ -124,7 +124,7 @@ if __name__ == '__main__':
     train_data, train_data_ori, valid_y_data, test_y_data, n_user, n_item = data_utils.data_load(train_path, valid_path, test_path, args.w_min, args.w_max)
     # train_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data.A)) #old method
     train_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data.toarray()))
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, pin_memory=True, shuffle=True, num_workers=4, worker_init_fn=worker_init_fn)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, pin_memory=True, shuffle=True, num_workers=2, worker_init_fn=worker_init_fn)
     test_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False)
 
     if args.tst_w_val:
