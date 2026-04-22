@@ -46,8 +46,10 @@ def objective(trial, base_args, dataset, device):
     steps = trial.suggest_int('steps', 2, 50)
     sampling_steps = trial.suggest_int('sampling_steps', 1, steps)
     noise_scale = trial.suggest_float('noise_scale', 1e-4, 1e-1, log=True)
+    # noise_min = trial.suggest_float('noise_min', 1e-4, 1e-2, log=True)
+    # noise_max = trial.suggest_float('noise_max', 1e-3, 1e-1, log=True)
     noise_min = trial.suggest_float('noise_min', 1e-4, 1e-2, log=True)
-    noise_max = trial.suggest_float('noise_max', 1e-3, 1e-1, log=True)
+    noise_max = trial.suggest_float('noise_max', noise_min, 1e-1, log=True)
     emb_size = trial.suggest_int('emb_size', 5, 50)
 
     # клонируем базовую конфигурацию и обновляем предложенными значениями
