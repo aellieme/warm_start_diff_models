@@ -14,7 +14,7 @@ dataset:
 dataloader:
   batch_size: 64
   test_batch_size: 16
-  num_workers: 8
+  num_workers: 2
   validation_size: 10000
 
 model: 'GPT-2'
