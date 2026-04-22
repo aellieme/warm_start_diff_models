@@ -8,7 +8,7 @@ import time
 import pickle
 
 from evaluate_topk_dp import compute_all_metrics
-
+from plotting import TrainingPlotter
 
 def optimizers(model, args):
     if args.optimizer.lower() == 'adam':
@@ -103,6 +103,11 @@ def evaluate_and_print(model, data_loader, args, logger, description="evaluation
         logger.info(f"k=10: Recall={rec:.4f}, MRR={mrr:.4f}, NDCG={nd:.4f}, Coverage={cov:.4f}")
 
 def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint, args, logger):
+    plotter = TrainingPlotter(
+        save_dir=args.log_file + args.dataset,
+        model_name=f"{args.description}_{time.strftime('%Y%m%d_%H%M%S')}",
+        metrics=['loss', 'recall@10']
+        )
     epochs = args.epochs
     device = args.device
     metric_ks = args.metric_ks
@@ -204,7 +209,13 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
                 logger.info(best_epoch)
             else:
                 bad_count += 1
-
+            plotter.update(
+                epoch=epoch_temp,
+                loss=loss_all.item(),
+                recall=recall10
+            )
+            # Сохранять график каждые eval_interval для отслеживания прогресса
+            plotter.plot(save=True, show=False, suffix=f'_epoch{epoch_temp}')
             if bad_count >= args.patience:
                 break
             # for key_temp, values_temp in metrics_dict.items():
@@ -262,7 +273,7 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
         #     if bad_count >= args.patience:
         #         break
             
-    
+    plotter.plot(save=True, show=False, suffix='_final')
     logger.info(best_metrics_dict)
     logger.info(best_epoch)
     # Гарантируем, что best_model не None (если улучшений не было, берём последнюю модель)
@@ -316,8 +327,8 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
 
     # print(best_metrics_dict)
     # print(best_epoch)
-    logger.info(best_metrics_dict)
-    logger.info(best_epoch)
+    # logger.info(best_metrics_dict)
+    # logger.info(best_epoch)
 
     print(args)
 
