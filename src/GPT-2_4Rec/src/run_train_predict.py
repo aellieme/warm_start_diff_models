@@ -251,13 +251,21 @@ class PlottingCallback(Callback):
     def __init__(self, plotter, save_every=5):
         self.plotter = plotter
         self.save_every = save_every
-
     def on_validation_epoch_end(self, trainer, pl_module):
         epoch = trainer.current_epoch
         metrics = trainer.callback_metrics
         train_loss = metrics.get('train_loss')
         val_loss = metrics.get('val_loss')
-        val_recall = metrics.get('val_hit_rate')   # hit_rate = recall@10
+        val_recall = metrics.get('val_hit_rate')
+        
+        # Преобразование тензоров в числа (если они есть)
+        if train_loss is not None:
+            train_loss = train_loss.item() if hasattr(train_loss, 'item') else train_loss
+        if val_loss is not None:
+            val_loss = val_loss.item() if hasattr(val_loss, 'item') else val_loss
+        if val_recall is not None:
+            val_recall = val_recall.item() if hasattr(val_recall, 'item') else val_recall
+        
         self.plotter.update(
             epoch=epoch,
             loss=train_loss,
@@ -266,6 +274,20 @@ class PlottingCallback(Callback):
         )
         if (epoch % self.save_every == 0) or (epoch == trainer.max_epochs - 1):
             self.plotter.plot(save=True, show=False)
+    # def on_validation_epoch_end(self, trainer, pl_module):
+    #     epoch = trainer.current_epoch
+    #     metrics = trainer.callback_metrics
+    #     train_loss = metrics.get('train_loss')
+    #     val_loss = metrics.get('val_loss')
+    #     val_recall = metrics.get('val_hit_rate')   # hit_rate = recall@10
+    #     self.plotter.update(
+    #         epoch=epoch,
+    #         loss=train_loss,
+    #         val_loss=val_loss,
+    #         recall=val_recall
+    #     )
+    #     if (epoch % self.save_every == 0) or (epoch == trainer.max_epochs - 1):
+    #         self.plotter.plot(save=True, show=False)
 
 
 def training(model, train_loader, eval_loader, config):
