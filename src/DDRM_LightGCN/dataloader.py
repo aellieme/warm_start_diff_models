@@ -78,7 +78,7 @@ class DiffData(BasicDataset):
 		train_file = path + '/train_list.npy'
 		valid_file = path + '/valid_list.npy'
 		test_file = path + '/test_list.npy'
-		adapt_file = path + '/adapt_list.npy'
+		# adapt_file = path + '/adapt_list.npy'
 
 		self.path = path
 		trainUniqueUsers, trainItem, trainUser = [], [], []
@@ -91,12 +91,12 @@ class DiffData(BasicDataset):
 		self.train_list = np.load(train_file, allow_pickle=True)
 		self.valid_list = np.load(valid_file, allow_pickle=True)
 		self.test_list = np.load(test_file, allow_pickle=True)
-		self.adapt_list = np.load(adapt_file, allow_pickle=True)
+		# self.adapt_list = np.load(adapt_file, allow_pickle=True)
 
 		self.train_dict = {}
 		self.valid_dict = {}
 		self.test_dict = {}
-		self.adapt_dict = {}
+		# self.adapt_dict = {}
 		for uid, iid in self.train_list:
 			if uid not in self.train_dict:
 				self.train_dict[uid] = []
@@ -113,8 +113,8 @@ class DiffData(BasicDataset):
 			self.test_dict[uid].append(iid)
 
 
-		for uid, iid in self.adapt_list:
-			self.adapt_dict.setdefault(uid, []).append(iid)
+		# for uid, iid in self.adapt_list:
+		# 	self.adapt_dict.setdefault(uid, []).append(iid)
   
 		for uid in self.train_dict.keys():
 			trainUniqueUsers.append(uid)
@@ -284,14 +284,14 @@ class DiffData(BasicDataset):
 				validItems.append(self.valid_dict[user])
 		return validItems
 
-	def getUserAdaptItems(self, users):
-		adaptItems = []
-		for user in users:
-			if user in self.adapt_dict:
-				adaptItems.append(self.adapt_dict[user])
-			else:
-				adaptItems.append([])
-		return adaptItems
+	# def getUserAdaptItems(self, users):
+	# 	adaptItems = []
+	# 	for user in users:
+	# 		if user in self.adapt_dict:
+	# 			adaptItems.append(self.adapt_dict[user])
+	# 		else:
+	# 			adaptItems.append([])
+	# 	return adaptItems
 	
 	def get_pair_bpr(self):
 		"""

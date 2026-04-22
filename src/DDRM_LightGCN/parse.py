@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument('--epochs', type=int,default=50)
     parser.add_argument('--multicore', type=int, default=0, help='whether we use multiprocessing or not in test')
     parser.add_argument('--pretrain', type=int, default=0, help='whether we use pretrained weight or not')
-    parser.add_argument('--seed', type=int, default=2020, help='random seed')
+    parser.add_argument('--seed', type=int, default=42, help='random seed')#2020
     parser.add_argument('--model', type=str, default='lgn', help='rec-model, support [mf, lgn]')
 
     parser.add_argument('--log_name', type=str, default='log', help='log name')

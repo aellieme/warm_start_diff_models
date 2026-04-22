@@ -14,6 +14,12 @@ data_path = '../data/ml-1m'
 epoch_num = 1000
 # noise_schedule = 'linear'
 
+import random, numpy as np, torch
+random.seed(42)
+np.random.seed(42)
+torch.manual_seed(42)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(42)
 
 
 def pid_exists(pid):

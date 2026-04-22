@@ -23,6 +23,10 @@ except:
     print("Cpp extension not loaded")
     sample_ext = False
 
+# import random, numpy as np, torch
+# random.seed(42)
+# np.random.seed(42)
+# torch.manual_seed(42)
 
 class BPRLoss:
     def __init__(self,

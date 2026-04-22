@@ -373,7 +373,7 @@ def Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_mod
     item_reverse_model.eval()
 
     max_K = max(world.topks)
-    start_time = time.time()
+    start_time = time.perf_counter()
 
     with torch.no_grad():
         rating_list = []
@@ -404,7 +404,8 @@ def Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diff_mod
             _, rating_K = torch.topk(rating, k=max_K)
             rating_list.extend([row.tolist() for row in rating_K.cpu()])
 
-    latency = time.time() - start_time
+    # latency = time.time() - start_time
+    latency = time.perf_counter() - start_time
 
     # Вычисляем метрики
     topKs = world.topks

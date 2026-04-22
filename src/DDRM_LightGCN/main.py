@@ -11,12 +11,18 @@ from parse import parse_args
 import torch.utils.data as data
 import diffusion as gd
 import register
+import random
+
+from plotting import TrainingPlotter
 
 if __name__ == '__main__':
     utils.set_seed(world.seed)
     print(">>SEED:", world.seed)
     
     # define dataset
+    random.seed(42)
+    np.random.seed(42)
+    torch.manual_seed(42)
     args = parse_args()
     dataset = dataloader.DiffData(path = args.data_path) 
     train_loader = data.DataLoader(dataset,
@@ -77,6 +83,14 @@ if __name__ == '__main__':
         w = None
         print("not enable tensorflowboard")
 
+    import os
+    from datetime import datetime
+
+    os.makedirs("./log", exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    save_dir = f"./log/{timestamp}"
+    plotter = TrainingPlotter(save_dir, model_name="DDRM-LightGCN", metrics=['loss', 'val_recall'])
+    
     try:
         best_recall = 0
         best_epoch = 0
@@ -104,10 +118,13 @@ if __name__ == '__main__':
                 iter += 1
 
             aver_loss = aver_loss / idx
+            plotter.update(epoch=epoch, loss=aver_loss)
             print(f'EPOCH[{epoch+1}/{world.TRAIN_epochs}] loss:{aver_loss}')
             
             if (epoch+1) % 5 == 0:
                 results = Procedure.Test(dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion, epoch, w, world.config['multicore'])
+                val_recall_at_10 = results[1][0]  # recall@10
+                plotter.update(epoch=epoch, val_recall=val_recall_at_10)
                 Procedure.print_results(results)
                 if results[1][0] > best_recall:
                     best_epoch = epoch
@@ -126,6 +143,8 @@ if __name__ == '__main__':
                         cnt = 1
                     if cnt >= 6:
                         break
+                if (epoch+1) % 5 == 0 or epoch == world.TRAIN_epochs - 1:
+                    plotter.plot(save=True, show=False)
 
 
         print( "End train and valid. Best validation epoch is {:03d}. ".format(best_epoch))
@@ -135,19 +154,10 @@ if __name__ == '__main__':
         
         # Все пользователи, у которых есть test-взаимодействия
         test_users = list(dataset.test_dict.keys())
-        ground_truth_dict = dataset.test_dict   # {user: [items]} 
+        ground_truth_dict = dataset.test_dict
         allPos_baseline = dataset.getUserPosItems(test_users)   # только train
-        allPos_adapt = []
-        adapt_items_list = dataset.getUserAdaptItems(test_users)   # список списков адапт items
-        for i, train_items in enumerate(allPos_baseline):
-            # train_items может быть numpy array или list
-            if isinstance(train_items, np.ndarray):
-                train_items = train_items.tolist()
-            adapt_items = adapt_items_list[i]
-            allPos_adapt.append(train_items + adapt_items)
-        
-        # Baseline inference (без адаптации)
-        metrics_baseline = Procedure.Test_all(
+
+        metrics = Procedure.Test_all(
             dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion,
             users=test_users,
             allPos=allPos_baseline,
@@ -155,66 +165,77 @@ if __name__ == '__main__':
             multicore=world.config['multicore']
         )
 
-        # Adaptation inference (с адаптацией)
-        metrics_adapt = Procedure.Test_all(
-            dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion,
-            users=test_users,
-            allPos=allPos_adapt,
-            ground_truth_dict=ground_truth_dict,
-            multicore=world.config['multicore']
-        )
-        
-        
         k_index = 0   # для top-10
-        recall_baseline = metrics_baseline['recall'][k_index]
-        ndcg_baseline = metrics_baseline['ndcg'][k_index]
-        coverage_baseline = metrics_baseline['coverage'][k_index]
-        mrr_baseline = metrics_baseline['mrr'][k_index]
-
-        recall_adapt = metrics_adapt['recall'][k_index]
-        ndcg_adapt = metrics_adapt['ndcg'][k_index]
-        coverage_adapt = metrics_adapt['coverage'][k_index]
-        mrr_adapt = metrics_adapt['mrr'][k_index]
-        latency_adapt = metrics_adapt['latency']
-        
-        summary = {
-            'k': world.topks[k_index],
-            'Recall@10 (Baseline)': recall_baseline,
-            'NDCG@10 (Baseline)': ndcg_baseline,
-            'Coverage (Baseline)': coverage_baseline,
-            'MRR (Baseline)': mrr_baseline,
-            'Recall (adaptation)': recall_adapt,
-            'NDCG (adaptation)': ndcg_adapt,
-            'Coverage (adaptation)': coverage_adapt,
-            'MRR (adaptation)': mrr_adapt,
-            'Latency (adaptation, s)': latency_adapt,
-        }
-
-        print("\n" + "="*60)
+        print("\n")
         print("FINAL SUMMARY")
-        print("="*60)
-        for key, value in summary.items():
-            print(f"{key}: {value}")
+        # print("="*60)
+        print(f"Recall@10: {metrics['recall'][k_index]:.4f}")
+        print(f"NDCG@10: {metrics['ndcg'][k_index]:.4f}")
+        print(f"Coverage@10: {metrics['coverage'][k_index]:.4f}")
+        print(f"MRR@10: {metrics['mrr'][k_index]:.4f}")
+        print(f"Latency: {metrics['latency']:.4f} seconds")
+        # test_users = list(dataset.test_dict.keys())
+        # ground_truth_dict = dataset.test_dict   # {user: [items]} 
+        # allPos_baseline = dataset.getUserPosItems(test_users)   # только train
+        # allPos_adapt = []
+        # adapt_items_list = dataset.getUserAdaptItems(test_users)   # список списков адапт items
+        # for i, train_items in enumerate(allPos_baseline):
+        #     # train_items может быть numpy array или list
+        #     if isinstance(train_items, np.ndarray):
+        #         train_items = train_items.tolist()
+        #     adapt_items = adapt_items_list[i]
+        #     allPos_adapt.append(train_items + adapt_items)
+        
+        # # Baseline inference (без адаптации)
+        # metrics_baseline = Procedure.Test_all(
+        #     dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion,
+        #     users=test_users,
+        #     allPos=allPos_baseline,
+        #     ground_truth_dict=ground_truth_dict,
+        #     multicore=world.config['multicore']
+        # )
+
+        # # Adaptation inference (с адаптацией)
+        # metrics_adapt = Procedure.Test_all(
+        #     dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion,
+        #     users=test_users,
+        #     allPos=allPos_adapt,
+        #     ground_truth_dict=ground_truth_dict,
+        #     multicore=world.config['multicore']
+        # )
+        
+        
+        # k_index = 0   # для top-10
+        # recall_baseline = metrics_baseline['recall'][k_index]
+        # ndcg_baseline = metrics_baseline['ndcg'][k_index]
+        # coverage_baseline = metrics_baseline['coverage'][k_index]
+        # mrr_baseline = metrics_baseline['mrr'][k_index]
+
+        # recall_adapt = metrics_adapt['recall'][k_index]
+        # ndcg_adapt = metrics_adapt['ndcg'][k_index]
+        # coverage_adapt = metrics_adapt['coverage'][k_index]
+        # mrr_adapt = metrics_adapt['mrr'][k_index]
+        # latency_adapt = metrics_adapt['latency']
+        
+        # summary = {
+        #     'k': world.topks[k_index],
+        #     'Recall@10 (Baseline)': recall_baseline,
+        #     'NDCG@10 (Baseline)': ndcg_baseline,
+        #     'Coverage (Baseline)': coverage_baseline,
+        #     'MRR (Baseline)': mrr_baseline,
+        #     'Recall (adaptation)': recall_adapt,
+        #     'NDCG (adaptation)': ndcg_adapt,
+        #     'Coverage (adaptation)': coverage_adapt,
+        #     'MRR (adaptation)': mrr_adapt,
+        #     'Latency (adaptation, s)': latency_adapt,
+        # }
+
+        # print("\n" + "="*60)
+        # print("FINAL SUMMARY")
+        # print("="*60)
+        # for key, value in summary.items():
+        #     print(f"{key}: {value}")
             
-            
-        # try:
-        #     best_results_valid = Procedure.Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion, epoch, w, world.config['multicore'], 0)
-        #     best_results_test = Procedure.Test_all(dataset, Recmodel, user_reverse_model, item_reverse_model, diffusion, epoch, w, world.config['multicore'], 1)
-
-        #     valid_precision, valid_recall, valid_ndcg, valid_mrr, valid_cov = best_results_valid
-        #     test_precision, test_recall, test_ndcg, test_mrr, test_cov = best_results_test
-
-        #     print("Validation: ")
-        #     Procedure.print_results_all(None, (valid_precision, valid_recall, valid_ndcg, valid_mrr), None)
-        #     print(f"Coverage@{max(world.topks)}: {valid_cov:.4f} ")
-
-        #     print("Test: ")
-        #     Procedure.print_results_all(None, None, (test_precision, test_recall, test_ndcg, test_mrr))
-        #     print(f"Coverage@{max(world.topks)}: {test_cov:.4f} ")
-        # except Exception as e:
-        #     print(f"!!! CRITICAL ERROR during final Test_all: {e}")
-        #     import traceback
-        #     traceback.print_exc()
     finally:
         if world.tensorboard:
             w.close()
