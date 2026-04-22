@@ -39,4 +39,6 @@ test_metrics: True
 
 mode: 'reciprocal_rank_aggregation'
 
+generation_params: {}
+
 generation: False
