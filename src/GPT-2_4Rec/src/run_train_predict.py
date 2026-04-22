@@ -23,6 +23,9 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 from transformers import GPT2Config, GPT2LMHeadModel, BertConfig, BertModel
 
+from plotting import TrainingPlotter
+from pytorch_lightning.callbacks import Callback
+
 from datasets import CausalLMDataset, CausalLMPredictionDataset, PaddingCollateFn, MaskedLMDataset, MaskedLMPredictionDataset, LastEvaluationDataset
 # from datasets import CausalLMDataset, CausalLMPredictionDataset, PaddingCollateFn, MaskedLMDataset, MaskedLMPredictionDataset
 from metrics import Evaluator
@@ -34,25 +37,22 @@ from preprocess import add_time_idx
 
 @hydra.main(version_base=None, config_path="configs", config_name="GPT_train_predict")
 def main(config):
+    import random
+    import numpy as np
+    import torch
+
+    random.seed(42)
+    np.random.seed(42)
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(42)
 
     print(OmegaConf.to_yaml(config))
 
     if hasattr(config, 'cuda_visible_devices'):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(config.cuda_visible_devices)
 
-    # if hasattr(config, 'project_name'):
-    #     if hasattr(config, 'seed'):
-    #         Task.set_random_seed(config.seed)
-    #     else:
-    #         Task.set_random_seed(None)
-    #     task = Task.init(project_name=config.project_name, task_name=config.task_name,
-    #                     reuse_last_task_id=False)
-    #     task.connect(OmegaConf.to_container(config))
-    # else:
-    #     task = None
-
-    # train, validation, validation_full, test, item_count = prepare_data(config)
-    train, validation, adapt, test, item_count = prepare_data(config)
+    train, validation, test, item_count = prepare_data(config)
     train_loader, eval_loader = create_dataloaders(train, validation, config)
     model = create_model(config, item_count=item_count)
     start_time = time.time()
@@ -84,61 +84,69 @@ def main(config):
         return val_metrics[val_metrics['metric_name'] == config.optuna_metrics]['metric_value'].values
     else:
         evaluate(recs, validation, train,  config, prefix='val')
-        
+    
+    
     if config.test_metrics:
-        # metrics_baseline = evaluate(recs, test, train,  config, prefix='test')
+        # metrics_baseline = evaluate(recs, test, train, config, prefix='test')
         test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
         metrics_baseline = evaluate(recs, test_last, train, config, prefix='test_last')
-        
-        if adapt is not None and len(adapt) > 0: #адаптация
-            print("\nStarting adaptation\n")
-            
-            #объединяем train и adapt, пересчитываем time_idx
-            # train_adapt = pd.concat([train, adapt], ignore_index=True)
-            # train_adapt = add_time_idx(train_adapt)   # пересортировка и новый time_idx
-            train_adapt = pd.concat([train, validation, adapt], ignore_index=True)
-            train_adapt = add_time_idx(train_adapt)
-            
-            start_time_adapt = time.perf_counter()
-            #генерируем рекомендации на основе обновл истории
-            recs_adapt = predict(trainer, seqrec_module, train_adapt, config, test_data=test, last_evaluation=True)
-            adapt_latency = time.perf_counter() - start_time_adapt
-            
-            #оцениваем на тех же тестовых данных
-            print("\nAdaptation metrics on test")
-            # metrics_adapt = evaluate(recs_adapt, test, train_adapt, config, prefix='test_adapt')
-            metrics_adapt = evaluate(recs_adapt, test_last, train_adapt, config, prefix='test_adapt_last')
-            
-            
-            baseline_prefix = 'test_last_' if config.get('test_metrics', True) else 'val_last_'
-            summary = {
-                f'Recall@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}recall@10', 0),
-                f'NDCG@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}ndcg@10', 0),
-                f'Coverage (Baseline)': metrics_baseline.get(f'{baseline_prefix}coverage@10', 0),
-                f'MRR (Baseline)': metrics_baseline.get(f'{baseline_prefix}mrr@10', 0),
-                'Recall (adaptation)': metrics_adapt.get('test_adapt_last_recall@10', 0),
-                'NDCG (adaptation)': metrics_adapt.get('test_adapt_last_ndcg@10', 0),
-                'Coverage (adaptation)': metrics_adapt.get('test_adapt_last_coverage@10', 0),
-                'MRR (adaptation)': metrics_adapt.get('test_adapt_last_mrr@10', 0),
-                'Latency (baseline, s)': baseline_latency,
-                'Latency (adaptation, s)': adapt_latency,
-            }
-            
-            # summary = {
-            # 'Recall@10 (Baseline)': metrics_baseline.get('test_recall@10', 0),
-            # 'NDCG@10 (Baseline)': metrics_baseline.get('test_ndcg@10', 0),
-            # 'Coverage (Baseline)': metrics_baseline.get('test_coverage@10', 0),
-            # 'MRR (Baseline)': metrics_baseline.get('test_mrr@10', 0),
-            # 'Recall (adaptation)': metrics_adapt.get('test_adapt_recall@10', 0),
-            # 'NDCG (adaptation)': metrics_adapt.get('test_adapt_ndcg@10', 0),
-            # 'Coverage (adaptation)': metrics_adapt.get('test_adapt_coverage@10', 0),
-            # 'MRR (adaptation)': metrics_adapt.get('test_adapt_mrr@10', 0),
-            # 'Latency (baseline, s)': baseline_latency,
-            # 'Latency (adaptation, s)': adapt_latency,
-            # }
+    else:
+        val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
+        metrics_baseline = evaluate(recs, val_last, train, config, prefix='val_last')
 
-            summary_df = pd.DataFrame([summary])
-            print(summary_df.to_string(index=False))
+    baseline_prefix = 'test_last_' if config.get('test_metrics', True) else 'val_last_'
+    summary = {
+        f'Recall@10 ': metrics_baseline.get(f'{baseline_prefix}recall@10', 0),
+        f'NDCG@10 ': metrics_baseline.get(f'{baseline_prefix}ndcg@10', 0),
+        f'Coverage': metrics_baseline.get(f'{baseline_prefix}coverage@10', 0),
+        f'MRR ': metrics_baseline.get(f'{baseline_prefix}mrr@10', 0),
+        'Latency (s)': baseline_latency,
+    }
+    summary_df = pd.DataFrame([summary])
+    print(summary_df.to_string(index=False))
+        
+        
+    # if config.test_metrics:
+    #     # metrics_baseline = evaluate(recs, test, train,  config, prefix='test')
+    #     test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
+    #     metrics_baseline = evaluate(recs, test_last, train, config, prefix='test_last')
+    #     adapt = None
+    #     if adapt is not None and len(adapt) > 0: #адаптация
+    #         print("\nStarting adaptation\n")
+            
+    #         #объединяем train и adapt, пересчитываем time_idx
+    #         # train_adapt = pd.concat([train, adapt], ignore_index=True)
+    #         # train_adapt = add_time_idx(train_adapt)   # пересортировка и новый time_idx
+    #         train_adapt = pd.concat([train, validation, adapt], ignore_index=True)
+    #         train_adapt = add_time_idx(train_adapt)
+            
+    #         start_time_adapt = time.perf_counter()
+    #         #генерируем рекомендации на основе обновл истории
+    #         recs_adapt = predict(trainer, seqrec_module, train_adapt, config, test_data=test, last_evaluation=True)
+    #         adapt_latency = time.perf_counter() - start_time_adapt
+            
+    #         #оцениваем на тех же тестовых данных
+    #         print("\nAdaptation metrics on test")
+    #         # metrics_adapt = evaluate(recs_adapt, test, train_adapt, config, prefix='test_adapt')
+    #         metrics_adapt = evaluate(recs_adapt, test_last, train_adapt, config, prefix='test_adapt_last')
+            
+            
+    # baseline_prefix = 'test_last_' if config.get('test_metrics', True) else 'val_last_'
+    # summary = {
+    #     f'Recall@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}recall@10', 0),
+    #     f'NDCG@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}ndcg@10', 0),
+    #     f'Coverage (Baseline)': metrics_baseline.get(f'{baseline_prefix}coverage@10', 0),
+    #     f'MRR (Baseline)': metrics_baseline.get(f'{baseline_prefix}mrr@10', 0),
+    #     'Recall (adaptation)': metrics_adapt.get('test_adapt_last_recall@10', 0),
+    #     'NDCG (adaptation)': metrics_adapt.get('test_adapt_last_ndcg@10', 0),
+    #     'Coverage (adaptation)': metrics_adapt.get('test_adapt_last_coverage@10', 0),
+    #     'MRR (adaptation)': metrics_adapt.get('test_adapt_last_mrr@10', 0),
+    #     'Latency (baseline, s)': baseline_latency,
+    #     'Latency (adaptation, s)': adapt_latency,
+    # }
+
+    # summary_df = pd.DataFrame([summary])
+    # print(summary_df.to_string(index=False))
     torch.save(seqrec_module.model.state_dict(), "best_model.pt")
 
 def prepare_data(config):
@@ -149,8 +157,8 @@ def prepare_data(config):
     print('GTS')
     global_time_col = getattr(config, 'global_time_col', 'timestamp')
 
-    ratios = getattr(config, 'split_ratios', [0.7, 0.1, 0.1, 0.1])
-    assert len(ratios) == 4 and abs(sum(ratios) - 1.0) < 1e-6
+    ratios = getattr(config, 'split_ratios', [0.7, 0.1, 0.2])
+    assert len(ratios) == 3 #and abs(sum(ratios) - 1.0) < 1e-6
 
     data = data.sort_values(global_time_col)
     
@@ -158,17 +166,17 @@ def prepare_data(config):
     time_values = data[global_time_col]
     train_cutoff = time_values.quantile(ratios[0])
     val_cutoff   = time_values.quantile(ratios[0] + ratios[1])
-    adapt_cutoff = time_values.quantile(ratios[0] + ratios[1] + ratios[2])
-    print(f'time_values {time_values}, train_cutoff {train_cutoff}, val cutoff {val_cutoff}, adapt cutoff {adapt_cutoff}, adapt {adapt_cutoff}')
+    # adapt_cutoff = time_values.quantile(ratios[0] + ratios[1] + ratios[2])
+    print(f'time_values {time_values}, train_cutoff {train_cutoff}, val cutoff {val_cutoff}')
 
     train = data[data[global_time_col] <= train_cutoff].copy()
     validation = data[(data[global_time_col] > train_cutoff) & (data[global_time_col] <= val_cutoff)].copy()
-    adapt = data[(data[global_time_col] > val_cutoff) & (data[global_time_col] <= adapt_cutoff)].copy()
-    test = data[data[global_time_col] > adapt_cutoff].copy()
+    # adapt = data[(data[global_time_col] > val_cutoff) & (data[global_time_col] <= adapt_cutoff)].copy()
+    test = data[data[global_time_col] > val_cutoff].copy()
 
     train = add_time_idx(train)
     validation = add_time_idx(validation)
-    adapt = add_time_idx(adapt)
+    # adapt = add_time_idx(adapt)
     test = add_time_idx(test)
 
     # validation_full как в старом коде 
@@ -181,8 +189,7 @@ def prepare_data(config):
     item_count = data.item_id.max()
     print(f'item count {item_count}')
 
-    return train, validation, adapt, test, item_count
-    # return train, validation, validation_full, adapt, test, item_count
+    return train, validation, test, item_count
 
 
 def create_dataloaders(train, validation, config):
@@ -240,6 +247,26 @@ def create_model(config, item_count, weights_path=None):
 
     return model
 
+class PlottingCallback(Callback):
+    def __init__(self, plotter, save_every=5):
+        self.plotter = plotter
+        self.save_every = save_every
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        epoch = trainer.current_epoch
+        metrics = trainer.callback_metrics
+        train_loss = metrics.get('train_loss')
+        val_loss = metrics.get('val_loss')
+        val_recall = metrics.get('val_hit_rate')   # hit_rate = recall@10
+        self.plotter.update(
+            epoch=epoch,
+            loss=train_loss,
+            val_loss=val_loss,
+            recall=val_recall
+        )
+        if (epoch % self.save_every == 0) or (epoch == trainer.max_epochs - 1):
+            self.plotter.plot(save=True, show=False)
+
 
 def training(model, train_loader, eval_loader, config):
 
@@ -258,6 +285,17 @@ def training(model, train_loader, eval_loader, config):
     progress_bar = TQDMProgressBar(refresh_rate=100)
     callbacks=[early_stopping, model_summary, checkpoint, progress_bar]
 
+    from datetime import datetime
+
+    # внутри training, после определения callbacks (но до trainer)
+    os.makedirs("./log", exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    save_dir = f"./log/{timestamp}"
+    plotter = TrainingPlotter(save_dir, model_name=config.model, metrics=['loss', 'val_loss', 'recall'])
+    plotting_callback = PlottingCallback(plotter, save_every=5)
+
+    callbacks.append(plotting_callback)   # добавляем в существующий список
+    
     trainer = pl.Trainer(callbacks=callbacks, enable_checkpointing=True,
                          **config['trainer_params'])
 
@@ -399,11 +437,6 @@ def evaluate(recs, test, train,  config, prefix='test'):
         #     task.upload_artifact(f'{prefix}_metrics_by_time_idx_top_k_gt',
         #                       metrics_by_time_idx_top_k_gt)
     return metrics
-
-
-
-
-
 
 
 if __name__ == "__main__":

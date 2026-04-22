@@ -4,7 +4,7 @@ model_checkpoint: best_model.pt
 
 data_path: ../data/ml-20m.csv
 global_time_col: timestamp
-split_ratios: [0.7, 0.1, 0.1, 0.1]
+split_ratios: [0.7, 0.1, 0.2]
 
 dataset:
   max_length: 128
@@ -24,7 +24,7 @@ seqrec_module:
 
 dataloader:
   test_batch_size: 16
-  num_workers: 8
+  num_workers: 2
 
 evaluator:
   top_k: [10]

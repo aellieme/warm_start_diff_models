@@ -25,13 +25,21 @@ from modules import SeqRecHuggingface
 
 @hydra.main(version_base=None, config_path="configs", config_name="GPT_predict")
 def main(config):
+    import random
+    import numpy as np
+    import torch
+
+    random.seed(42)
+    np.random.seed(42)
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(42)
     print(OmegaConf.to_yaml(config))
 
     if hasattr(config, 'cuda_visible_devices'):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(config.cuda_visible_devices)
 
-    # train, validation, validation_full, adapt, test, item_count = prepare_data(config)
-    train, validation, adapt, test, item_count = prepare_data(config)
+    train, validation, test, item_count = prepare_data(config)
     test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
 
     model = create_model(config, item_count=item_count)
@@ -76,49 +84,48 @@ def main(config):
         # metrics_baseline = evaluate(recs, validation, train, config, prefix='val')
         val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
         metrics_baseline = evaluate(recs, val_last, train, config, prefix='val_last')
+        
+        
+        
+    baseline_prefix = 'test_last_' if config.get('test_metrics', True) else 'val_last_'
+    summary = {
+        f'Recall@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}recall@10', 0),
+        f'NDCG@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}ndcg@10', 0),
+        f'Coverage (Baseline)': metrics_baseline.get(f'{baseline_prefix}coverage@10', 0),
+        f'MRR (Baseline)': metrics_baseline.get(f'{baseline_prefix}mrr@10', 0),
+        'Latency (baseline, s)': baseline_latency,
+    }
+    summary_df = pd.DataFrame([summary])
+    print(summary_df.to_string(index=False))    
+    # adapt = None
+    # if adapt is not None and len(adapt) > 0:
+    #     print("\nStarting adaptation")
+    #     train_adapt = pd.concat([train, validation, adapt], ignore_index=True)
+    #     train_adapt = add_time_idx(train_adapt)
 
-    if adapt is not None and len(adapt) > 0:
-        print("\nStarting adaptation")
-        train_adapt = pd.concat([train, validation, adapt], ignore_index=True)
-        train_adapt = add_time_idx(train_adapt)
+    #     start_time_adapt = time.perf_counter()
+    #     recs_adapt = predict(trainer, seqrec_module, train_adapt, config, test_data=test, last_evaluation=True)
+    #     adapt_latency = time.perf_counter() - start_time_adapt
+    #     print(f"Adaptation inference latency: {adapt_latency:.4f} seconds")
 
-        start_time_adapt = time.perf_counter()
-        recs_adapt = predict(trainer, seqrec_module, train_adapt, config, test_data=test, last_evaluation=True)
-        adapt_latency = time.perf_counter() - start_time_adapt
-        print(f"Adaptation inference latency: {adapt_latency:.4f} seconds")
+    #     # metrics_adapt = evaluate(recs_adapt, test, train_adapt, config, prefix='test_adapt')
+    #     metrics_adapt = evaluate(recs_adapt, test_last, train_adapt, config, prefix='test_adapt_last')
 
-        # metrics_adapt = evaluate(recs_adapt, test, train_adapt, config, prefix='test_adapt')
-        metrics_adapt = evaluate(recs_adapt, test_last, train_adapt, config, prefix='test_adapt_last')
-
-        baseline_prefix = 'test_last_' if config.get('test_metrics', True) else 'val_last_'
-        summary = {
-            f'Recall@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}recall@10', 0),
-            f'NDCG@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}ndcg@10', 0),
-            f'Coverage (Baseline)': metrics_baseline.get(f'{baseline_prefix}coverage@10', 0),
-            f'MRR (Baseline)': metrics_baseline.get(f'{baseline_prefix}mrr@10', 0),
-            'Recall (adaptation)': metrics_adapt.get('test_adapt_last_recall@10', 0),
-            'NDCG (adaptation)': metrics_adapt.get('test_adapt_last_ndcg@10', 0),
-            'Coverage (adaptation)': metrics_adapt.get('test_adapt_last_coverage@10', 0),
-            'MRR (adaptation)': metrics_adapt.get('test_adapt_last_mrr@10', 0),
-            'Latency (baseline, s)': baseline_latency,
-            'Latency (adaptation, s)': adapt_latency,
-        }
-        # summary = {
-        #     'Recall@10 (Baseline)': metrics_baseline.get('test_recall@10', 0),
-        #     'NDCG@10 (Baseline)': metrics_baseline.get('test_ndcg@10', 0),
-        #     'Coverage (Baseline)': metrics_baseline.get('test_coverage@10', 0),
-        #     'MRR (Baseline)': metrics_baseline.get('test_mrr@10', 0),
-        #     'Recall (adaptation)': metrics_adapt.get('test_adapt_recall@10', 0),
-        #     'NDCG (adaptation)': metrics_adapt.get('test_adapt_ndcg@10', 0),
-        #     'Coverage (adaptation)': metrics_adapt.get('test_adapt_coverage@10', 0),
-        #     'MRR (adaptation)': metrics_adapt.get('test_adapt_mrr@10', 0),
-        #     'Latency (baseline, s)': baseline_latency,
-        #     'Latency (adaptation, s)': adapt_latency,
-        # }
-        summary_df = pd.DataFrame([summary])
-        print(summary_df.to_string(index=False))
-    else:
-        print("\nNo adaptation data available.")
+    #     baseline_prefix = 'test_last_' if config.get('test_metrics', True) else 'val_last_'
+    # summary = {
+    #         f'Recall@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}recall@10', 0),
+    #         f'NDCG@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}ndcg@10', 0),
+    #         f'Coverage (Baseline)': metrics_baseline.get(f'{baseline_prefix}coverage@10', 0),
+    #         f'MRR (Baseline)': metrics_baseline.get(f'{baseline_prefix}mrr@10', 0),
+    #         'Recall (adaptation)': metrics_adapt.get('test_adapt_last_recall@10', 0),
+    #         'NDCG (adaptation)': metrics_adapt.get('test_adapt_last_ndcg@10', 0),
+    #         'Coverage (adaptation)': metrics_adapt.get('test_adapt_last_coverage@10', 0),
+    #         'MRR (adaptation)': metrics_adapt.get('test_adapt_last_mrr@10', 0),
+    #         'Latency (baseline, s)': baseline_latency,
+    #         'Latency (adaptation, s)': adapt_latency,
+    #     }
+    # summary_df = pd.DataFrame([summary])
+    # print(summary_df.to_string(index=False))
 
 
 if __name__ == "__main__":

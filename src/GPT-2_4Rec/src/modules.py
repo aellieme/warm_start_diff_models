@@ -112,6 +112,7 @@ class SeqRecHuggingface(SeqRecBase):
     def training_step(self, batch, batch_idx):
         outputs = self.model(**batch)
         loss = outputs.loss
+        self.log('train_loss', loss, on_step=False, on_epoch=True, prog_bar=False)
         return loss
 
     def prediction_output(self, batch):
@@ -248,7 +249,7 @@ class SeqRec(SeqRecBase):
 
         outputs = self.model(batch['input_ids'], batch['attention_mask'])
         loss = self.compute_loss(outputs, batch)
-
+        self.log('train_loss', loss, on_step=False, on_epoch=True, prog_bar=False)
         return loss
 
     def compute_loss(self, outputs, batch):
@@ -261,7 +262,6 @@ class SeqRec(SeqRecBase):
     def prediction_output(self, batch):
 
         return self.model(batch['input_ids'], batch['attention_mask'])
-
 
 class SeqRecWithSampling(SeqRec):
 
