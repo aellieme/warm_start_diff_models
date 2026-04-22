@@ -37,4 +37,6 @@ evaluator:
   top_k: [10]
 test_metrics: True
 
+mode: 'reciprocal_rank_aggregation'
+
 generation: False
