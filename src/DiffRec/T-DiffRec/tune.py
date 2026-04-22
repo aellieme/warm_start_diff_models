@@ -15,6 +15,9 @@ import evaluate_topk_dp as eval_metrics
 import models.gaussian_diffusion as gd
 from models.DNN import DNN
 
+import time
+from plotting import TrainingPlotter
+
 DATASET = 'ml-1m'                     
 DATA_PATH = f'../../data/{DATASET}/'
 BATCH_SIZE = 400
@@ -161,6 +164,11 @@ def main():
     model = DNN(in_dims, out_dims, best_params['emb_size'], time_type="cat", norm=False).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=best_params['lr'], weight_decay=best_params['weight_decay'])
 
+    plotter = TrainingPlotter(
+            save_dir='./log/' + DATASET,
+            model_name=f"T-DiffRec_tuned_{time.strftime('%Y%m%d_%H%M%S')}",
+            metrics=['loss', 'recall@10']
+        )
     best_recall = -100
     best_epoch = 0
     best_model_state = None
@@ -175,10 +183,16 @@ def main():
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
+
+        avg_loss = total_loss / len(train_loader)
+        plotter.update(epoch=epoch, loss=avg_loss)
+        
         if epoch % 5 == 0:
             # precisions, recalls, _, _, _ = evaluate(model, diffusion, test_loader, valid_y_data, train_data_ori, TOP_N)
             precisions, recalls, _, _, _ = evaluate(model, diffusion, test_loader, valid_y_data, train_data_ori, TOP_N, sampling_steps=steps, sampling_noise=False)
             recall10 = recalls[0]
+            plotter.update(epoch=epoch, val_recall=recall10)
+            plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')
             if recall10 > best_recall:
                 best_recall = recall10
                 best_epoch = epoch
@@ -193,6 +207,7 @@ def main():
     else:
         print("Warning: No best model state found!")
     # model.load_state_dict(best_model_state)
+    plotter.plot(save=True, show=False, suffix='_final')
     # Сохраняем модель
     os.makedirs(SAVE_PATH, exist_ok=True)
     model_path = f"{SAVE_PATH}/best_tuned_model.pth"
@@ -200,11 +215,12 @@ def main():
     print(f"Final model saved to {model_path}")
 
     # Инференс базовый 
-    print("\n Inference without adaptation ")
+    print("\n Inference ")
     # Загружаем модель (можно из сохранённой, но у нас уже есть в памяти)
     model.eval()
     # Для базового теста используем test_loader и test_y_data, маска mask_tv = train_data_ori + valid_y_data
     # precisions, recalls, ndcgs, mrrs, covs = evaluate(model, diffusion, test_loader, test_y_data, mask_tv, TOP_N)
+    start_time = time.time()
     precisions, recalls, ndcgs, mrrs, covs = evaluate(model, diffusion, test_loader, test_y_data, mask_tv, TOP_N, sampling_steps=steps, sampling_noise=False)
     print("Base test results:")
     # print(f"  Precision@{TOP_N}: {precisions}")
@@ -212,47 +228,8 @@ def main():
     print(f"  NDCG@{TOP_N}:      {ndcgs}")
     print(f"  MRR@{TOP_N}:       {mrrs}")
     print(f"  Coverage:          {covs}")
-
-    # Инференс с адаптацией
-    adapt_path = DATA_PATH + 'adapt_list.npy'
-    if os.path.exists(adapt_path):
-        print("\n Warm-start adaptation ")
-        adapt_list = np.load(adapt_path, allow_pickle=True)
-        # Объединяем train + adapt
-        train_list_full = np.load(train_path, allow_pickle=True)
-        combined_list = np.vstack([train_list_full, adapt_list])
-        user_items = {}
-        for uid, iid in combined_list:
-            user_items.setdefault(int(uid), []).append(int(iid))
-        rows, cols, weights = [], [], []
-        for uid, items in user_items.items():
-            w = np.linspace(w_min, w_max, len(items))
-            for i, iid in enumerate(items):
-                rows.append(uid)
-                cols.append(iid)
-                weights.append(w[i])
-        from scipy.sparse import csr_matrix
-        train_data_adapt = csr_matrix((weights, (rows, cols)), shape=(n_user, n_item))
-        mask_adapt = csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(n_user, n_item))
-        if TST_W_VAL:
-            mask_adapt += valid_y_data
-        adapt_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data_adapt.toarray()))
-        adapt_loader = DataLoader(adapt_dataset, batch_size=BATCH_SIZE, shuffle=False)
-        
-        start_time = time.perf_counter()
-        # Оценка
-        # precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a = evaluate(model, diffusion, adapt_loader, test_y_data, mask_adapt, TOP_N)
-        precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a = evaluate(model, diffusion, adapt_loader, test_y_data, mask_adapt, TOP_N, sampling_steps=steps, sampling_noise=False)
-        warm_latency = time.perf_counter() - start_time
-        print("Warm-start test results:")
-        # print(f"  Precision@{TOP_N}: {precisions_a}")
-        print(f"  Recall@{TOP_N}:    {recalls_a}")
-        print(f"  NDCG@{TOP_N}:      {ndcgs_a}")
-        print(f"  MRR@{TOP_N}:       {mrrs_a}")
-        print(f"  Coverage:          {covs_a}")
-        print(f"Warm-start inference latency: {warm_latency:.4f} sec")
-    else:
-        print("adapt_list.npy not found, skipping warm-start.")
-
+    from scipy.sparse import csr_matrix
+    latency = time.perf_counter() - start_time
+    print(f"inference latency: {latency:.4f} sec")
 if __name__ == '__main__':
     main()

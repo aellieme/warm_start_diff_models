@@ -26,6 +26,8 @@ import evaluate_topk_dp as eval_metrics
 import data_utils
 from copy import deepcopy
 
+from plotting import TrainingPlotter
+
 import random
 random_seed = 1
 torch.manual_seed(random_seed) # cpu
@@ -230,24 +232,19 @@ if __name__ == '__main__':
                             print(f"  Rec : {rec_names}")
                 
                 
-                # if batch_idx == 0:   # только первый батч
-                #     for u in range(min(3, len(indices))):
-                #         true_items = target_items[batch_idx*args.batch_size + u][:5]
-                #         if not true_items:
-                #             continue
-                #         true_items = target_items[batch_idx*args.batch_size + u][:5]
-                #         true_names = [id2title.get(i, f"ID_{i}") for i in true_items]
-                #         rec_items = indices[u][:10]
-                #         rec_names = [id2title.get(i, f"ID_{i}") for i in rec_items]
-                #         print(f"\n[DEBUG] User {batch_idx*args.batch_size + u}:")
-                #         print(f"  True: {true_names}")
-                #         print(f"  Rec : {rec_names}")
-                
         precisions, recalls, ndcgs, mrrs, covs = eval_metrics.compute_all_metrics(target_items, predict_items, topN, n_item)
         return (precisions, recalls, ndcgs, mrrs, covs)
 
     best_recall, best_epoch = -100, 0
     best_test_result = None
+    
+    plotter = TrainingPlotter(
+            save_dir='./log/' + args.dataset,
+            model_name=f"T-DiffRec_{time.strftime('%Y%m%d_%H%M%S')}",
+            metrics=['loss', 'recall@10']
+        )
+    
+    
     print("Start training...")
     for epoch in range(1, args.epochs + 1):
         if epoch - best_epoch >= 25:
@@ -271,10 +268,16 @@ if __name__ == '__main__':
             total_loss += loss
             loss.backward()
             optimizer.step()
+
+        avg_loss = total_loss / len(train_loader)
+        plotter.update(epoch=epoch, loss=avg_loss)
         
         if epoch % 5 == 0:
             # valid_results = evaluate(test_loader, valid_y_data, train_data, eval(args.topN))
             valid_results = evaluate(test_loader, valid_y_data, train_data_ori, eval(args.topN))
+            recall10 = valid_results[1][0]  # recall@10
+            plotter.update(epoch=epoch, val_recall=recall10)
+            plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')
             if args.tst_w_val:
                 test_results = evaluate(test_twv_loader, test_y_data, mask_tv, eval(args.topN))
             else:
@@ -298,6 +301,7 @@ if __name__ == '__main__':
 
     print('==='*18)
     print("End. Best Epoch {:03d} ".format(best_epoch))
+    plotter.plot(save=True, show=False, suffix='_final')
     print_results(None, best_results, best_test_results)   
     print("End time: ", time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
 
