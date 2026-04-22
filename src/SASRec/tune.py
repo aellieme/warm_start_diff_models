@@ -3,6 +3,16 @@ import torch
 import numpy as np
 import pandas as pd
 from copy import deepcopy
+import random
+
+seed = 42
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+torch.backends.cudnn.deterministic = True
+
+
 
 from load_evaluate_pipeline import prepare_data_and_description
 from training import (
@@ -99,10 +109,7 @@ def objective(trial, train_data, val_data, data_description):
 
 
 def main():
-    # (train_data, val_data, adapt_data, test_data, test_examples,
-    #  data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
-    (train_data, val_data, adapt_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col,
-        val_seq_dict) = prepare_data_and_description()
+    (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict) = prepare_data_and_description()
     print(f"Train: {len(train_data)}, Val: {len(val_data)}")
 
     # study = optuna.create_study(direction='minimize', sampler=optuna.samplers.TPESampler(seed=42))
@@ -162,15 +169,16 @@ def main():
         data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
     )
     prec, rec, ndcg, mrr, cov = metrics_baseline
-    print(f"Baseline (train only): Recall@10={rec[0]:.4f}, MRR={mrr[0]:.4f}, NDCG={ndcg[0]:.4f}, Cov={cov[0]:.4f}, Latency = {time_base:.4f}")
+    print(f"Инференс: Recall@10={rec[0]:.4f}, MRR={mrr[0]:.4f}, NDCG={ndcg[0]:.4f}, Cov={cov[0]:.4f}, Latency = {time_base:.4f}")
 
     # С адаптацией (train+adapt)
-    inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
-    recs_adapt, users_adapt, metrics_adapt, time = run_inference_pipeline(
-        final_model, inference_history, train_data, test_examples,
-        data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
-    )
-    prec_a, rec_a, ndcg_a, mrr_a, cov_a = metrics_adapt
-    print(f"With adaptation: Recall@10={rec_a[0]:.4f}, MRR={mrr_a[0]:.4f}, NDCG={ndcg_a[0]:.4f}, Cov={cov_a[0]:.4f}, Latency = {time:.4f}")
+    # inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
+    # recs_adapt, users_adapt, metrics_adapt, time = run_inference_pipeline(
+    #     final_model, inference_history, train_data, test_examples,
+    #     data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
+    # )
+    # prec_a, rec_a, ndcg_a, mrr_a, cov_a = metrics_adapt
+    # print(f"With adaptation: Recall@10={rec_a[0]:.4f}, MRR={mrr_a[0]:.4f}, NDCG={ndcg_a[0]:.4f}, Cov={cov_a[0]:.4f}, Latency = {time:.4f}")
+    
 if __name__ == "__main__":
     main()

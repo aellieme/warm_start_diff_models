@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 from tqdm.auto import tqdm
 
+from plotting import TrainingPlotter
 from data_utils import data_to_sequences
 
 def random_neq(l, r, s, random_state):
@@ -103,6 +104,13 @@ def build_sasrec_model(config, train_data, val_data, data_description, patience=
     Обучает модель с early stopping на val_data (last-item стратегия).
     Возвращает лучшую модель (по HR@10) и словарь потерь.
     """
+    import time
+
+    plotter = TrainingPlotter(
+        save_dir='./log/',
+        model_name=f"SASRec_{time.strftime('%Y%m%d_%H%M%S')}",
+        metrics=['loss', 'recall@10']
+        )
     model, sampler, n_batches, criterion, optimizer = prepare_sasrec_model(config, train_data, data_description)
     device = 'cpu'
     if torch.cuda.is_available():
@@ -123,6 +131,10 @@ def build_sasrec_model(config, train_data, val_data, data_description, patience=
 
         # Валидация после эпохи
         hr, mrr = validate_last_item(model, val_data, train_data, data_description, topn=10)
+        avg_loss = np.mean(epoch_loss)
+        plotter.update(epoch=epoch, loss=avg_loss, val_recall=hr)
+        if epoch % 5 == 0:
+            plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')
         print(f"Epoch {epoch}: loss={np.mean(epoch_loss):.4f}, val_HR@10={hr:.4f}, val_MRR={mrr:.4f}")
 
         # Early stopping
@@ -135,7 +147,7 @@ def build_sasrec_model(config, train_data, val_data, data_description, patience=
             if epochs_no_improve >= patience:
                 print(f"Early stopping at epoch {epoch} (no improvement for {patience} epochs)")
                 break
-
+    plotter.plot(save=True, show=False, suffix='_final')
     # Восстанавливаем лучшую модель
     if best_model_state is not None:
         model.load_state_dict(best_model_state)

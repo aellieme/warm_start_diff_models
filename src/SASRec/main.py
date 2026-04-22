@@ -9,18 +9,21 @@ from load_evaluate_pipeline import (
     run_inference_pipeline,
     print_example_user
 )
+import random
+import torch
+
+seed = 42
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+torch.backends.cudnn.deterministic = True
 
 def main():
-    # (train_data, val_data, adapt_data, test_data, test_last,
-    #  data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
-    (train_data, val_data, adapt_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col,
-        val_seq_dict) = prepare_data_and_description()
-    # (train_data, val_data, adapt_data, test_data, test_examples,
-    #     data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
+    (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict) = prepare_data_and_description()
 
-    print(f"Train: {len(train_data)}, Val: {len(val_data)}, "
-          f"Adapt: {len(adapt_data)}, Test: {len(test_data)}, "
-          f"len test_examples: {len(test_examples)}")
+
+    print(f"Train: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}, len test_examples: {len(test_examples)}")
 
     config = {
         'num_epochs': 500,
@@ -30,8 +33,8 @@ def main():
         'num_blocks': 2,
         'num_heads': 2,
         'batch_size': 128,
-        'sampler_seed': 99,
-        'manual_seed': 111,
+        'sampler_seed': 42, #99
+        'manual_seed': 42, #111
         'learning_rate': 1e-3,
         'l2_emb': 0.0,
     }
@@ -58,25 +61,25 @@ def main():
     for k, p, r, ndcg, mrr, cov in zip([10], precisions, recalls, ndcgs, mrrs, covs):
         print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
 
-    # Adaptation (train + adapt) 
-    print("\nadaptation")
-    inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
-    recs_adapt, users_adapt, metrics_adapt, inf_time_adapt = run_inference_pipeline(
-        model, inference_history, train_data, test_examples,
-        data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
-    )
-    precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a = metrics_adapt
+    # # Adaptation (train + adapt) 
+    # print("\nadaptation")
+    # inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
+    # recs_adapt, users_adapt, metrics_adapt, inf_time_adapt = run_inference_pipeline(
+    #     model, inference_history, train_data, test_examples,
+    #     data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
+    # )
+    # precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a = metrics_adapt
 
-    print(f"Inference latency (total): {inf_time_adapt:.4f} seconds")
-    print(f"Evaluated users: {len(users_adapt)}")
-    for k, p, r, ndcg, mrr, cov in zip([10], precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a):
-        print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
+    # print(f"Inference latency (total): {inf_time_adapt:.4f} seconds")
+    # print(f"Evaluated users: {len(users_adapt)}")
+    # for k, p, r, ndcg, mrr, cov in zip([10], precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a):
+    #     print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
 
     #  Пример для одного пользователя 
-    example_user = users_adapt[1]
+    example_user = users[1]
     print_example_user(
-        example_user, users_adapt, recs_adapt,
-        train_data, adapt_data, test_examples,
+        example_user, users, recs,
+        train_data, test_examples,
         data_index, data_description,
         userid_col, itemid_col, time_col
     )

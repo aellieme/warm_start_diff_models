@@ -12,10 +12,6 @@ from training import sasrec_model_scoring
 
 
 def prepare_data_and_description():
-    """
-    загрузка данных (бвзово - MovieLens-1M), сквозная переиндексация пользователей и айтемов,
-    сортировка всех взаимодействий по времени,  хронологическое разбиение по квантилям на train, val, adapt, test
-    """
     mldata = get_movielens_data(include_time=True)
     userid_col = 'userid'
     itemid_col = 'movieid'
@@ -24,51 +20,34 @@ def prepare_data_and_description():
     all_data, data_index = transform_indices(mldata.copy(), userid_col, itemid_col)
     all_data_sorted = all_data.sort_values(time_col).reset_index(drop=True)
 
-    quantile_valid = 0.70   # T_valid
-    quantile_adapt = 0.80   # граница между validation и adapt
-    quantile_test  = 0.90   # T_test
+    T_valid = all_data_sorted[time_col].quantile(0.70)
+    T_test  = all_data_sorted[time_col].quantile(0.80)
 
-    T_valid = all_data_sorted[time_col].quantile(quantile_valid)
-    T_adapt = all_data_sorted[time_col].quantile(quantile_adapt)
-    T_test  = all_data_sorted[time_col].quantile(quantile_test)
-
-    assert T_valid < T_adapt < T_test
-
-    #  Обучающая выборка (до T_valid) 
     train_data = all_data_sorted[all_data_sorted[time_col] <= T_valid].copy()
-
-    #  Данные после T_valid (для валидации, адаптации, теста) 
     future_data = all_data_sorted[all_data_sorted[time_col] > T_valid].copy()
-    
-    val_window_data = future_data[future_data[time_col] <= T_adapt].copy()
+
+    # Validation (T_valid < ts <= T_test)
+    val_window = future_data[future_data[time_col] <= T_test].copy()
     val_seq_dict = (
-        val_window_data.sort_values([userid_col, time_col])
+        val_window.sort_values([userid_col, time_col])
         .groupby(userid_col)[itemid_col].apply(list)
         .to_dict()
     )
-    
 
-    # Валидационные примеры (цель — последнее взаимодействие до T_adapt)
     val_inputs, val_targets, val_users = [], [], []
     for uid, user_future in future_data.groupby(userid_col):
         user_future = user_future.sort_values(time_col)
         items = user_future[itemid_col].tolist()
         times = user_future[time_col].tolist()
-
-        # Находим последний элемент с timestamp <= T_adapt
+        # последний элемент до T_test
         target_idx = -1
         for i, t in enumerate(times):
-            if t <= T_adapt:
+            if t <= T_test:
                 target_idx = i
         if target_idx == -1:
-            continue   # нет цели в валидационном окне
-
+            continue
         target_item = items[target_idx]
-        # Входная последовательность — все элементы до target (включая из того же окна, но до цели)
         input_seq = items[:target_idx]
-        # if len(input_seq) == 0:
-        #     continue
-
         val_inputs.append(input_seq)
         val_targets.append(target_item)
         val_users.append(uid)
@@ -76,27 +55,19 @@ def prepare_data_and_description():
     val_data = pd.DataFrame({
         userid_col: val_users,
         itemid_col: val_targets,
-        'history': val_inputs   # список индексов item_id
+        'history': val_inputs
     })
 
-    #  Адаптационная выборка (строго между T_adapt и T_test) 
-    adapt_data = all_data_sorted[
-        (all_data_sorted[time_col] > T_adapt) & (all_data_sorted[time_col] <= T_test)
-    ].copy()
-
-    #  Тестовые примеры (последнее взаимодействие после T_test) 
+    # Test (ts > T_test)
     test_data = all_data_sorted[all_data_sorted[time_col] > T_test].copy()
-    
     test_examples = []
     for uid, user_test in test_data.groupby(userid_col):
         user_test = user_test.sort_values(time_col)
         items = user_test[itemid_col].tolist()
         if len(items) == 0:
             continue
-        target = items[-1]                     # последнее взаимодействие в тесте
-        history = items[:-1]                   # все предыдущие в тестовом окне
-        # if len(history) == 0:
-        #     continue                           # холодный старт – исключаем
+        target = items[-1]
+        history = items[:-1]
         test_examples.append({
             userid_col: uid,
             itemid_col: target,
@@ -112,15 +83,12 @@ def prepare_data_and_description():
         'n_users': len(data_index['users']),
         'n_items': len(data_index['items']),
         'T_valid': T_valid,
-        'T_adapt': T_adapt,
         'T_test': T_test,
     }
-    
-    return (train_data, val_data, adapt_data, test_data, test_examples_df,
-        data_index, data_description, userid_col, itemid_col, time_col,
-        val_seq_dict)
-    # return (train_data, val_data, adapt_data, test_data, test_examples_df,
-            # data_index, data_description, userid_col, itemid_col, time_col)
+
+    return (train_data, val_data, test_data, test_examples_df,
+            data_index, data_description, userid_col, itemid_col, time_col,
+            val_seq_dict)
  
  
 def run_inference_pipeline(
@@ -253,7 +221,6 @@ def print_example_user(
     filtered_user_order,
     sasrec_recs,
     train_data,
-    adapt_data,
     test_examples,
     data_index,
     data_description,
@@ -275,20 +242,20 @@ def print_example_user(
     movie_dict = load_movies_metadata()
 
     user_train = train_data[train_data[userid_col] == example_user].sort_values(time_col)
-    user_adapt = adapt_data[adapt_data[userid_col] == example_user].sort_values(time_col)
+    # user_adapt = adapt_data[adapt_data[userid_col] == example_user].sort_values(time_col)
     user_holdout = test_examples[test_examples[userid_col] == example_user]
 
     user_position = filtered_user_order.index(example_user)
     user_recs = sasrec_recs[user_position]
 
     train_movies = decode_items(user_train[itemid_col], data_index, movie_dict)
-    adapt_movies = decode_items(user_adapt[itemid_col], data_index, movie_dict)
+    # adapt_movies = decode_items(user_adapt[itemid_col], data_index, movie_dict)
     rec_movies = decode_items(user_recs, data_index, movie_dict)
     holdout_movie = decode_items(user_holdout[itemid_col], data_index, movie_dict)[0]
 
     print("\n Example user")
     print(f"User ID: {example_user}")
     print("Last 10 train movies:", train_movies[-10:])
-    print("Adaptation (warm‑start) movies:", adapt_movies)
+    # print("Adaptation (warm‑start) movies:", adapt_movies)
     print("Recommended next movies:", rec_movies[:10])
     print("True next movie:", holdout_movie)
