@@ -47,7 +47,7 @@ valid_path = DATA_PATH + 'valid_list.npy'
 test_path = DATA_PATH + 'test_list.npy'
 
 train_data, train_data_ori, valid_y_data, test_y_data, n_user, n_item = data_utils.data_load(
-    train_path, valid_path, test_path, w_min=0.1, w_max=1.0   # временные w_min/w_max, будут заменены при тюнинге
+    train_path, valid_path, test_path, w_min=0.1, w_max=1.0  
 )
 train_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data.toarray()))
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True, num_workers=2)
