@@ -1,5 +1,0 @@
-## Features configuration for text classification tasks.
-
-features:
-  - name: text
-  - name: label

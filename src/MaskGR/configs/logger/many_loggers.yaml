@@ -1,5 +1,0 @@
-## Example for adding multiple loggers
-defaults:
-  - csv
-  - tensorboard
-  - wandb

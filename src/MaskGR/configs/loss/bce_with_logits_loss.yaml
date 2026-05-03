@@ -1,3 +1,0 @@
-## Torch's BCEWithLogitsLoss loss function
-loss_function:
-  _target_: torch.nn.BCEWithLogitsLoss

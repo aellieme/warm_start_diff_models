@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 import optuna
 from optuna.trial import TrialState
 import argparse
+import scipy.sparse as sp
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -58,7 +59,6 @@ mask_tv = train_data_ori + valid_y_data
 
 print("Data loaded. n_user={}, n_item={}".format(n_user, n_item))
 
-# def evaluate(model, diffusion, data_loader, data_te, mask_his, topN):
 def evaluate(model, diffusion, data_loader, data_te, mask_his, topN, sampling_steps, sampling_noise=False):
     """Оценка модели (скопировано из main.py)"""
     model.eval()
@@ -72,7 +72,6 @@ def evaluate(model, diffusion, data_loader, data_te, mask_his, topN, sampling_st
         for batch_idx, batch in enumerate(data_loader):
             his_data = mask_his[e_idxlist[batch_idx*BATCH_SIZE:batch_idx*BATCH_SIZE+len(batch)]]
             batch = batch.to(device)
-            # prediction = diffusion.p_sample(model, batch, args_sampling_steps, args_sampling_noise)
             prediction = diffusion.p_sample(model, batch, sampling_steps, sampling_noise)
             prediction[his_data.nonzero()] = -np.inf
             _, indices = torch.topk(prediction, topN[-1])
@@ -84,7 +83,6 @@ def evaluate(model, diffusion, data_loader, data_te, mask_his, topN, sampling_st
 
 def train_and_evaluate(trial):
     lr = trial.suggest_float('lr', 1e-5, 1e-3, log=True)
-    # weight_decay = trial.suggest_float('weight_decay', 0.0, 1e-4, log=True)
     weight_decay = trial.suggest_float('weight_decay', 1e-8, 1e-4, log=True)
     steps = trial.suggest_int('steps', 5, 100)
     noise_scale = trial.suggest_float('noise_scale', 0.0001, 0.5, log=True)
@@ -127,63 +125,74 @@ def train_and_evaluate(trial):
             optimizer.step()
         # Оценка каждые 5 эпох
         if epoch % 5 == 0:
-            # используем train_data_ori (бинарную) для маски
-            # precisions, recalls, ndcgs, mrrs, covs = evaluate(model, diffusion, test_loader, valid_y_data, train_data_ori, TOP_N)
             precisions, recalls, ndcgs, mrrs, covs = evaluate(model, diffusion, test_loader, valid_y_data, train_data_ori, TOP_N, sampling_steps=steps, sampling_noise=False)
             recall10 = recalls[0]   # recall@10
             if recall10 > best_recall:
                 best_recall = recall10
                 best_epoch = epoch
-                # сохраняем лучшую модель в память 
                 best_model_state = model.state_dict()
         # Логирование
         trial.report(best_recall, epoch)
         if trial.should_prune():
             raise optuna.TrialPruned()
-    #лучший recall@10
     return best_recall
 
 def main():
     study = optuna.create_study(direction='maximize', pruner=optuna.pruners.MedianPruner())
     study.optimize(train_and_evaluate, n_trials=25, timeout=5500)  
-
-    # Лучшие параметры
+    
     best_params = study.best_params
+    w_min = best_params['w_min']
+    w_max = best_params['w_max']
     steps = best_params['steps']
     print("Best hyperparameters:", best_params)
 
-    #обучение финальной модели с лучшими параметрами 
-    print("\nTraining final model with best parameters")
-    #gерезагружаем данные с лучшими w_min/w_max
-    w_min = best_params['w_min']
-    w_max = best_params['w_max']
-    train_data, train_data_ori, valid_y_data, test_y_data, n_user, n_item = data_utils.data_load(
-        train_path, valid_path, test_path, w_min, w_max)
-    train_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data.toarray()))
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, pin_memory=True, shuffle=True, num_workers=2)
-    # диффузия
+    train_list = np.load(train_path, allow_pickle=True)
+    valid_list = np.load(valid_path, allow_pickle=True)
+    combined_list = np.vstack([train_list, valid_list])
+
+    # группировка по пользователям с сохранением хронологии
+    user_items = {}
+    for uid, iid in combined_list:
+        user_items.setdefault(int(uid), []).append(int(iid))
+
+    rows, cols, weights = [], [], []
+    for uid, items in user_items.items():
+        w = np.linspace(w_min, w_max, len(items))
+        for i, iid in enumerate(items):
+            rows.append(uid)
+            cols.append(iid)
+            weights.append(w[i])
+
+    train_val_data = sp.csr_matrix((weights, (rows, cols)), shape=(n_user, n_item))
+    train_val_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_val_data.toarray()))
+    train_val_loader = DataLoader(train_val_dataset, batch_size=BATCH_SIZE,
+                                  pin_memory=True, shuffle=True, num_workers=2)
+
     diffusion = gd.GaussianDiffusion(gd.ModelMeanType.START_X, 'linear-var',
-                                     best_params['noise_scale'], best_params['noise_min'], best_params['noise_max'],
-                                     best_params['steps'], device)
+                                     best_params['noise_scale'], best_params['noise_min'],
+                                     best_params['noise_max'], best_params['steps'], device)
     diffusion.to(device)
-    # DNN
+
     out_dims = [1000] + [n_item]
     in_dims = out_dims[::-1]
     model = DNN(in_dims, out_dims, best_params['emb_size'], time_type="cat", norm=False).to(device)
-    optimizer = optim.AdamW(model.parameters(), lr=best_params['lr'], weight_decay=best_params['weight_decay'])
+    optimizer = optim.AdamW(model.parameters(), lr=best_params['lr'],
+                            weight_decay=best_params['weight_decay'])
 
+    print("\nTraining final model with best parameters on train+val")
+    # Инициализация плоттера
     plotter = TrainingPlotter(
-            save_dir='./log/' + DATASET,
-            model_name=f"T-DiffRec_tuned_{time.strftime('%Y%m%d_%H%M%S')}",
-            metrics=['loss', 'recall@10']
-        )
-    best_recall = -100
-    best_epoch = 0
-    best_model_state = None
-    for epoch in range(1, EPOCHS + 1):
+        save_dir='./log/' + DATASET,
+        model_name=f"T-DiffRec_final_trainval_{time.strftime('%Y%m%d_%H%M%S')}",
+        metrics=['loss']
+    )
+
+    FIXED_EPOCHS = 200
+    for epoch in range(1, FIXED_EPOCHS + 1):
         model.train()
         total_loss = 0.0
-        for batch in train_loader:
+        for batch in train_val_loader:
             batch = batch.to(device)
             optimizer.zero_grad()
             losses = diffusion.training_losses(model, batch, reweight=True)
@@ -192,52 +201,35 @@ def main():
             optimizer.step()
             total_loss += loss.item()
 
-        avg_loss = total_loss / len(train_loader)
+        avg_loss = total_loss / len(train_val_loader)
+        print(f"Epoch {epoch:03d} average loss: {avg_loss:.4f}")
         plotter.update(epoch=epoch, loss=avg_loss)
-        
-        if epoch % 5 == 0:
-            # precisions, recalls, _, _, _ = evaluate(model, diffusion, test_loader, valid_y_data, train_data_ori, TOP_N)
-            precisions, recalls, _, _, _ = evaluate(model, diffusion, test_loader, valid_y_data, train_data_ori, TOP_N, sampling_steps=steps, sampling_noise=False)
-            recall10 = recalls[0]
-            plotter.update(epoch=epoch, val_recall=recall10)
-            plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')
-            if recall10 > best_recall:
-                best_recall = recall10
-                best_epoch = epoch
-                best_model_state = model.state_dict()
-            print(f"Epoch {epoch:03d}, val recall@10={recall10:.4f}, best={best_recall:.4f}")
-            if epoch - best_epoch >= 25:
-                print(f"Early stopping triggered at epoch {epoch}. Best epoch was {best_epoch} with recall {best_recall:.4f}")
-                break
-    # Загружаем лучшую модель
-    if best_model_state is not None:
-        model.load_state_dict(best_model_state)
-    else:
-        print("Warning: No best model state found!")
-    # model.load_state_dict(best_model_state)
-    plotter.plot(save=True, show=False, suffix='_final')
-    # Сохраняем модель
-    os.makedirs(SAVE_PATH, exist_ok=True)
-    model_path = f"{SAVE_PATH}/best_tuned_model.pth"
-    torch.save(model, model_path)
-    print(f"Final model saved to {model_path}")
 
-    # Инференс базовый 
-    print("\n Inference ")
-    # Загружаем модель (можно из сохранённой, но у нас уже есть в памяти)
+        # Сохраняем график каждые 10 эпох
+        if epoch % 10 == 0:
+            plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')
+
+    # Финальный график и сохранение модели
+    plotter.plot(save=True, show=False, suffix='_final')
+    os.makedirs(SAVE_PATH, exist_ok=True)
+    model_path = f"{SAVE_PATH}/final_model_trainval.pth"
+    torch.save(model, model_path)
+    print(f"Final model (train+val) saved to {model_path}")
+
+    # Инференс на тесте
+    test_loader_combined = DataLoader(train_val_dataset, batch_size=BATCH_SIZE, shuffle=False)
     model.eval()
-    # Для базового теста используем test_loader и test_y_data, маска mask_tv = train_data_ori + valid_y_data
-    # precisions, recalls, ndcgs, mrrs, covs = evaluate(model, diffusion, test_loader, test_y_data, mask_tv, TOP_N)
-    start_time = time.time()
-    precisions, recalls, ndcgs, mrrs, covs = evaluate(model, diffusion, test_loader, test_y_data, mask_tv, TOP_N, sampling_steps=steps, sampling_noise=False)
-    print("Base test results:")
-    # print(f"  Precision@{TOP_N}: {precisions}")
+    start_time = time.perf_counter()
+    precisions, recalls, ndcgs, mrrs, covs = evaluate(
+        model, diffusion, test_loader_combined, test_y_data, mask_tv,
+        TOP_N, sampling_steps=steps, sampling_noise=False)
+    latency = time.perf_counter() - start_time
+    print("Test Results on train+val model:")
     print(f"  Recall@{TOP_N}:    {recalls}")
     print(f"  NDCG@{TOP_N}:      {ndcgs}")
     print(f"  MRR@{TOP_N}:       {mrrs}")
     print(f"  Coverage:          {covs}")
-    from scipy.sparse import csr_matrix
-    latency = time.perf_counter() - start_time
-    print(f"inference latency: {latency:.4f} sec")
+    print(f"  Inference latency: {latency:.4f} sec")
+
 if __name__ == '__main__':
     main()

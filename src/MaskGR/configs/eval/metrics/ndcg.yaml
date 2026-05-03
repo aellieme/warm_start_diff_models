@@ -1,4 +1,0 @@
-## NDCG metric for retrieval tasks.
-ndcg:
-  _target_: src.components.eval_metrics.NDCG
-  _partial_: true
