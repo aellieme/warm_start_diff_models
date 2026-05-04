@@ -138,32 +138,83 @@ def objective(trial, base_args, dataset, device):
 
     return best_recall
 
+# def main_tune():
+#     base_args = parse_args()
+#     base_args.epochs = 100  
+#     base_args.batch_size = 2048
+#     base_args.recdim = 64
+#     base_args.dropout = 0
+#     base_args.keepprob = 0.6
+#     base_args.dims = '[200,600]'
+#     base_args.emb_size = 10  
+#     base_args.mean_type = 'x0'
+#     base_args.noise_schedule = 'linear-var'
+#     base_args.norm = False
+#     base_args.act = 'relu'
+#     base_args.num_ng = 4
+#     base_args.multicore = 0
+#     base_args.data_path = '../data/ml-1m'  
+
+#     dataset = dataloader.DiffData(path=base_args.data_path)
+#     device = world.device
+    
+#     study = optuna.create_study(direction='maximize', study_name='lightgcn_diff_tuning')
+#     optuna.logging.set_verbosity(optuna.logging.INFO)
+#     study.optimize(
+#         lambda trial: objective(trial, base_args, dataset, device),
+#         n_trials=100,  # количество экспериментов
+#         timeout=1800  # можно ограничить по времени
+#     )
+
+#     print("Best trial:")
+#     best_trial = study.best_trial
+#     print(f"  Value (best recall@10): {best_trial.value}")
+#     print("  Params: ")
+#     for key, value in best_trial.params.items():
+#         print(f"    {key}: {value}")
+
+#     import json
+#     with open('best_params.json', 'w') as f:
+#         json.dump(best_trial.params, f, indent=4)
+
+#     print("\n--- Retraining final model with best parameters ---")
+#     # Обновляем base_args лучшими параметрами
+#     for key, value in best_trial.params.items():
+#         setattr(base_args, key, value)
+#     # Запускаем финальное обучение (можно импортировать и вызвать функцию из main.py,
+#     # но проще запустить main.py как подпроцесс с аргументами)
+#     import subprocess
+#     cmd = f"python main.py --lr={best_trial.params['lr']} --diff_lr={best_trial.params['diff_lr']} --alpha={best_trial.params['alpha']} --decay={best_trial.params['decay']} --layer={best_trial.params['layer']} --steps={best_trial.params['steps']} --sampling_steps={best_trial.params['sampling_steps']} --noise_scale={best_trial.params['noise_scale']} --noise_min={best_trial.params['noise_min']} --noise_max={best_trial.params['noise_max']} --emb_size={best_trial.params['emb_size']} --epochs=1000 --data_path={base_args.data_path}"
+#     print(f"Running: {cmd}")
+#     subprocess.run(cmd, shell=True)
+
 def main_tune():
     base_args = parse_args()
-    base_args.epochs = 100  
+    # Задаём фиксированные значения, не участвующие в тюнинге
+    base_args.epochs = 100
     base_args.batch_size = 2048
     base_args.recdim = 64
     base_args.dropout = 0
     base_args.keepprob = 0.6
     base_args.dims = '[200,600]'
-    base_args.emb_size = 10  
+    base_args.emb_size = 10
     base_args.mean_type = 'x0'
     base_args.noise_schedule = 'linear-var'
     base_args.norm = False
     base_args.act = 'relu'
     base_args.num_ng = 4
     base_args.multicore = 0
-    base_args.data_path = '../data/ml-1m'  
+    base_args.data_path = '../data/ml-1m'
 
     dataset = dataloader.DiffData(path=base_args.data_path)
     device = world.device
-    
+
     study = optuna.create_study(direction='maximize', study_name='lightgcn_diff_tuning')
     optuna.logging.set_verbosity(optuna.logging.INFO)
     study.optimize(
         lambda trial: objective(trial, base_args, dataset, device),
-        n_trials=100,  # количество экспериментов
-        timeout=1800  # можно ограничить по времени
+        n_trials=100,
+        timeout=1800
     )
 
     print("Best trial:")
@@ -177,16 +228,43 @@ def main_tune():
     with open('best_params.json', 'w') as f:
         json.dump(best_trial.params, f, indent=4)
 
-    print("\n--- Retraining final model with best parameters ---")
-    # Обновляем base_args лучшими параметрами
-    for key, value in best_trial.params.items():
-        setattr(base_args, key, value)
-    # Запускаем финальное обучение (можно импортировать и вызвать функцию из main.py,
-    # но проще запустить main.py как подпроцесс с аргументами)
+    # ------------------------------------------------
+    # Автоматический запуск финального обучения
+    # ------------------------------------------------
+    print("\n>>> Запуск финального обучения на train+val ...")
     import subprocess
-    cmd = f"python main.py --lr={best_trial.params['lr']} --diff_lr={best_trial.params['diff_lr']} --alpha={best_trial.params['alpha']} --decay={best_trial.params['decay']} --layer={best_trial.params['layer']} --steps={best_trial.params['steps']} --sampling_steps={best_trial.params['sampling_steps']} --noise_scale={best_trial.params['noise_scale']} --noise_min={best_trial.params['noise_min']} --noise_max={best_trial.params['noise_max']} --emb_size={best_trial.params['emb_size']} --epochs=1000 --data_path={base_args.data_path}"
-    print(f"Running: {cmd}")
-    subprocess.run(cmd, shell=True)
+
+    # Собираем все аргументы, включая не тюнингованные
+    cmd = [
+        "python", "main.py",
+        "--final",                          # ключевой флаг
+        "--data_path", base_args.data_path,
+        "--epochs", "1000",
+        "--batch_size", str(base_args.batch_size),
+        "--recdim", str(base_args.recdim),
+        "--dims", base_args.dims,
+        "--act", base_args.act,
+        "--mean_type", base_args.mean_type,
+        "--noise_schedule", base_args.noise_schedule,
+        # "--norm", str(base_args.norm),
+        "--num_ng", str(base_args.num_ng),
+        "--multicore", str(base_args.multicore),
+        # Добавляем подобранные гиперпараметры
+        "--lr", str(best_trial.params['lr']),
+        "--diff_lr", str(best_trial.params['diff_lr']),
+        "--alpha", str(best_trial.params['alpha']),
+        "--decay", str(best_trial.params['decay']),
+        "--layer", str(best_trial.params['layer']),
+        "--steps", str(best_trial.params['steps']),
+        "--sampling_steps", str(best_trial.params['sampling_steps']),
+        "--noise_scale", str(best_trial.params['noise_scale']),
+        "--noise_min", str(best_trial.params['noise_min']),
+        "--noise_max", str(best_trial.params['noise_max']),
+        "--emb_size", str(best_trial.params['emb_size']),
+    ]
+
+    print("Команда:", " ".join(cmd))
+    subprocess.run(cmd)
 
 if __name__ == '__main__':
     main_tune()

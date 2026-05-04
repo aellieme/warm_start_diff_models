@@ -33,6 +33,8 @@ def parse_args():
                         help="@k test list")
     parser.add_argument('--tensorboard', type=int,default=0,
                         help="enable tensorboard")
+    parser.add_argument('--final', action='store_true', default=False,
+                    help='Финальное обучение после тюнинга: объединить train + val, без early stopping')
     parser.add_argument('--comment', type=str,default="lgn")
     parser.add_argument('--load', type=int,default=0)
     parser.add_argument('--epochs', type=int,default=50)
