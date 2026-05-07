@@ -30,21 +30,15 @@ def pad_history(itemlist,length,pad_item):
         itemlist.extend(temp)
         return itemlist
 
+def downvote_seen_items(scores, seen_items, inf_value=-np.inf):
+    for idx in seen_items:
+        if idx < len(scores):
+            scores[idx] = inf_value
+    return scores
 
-# def extract_axis_1(data, ind):
-#     """
-#     Get specified elements along the first axis of tensor.
-#     :param data: Tensorflow tensor that will be subsetted.
-#     :param ind: Indices to take (one for each element along axis 0 of data).
-#     :return: Subsetted tensor.
-#     """
-
-#     batch_range = tf.range(tf.shape(data)[0])
-#     indices = tf.stack([batch_range, ind], axis=1)
-#     res = tf.gather_nd(data, indices)
-
-#     return res
-
+def topn_recommendations(scores, topn=10):
+    recs = np.argsort(scores, axis=1)[:, -topn:][:, ::-1]
+    return recs
 
 def normalize(inputs,
               epsilon=1e-8,

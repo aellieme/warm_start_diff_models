@@ -13,6 +13,9 @@ import time as Time
 from utility import pad_history,calculate_hit,extract_axis_1
 from collections import Counter
 from Modules_ori import *
+from load_and_split import load_and_preprocess_ml1m, global_temporal_split, prepare_dreamrec_data
+from evaluate_topk_dp import compute_all_metrics
+from plotting import TrainingPlotter
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -21,7 +24,7 @@ def parse_args():
 
     parser.add_argument('--epoch', type=int, default=1000,
                         help='Number of max epochs.')
-    parser.add_argument('--data', nargs='?', default='yc',
+    parser.add_argument('--data', nargs='?', default='ml-1m',
                         help='yc, ks, zhihu')
     parser.add_argument('--random_seed', type=int, default=100,
                         help='random seed')
@@ -166,15 +169,14 @@ class diffusion():
         if noise is None:
             noise = torch.randn_like(x_start) 
             # noise = torch.randn_like(x_start) / 100
-        
-        # 
+        print(f"[DEBUG] Mean of noise: {noise.mean().item():.4f}, Std of noise: {noise.std().item():.4f}")
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
 
+        print(f"[DEBUG] Mean of x_start: {x_start.mean().item():.4f}, Std of x_start: {x_start.std().item():.4f}")
+        print(f"[DEBUG] Mean of x_noisy: {x_noisy.mean().item():.4f}, Std of x_noisy: {x_noisy.std().item():.4f}")
 
         predicted_x = denoise_model(x_noisy, h, t)
-
         
-        # 
         if loss_type == 'l1':
             loss = F.l1_loss(x_start, predicted_x)
         elif loss_type == 'l2':
@@ -386,71 +388,74 @@ class Tenc(nn.Module):
 
         return scores
 
-
-
-def evaluate(model, test_data, diff, device):
-    eval_data=pd.read_pickle(os.path.join(data_directory, test_data))
-
+def evaluate(model, eval_df, diff, device, item_num):
     batch_size = 100
-    evaluated=0
-    total_clicks=1.0
-    total_purchase = 0.0
-    total_reward = [0, 0, 0, 0]
-    hit_clicks=[0,0,0,0]
-    ndcg_clicks=[0,0,0,0]
-    hit_purchase=[0,0,0,0]
-    ndcg_purchase=[0,0,0,0]
+    topk = [10, 20, 50]
 
-    seq, len_seq, target = list(eval_data['seq'].values), list(eval_data['len_seq'].values), list(eval_data['next'].values)
-
-
+    seq = eval_df['seq'].tolist()
+    len_seq = eval_df['len_seq'].tolist()
+    target = eval_df['next'].tolist()
     num_total = len(seq)
 
-    for i in range(num_total // batch_size):
-        seq_b, len_seq_b, target_b = seq[i * batch_size: (i + 1)* batch_size], len_seq[i * batch_size: (i + 1)* batch_size], target[i * batch_size: (i + 1)* batch_size]
-        states = np.array(seq_b)
-        states = torch.LongTensor(states)
-        states = states.to(device)
+    all_actual = []
+    all_predicted = []
 
-        prediction = model.predict(states, np.array(len_seq_b), diff)
-        _, topK = prediction.topk(100, dim=1, largest=True, sorted=True)
-        topK = topK.cpu().detach().numpy()
-        sorted_list2=np.flip(topK,axis=1)
-        sorted_list2 = sorted_list2
-        calculate_hit(sorted_list2,topk,target_b,hit_purchase,ndcg_purchase)
+    for start in range(0, num_total, batch_size):
+        end = min(start + batch_size, num_total)
+        batch_slice = slice(start, end)
+        target_b = target[batch_slice]
+        states = np.array(seq[batch_slice])
+        states = torch.LongTensor(states).to(device)
+        len_seq_b = np.array(len_seq[batch_slice])
 
-        total_purchase+=batch_size
- 
+        prediction = model.predict(states, len_seq_b, diff)
+        _, topK_batch = prediction.topk(max(topk), dim=1, largest=True, sorted=True)
+        topK_batch = topK_batch.cpu().detach().numpy()
 
-    hr_list = []
-    ndcg_list = []
-    print('{:<10s} {:<10s} {:<10s} {:<10s} {:<10s} {:<10s}'.format('HR@'+str(topk[0]), 'NDCG@'+str(topk[0]), 'HR@'+str(topk[1]), 'NDCG@'+str(topk[1]), 'HR@'+str(topk[2]), 'NDCG@'+str(topk[2])))
-    for i in range(len(topk)):
-        hr_purchase=hit_purchase[i]/total_purchase
-        ng_purchase=ndcg_purchase[i]/total_purchase
+        all_actual.extend([[t] for t in target_b])
+        all_predicted.extend(topK_batch.tolist())
 
-        hr_list.append(hr_purchase)
-        ndcg_list.append(ng_purchase[0,0])
+    prec, rec, ndcg, mrr, cov = compute_all_metrics(all_actual, all_predicted, topk, item_num)
 
-        if i == 1:
-            hr_20 = hr_purchase
+    print('{:<10s} {:<10s} {:<10s} {:<10s} {:<10s} {:<10s}'.format(
+        'HR@'+str(topk[0]), 'NDCG@'+str(topk[0]),
+        'HR@'+str(topk[1]), 'NDCG@'+str(topk[1]),
+        'HR@'+str(topk[2]), 'NDCG@'+str(topk[2])))
+    print('{:<10.6f} {:<10.6f} {:<10.6f} {:<10.6f} {:<10.6f} {:<10.6f}'.format(
+        rec[0], ndcg[0], rec[1], ndcg[1], rec[2], ndcg[2]))
+    print('MRR@{}: {:.6f}'.format(topk[1], mrr[1]))
+    print('Coverage@{}: {:.6f}'.format(topk[1], cov[1]))
 
-    print('{:<10.6f} {:<10.6f} {:<10.6f} {:<10.6f} {:<10.6f} {:<10.6f}'.format(hr_list[0], (ndcg_list[0]), hr_list[1], (ndcg_list[1]), hr_list[2], (ndcg_list[2])))
-
-    return hr_20
-
+    return rec[1]   # HR@20
 
 if __name__ == '__main__':
 
     # args = parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.cuda)
+    
+    if args.data == 'ml-1m':
+        all_data, data_index, n_users, n_items, userid_col, itemid_col, time_col = load_and_preprocess_ml1m()
+        train_raw, val_raw, test_raw, T_train, T_val = global_temporal_split(all_data, time_col)
+        seq_size = 50
+        item_num = n_items
+        train_data, val_data, test_data, pad_token = prepare_dreamrec_data(
+            train_raw, val_raw, test_raw, userid_col, itemid_col, time_col,
+            max_seq_len=seq_size, pad_item=item_num
+        )
+    else:
+        data_directory = './data/' + args.data
+        data_statis = pd.read_pickle(os.path.join(data_directory, 'data_statis.df'))
+        seq_size = data_statis['seq_size'][0]
+        item_num = data_statis['item_num'][0]
+        train_data = pd.read_pickle(os.path.join(data_directory, 'train_data.df'))
+        # при необходимости здесь же можно загрузить val_data, test_data
+    total_step=0
+    hr_max = 0
+    best_epoch = 0
 
-    data_directory = './data/' + args.data
-    data_statis = pd.read_pickle(
-        os.path.join(data_directory, 'data_statis.df'))  # read data statistics, includeing seq_size and item_num
-    seq_size = data_statis['seq_size'][0]  # the length of history to define the seq
-    item_num = data_statis['item_num'][0]  # total number of items
-    topk=[10, 20, 50]
+    # seq_size = data_statis['seq_size'][0]  # the length of history to define the seq
+    # item_num = data_statis['item_num'][0]  # total number of items
+    # topk=[10, 20, 50]
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     timesteps = args.timesteps
@@ -471,14 +476,8 @@ if __name__ == '__main__':
     # scheduler = lr_scheduler.LinearLR(optimizer, start_factor=0.1, end_factor=1, total_iters=20)
     
     model.to(device)
-    # optimizer.to(device)
-
-    train_data = pd.read_pickle(os.path.join(data_directory, 'train_data.df'))
-
-    total_step=0
-    hr_max = 0
-    best_epoch = 0
-
+    plotter = TrainingPlotter(save_dir='./plots', model_name='DreamRec_ml1m', metrics=['loss'])
+    
     num_rows=train_data.shape[0]
     num_batches=int(num_rows/args.batch_size)
     for i in range(args.epoch):
@@ -505,26 +504,35 @@ if __name__ == '__main__':
 
             n = torch.randint(0, args.timesteps, (args.batch_size, ), device=device).long()
             loss, predicted_x = diff.p_losses(model, x_start, h, n, loss_type='l2')
+            # loss, predicted_x = diff.p_losses(model.diffuser, x_start, h, n, loss_type='l2')
 
             loss.backward()
             optimizer.step()
-
+        plotter.update(epoch=i, loss=loss.item())
+    plotter.plot(show=False)
+    print('-------------------------- FINAL EVALUATION --------------------------')
+    # print('VAL PHRASE:')
+    # evaluate(model, val_data, diff, device, item_num)
+    print('TEST PHRASE:')
+    evaluate(model, test_data, diff, device, item_num)
 
         # scheduler.step()
-        if args.report_epoch:
-            if i % 1 == 0:
-                print("Epoch {:03d}; ".format(i) + 'Train loss: {:.4f}; '.format(loss) + "Time cost: " + Time.strftime(
-                        "%H: %M: %S", Time.gmtime(Time.time()-start_time)))
+        # if args.report_epoch:
+        #     if i % 1 == 0:
+        #         print("Epoch {:03d}; ".format(i) + 'Train loss: {:.4f}; '.format(loss) + "Time cost: " + Time.strftime(
+        #                 "%H: %M: %S", Time.gmtime(Time.time()-start_time)))
 
-            if (i + 1) % 10 == 0:
+        #     if (i + 1) % 10 == 0:
                 
-                eval_start = Time.time()
-                print('-------------------------- VAL PHRASE --------------------------')
-                _ = evaluate(model, 'val_data.df', diff, device)
-                print('-------------------------- TEST PHRASE -------------------------')
-                _ = evaluate(model, 'test_data.df', diff, device)
-                print("Evalution cost: " + Time.strftime("%H: %M: %S", Time.gmtime(Time.time()-eval_start)))
-                print('----------------------------------------------------------------')
+        #         eval_start = Time.time()
+        #         print('-------------------------- VAL PHRASE --------------------------')
+        #         _ = evaluate(model, 'val_data.df', diff, device)
+                #   _ = evaluate(model, val_data, diff, device, item_num)
+                #   _ = evaluate(model, test_data, diff, device, item_num)
+        #         print('-------------------------- TEST PHRASE -------------------------')
+        #         _ = evaluate(model, 'test_data.df', diff, device)
+        #         print("Evalution cost: " + Time.strftime("%H: %M: %S", Time.gmtime(Time.time()-eval_start)))
+        #         print('----------------------------------------------------------------')
 
 
 
