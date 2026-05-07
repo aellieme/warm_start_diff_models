@@ -20,7 +20,7 @@ torch.cuda.manual_seed_all(seed)
 torch.backends.cudnn.deterministic = True
 
 def main():
-    (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict) = prepare_data_and_description()
+    (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict, _) = prepare_data_and_description()
 
 
     print(f"Train: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}, len test_examples: {len(test_examples)}")
@@ -61,19 +61,6 @@ def main():
     for k, p, r, ndcg, mrr, cov in zip([10], precisions, recalls, ndcgs, mrrs, covs):
         print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
 
-    # # Adaptation (train + adapt) 
-    # print("\nadaptation")
-    # inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
-    # recs_adapt, users_adapt, metrics_adapt, inf_time_adapt = run_inference_pipeline(
-    #     model, inference_history, train_data, test_examples,
-    #     data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
-    # )
-    # precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a = metrics_adapt
-
-    # print(f"Inference latency (total): {inf_time_adapt:.4f} seconds")
-    # print(f"Evaluated users: {len(users_adapt)}")
-    # for k, p, r, ndcg, mrr, cov in zip([10], precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a):
-    #     print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
 
     #  Пример для одного пользователя 
     example_user = users[1]

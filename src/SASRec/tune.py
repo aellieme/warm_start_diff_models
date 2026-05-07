@@ -22,6 +22,8 @@ from training import (
 )
 from model import save_sasrec_model, get_model_path, generate_model_name
 from load_evaluate_pipeline import run_inference_pipeline
+from training import build_sasrec_model
+from training import build_final_sasrec_model
 
 BASE_CONFIG = {
     'num_epochs': 500,
@@ -50,16 +52,7 @@ SEARCH_SPACE = {
     'learning_rate': [5e-4, 1e-3, 2e-3], # вокруг 1e-3
     'l2_emb': [5e-5, 1e-4, 5e-4],        # вокруг 1e-4
 }
-# SEARCH_SPACE = {
-#     'maxlen': [50, 100, 200],
-#     'hidden_units': [64, 128, 256],
-#     'dropout_rate': [0.2, 0.5, 0.8],
-#     'num_blocks': [1, 2, 3],
-#     'num_heads': [1, 2, 4],
-#     'batch_size': [64, 128, 256],
-#     'learning_rate': [1e-4, 3e-4, 1e-3, 3e-3],
-#     'l2_emb': [0.0, 1e-5, 1e-4, 1e-3],
-# }
+
 
 
 def train_and_evaluate(config, train_data, val_data, data_description, max_epochs, patience):
@@ -109,7 +102,7 @@ def objective(trial, train_data, val_data, data_description):
 
 
 def main():
-    (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict) = prepare_data_and_description()
+    (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict, train_val_data) = prepare_data_and_description()
     print(f"Train: {len(train_data)}, Val: {len(val_data)}")
 
     # study = optuna.create_study(direction='minimize', sampler=optuna.samplers.TPESampler(seed=42))
@@ -144,16 +137,12 @@ def main():
         print(f"  {k}: {v}")
     print(f"Лучший HR@10: {best_hr:.4f}")
 
+    
+    print("\nФинальное обучение на train+val ")
     final_config = deepcopy(BASE_CONFIG)
     final_config.update(best_params)
-    final_config['num_epochs'] = 500
-    final_config['patience'] = 10
-
-    print("\nФинальное обучение")
-    from training import build_sasrec_model
-    final_model, _ = build_sasrec_model(
-        final_config, train_data, val_data, data_description, patience=final_config['patience']
-    )
+    final_config['num_epochs'] = 250       
+    final_model = build_final_sasrec_model(final_config, train_val_data, data_description)
 
     model_filename = generate_model_name(final_config, suffix='tuned')
     model_path = get_model_path(model_filename)
@@ -163,7 +152,6 @@ def main():
 
     print("\n Оценка финальной модели на тесте")
 
-    # Baseline (только train)
     recs_baseline, users_baseline, metrics_baseline, time_base = run_inference_pipeline(
         final_model, train_data, train_data, test_examples,
         data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
@@ -171,14 +159,6 @@ def main():
     prec, rec, ndcg, mrr, cov = metrics_baseline
     print(f"Инференс: Recall@10={rec[0]:.4f}, MRR={mrr[0]:.4f}, NDCG={ndcg[0]:.4f}, Cov={cov[0]:.4f}, Latency = {time_base:.4f}")
 
-    # С адаптацией (train+adapt)
-    # inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
-    # recs_adapt, users_adapt, metrics_adapt, time = run_inference_pipeline(
-    #     final_model, inference_history, train_data, test_examples,
-    #     data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
-    # )
-    # prec_a, rec_a, ndcg_a, mrr_a, cov_a = metrics_adapt
-    # print(f"With adaptation: Recall@10={rec_a[0]:.4f}, MRR={mrr_a[0]:.4f}, NDCG={ndcg_a[0]:.4f}, Cov={cov_a[0]:.4f}, Latency = {time:.4f}")
-    
+
 if __name__ == "__main__":
     main()

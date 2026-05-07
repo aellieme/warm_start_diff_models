@@ -17,12 +17,7 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 torch.backends.cudnn.deterministic = True
 def main():
-    #Подготовка данных 
-    # (train_data, val_data, adapt_data, test_data, test_last,
-    #  data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
-    # (train_data, val_data, adapt_data, test_data, test_examples,
-        # data_index, data_description, userid_col, itemid_col, time_col) = prepare_data_and_description()
-    (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict) = prepare_data_and_description()
+    (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict, _) = prepare_data_and_description()
     #  Загрузка модели 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model_path = get_latest_model_path()

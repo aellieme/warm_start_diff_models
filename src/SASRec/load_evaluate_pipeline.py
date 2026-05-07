@@ -60,6 +60,7 @@ def prepare_data_and_description():
 
     # Test (ts > T_test)
     test_data = all_data_sorted[all_data_sorted[time_col] > T_test].copy()
+    train_val_data = all_data_sorted[all_data_sorted[time_col] <= T_test].copy()
     test_examples = []
     for uid, user_test in test_data.groupby(userid_col):
         user_test = user_test.sort_values(time_col)
@@ -88,7 +89,7 @@ def prepare_data_and_description():
 
     return (train_data, val_data, test_data, test_examples_df,
             data_index, data_description, userid_col, itemid_col, time_col,
-            val_seq_dict)
+            val_seq_dict, train_val_data)
  
  
 def run_inference_pipeline(
