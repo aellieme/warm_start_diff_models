@@ -509,6 +509,10 @@ if __name__ == '__main__':
             loss.backward()
             optimizer.step()
         plotter.update(epoch=i, loss=loss.item())
+        if args.report_epoch:
+            if i % 1 == 0:
+                print("Epoch {:03d}; ".format(i) + 'Train loss: {:.4f}; '.format(loss) + "Time cost: " + Time.strftime(
+                        "%H: %M: %S", Time.gmtime(Time.time()-start_time)))
     plotter.plot(show=False)
     print('-------------------------- FINAL EVALUATION --------------------------')
     # print('VAL PHRASE:')
