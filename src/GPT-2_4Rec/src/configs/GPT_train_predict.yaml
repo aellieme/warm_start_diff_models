@@ -9,7 +9,7 @@ last_n_items: 10
 
 dataset:
   max_length: 128
-  shift_labels: False
+  shift_labels: True #False
 
 dataloader:
   batch_size: 64
@@ -42,3 +42,6 @@ mode: 'reciprocal_rank_aggregation'
 generation_params: {}
 
 generation: False
+
+final_train: true   
+final_epochs: 80     

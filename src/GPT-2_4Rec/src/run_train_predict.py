@@ -53,101 +53,100 @@ def main(config):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(config.cuda_visible_devices)
 
     train, validation, test, item_count = prepare_data(config)
-    train_loader, eval_loader = create_dataloaders(train, validation, config)
-    model = create_model(config, item_count=item_count)
-    start_time = time.time()
-    trainer, seqrec_module = training(model, train_loader, eval_loader, config)
-    training_time = time.time() - start_time
-    print('training_time', training_time)
+    
+    if config.get('final_train', False):
+        train_val = pd.concat([train, validation], ignore_index=True)
+        train_val = add_time_idx(train_val)
 
-    if config.test_metrics:
+        train_dataset = CausalLMDataset(train_val, **config['dataset'])
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config.dataloader.batch_size,
+            shuffle=True,
+            num_workers=config.dataloader.num_workers,
+            collate_fn=PaddingCollateFn()
+        )
+
+        model = create_model(config, item_count=item_count)
+
+        seqrec_module, trainer = final_training(model, train_loader, config)
+
+        torch.save(seqrec_module.model.state_dict(), "final_model.pt")
+
         history_before_test = pd.concat([train, validation], ignore_index=True)
         history_before_test = add_time_idx(history_before_test)
         start_time_inf = time.perf_counter()
-        recs = predict(trainer, seqrec_module, history_before_test, config, test_data=test, last_evaluation=True)
+        recs = predict(trainer, seqrec_module, history_before_test, config,
+                       test_data=test, last_evaluation=True)
 
-        # recs = predict(trainer, seqrec_module, train, config, test_data=test, last_evaluation=True)
-        # recs = predict(trainer, seqrec_module, train, config)
-        baseline_latency = time.perf_counter() - start_time_inf
-    else:
-        start_time_inf = time.perf_counter()
-        # recs = predict(trainer, seqrec_module, train[train.user_id.isin(validation.user_id.unique())], config,last_evaluation=True )
-        recs = predict(trainer, seqrec_module, train[train.user_id.isin(validation.user_id.unique())], config, test_data=validation, last_evaluation=True)
-        val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
-        evaluate(recs, val_last, train, config, prefix='val_last')
-        baseline_latency = time.perf_counter() - start_time_inf
-    
-    if hasattr(config, 'optuna_metrics'):
-        # val_metrics = evaluate(recs, validation[validation.time_idx == 0], train,  config, prefix='val')
-        val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
-        val_metrics = evaluate(recs, val_last, train, config, prefix='val_last')
-        return val_metrics[val_metrics['metric_name'] == config.optuna_metrics]['metric_value'].values
-    else:
-        evaluate(recs, validation, train,  config, prefix='val')
-    
-    
-    if config.test_metrics:
-        # metrics_baseline = evaluate(recs, test, train, config, prefix='test')
         test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
-        metrics_baseline = evaluate(recs, test_last, train, config, prefix='test_last')
+        metrics = evaluate(recs, test_last, train, config, prefix='test_last')
+        print("Final test metrics:", metrics)
+
+        summary = {
+            'Recall@10': metrics.get('test_last_recall@10', 0),
+            'NDCG@10': metrics.get('test_last_ndcg@10', 0),
+            'Coverage': metrics.get('test_last_coverage@10', 0),
+            'MRR': metrics.get('test_last_mrr@10', 0),
+            'Latency (s)': time.perf_counter() - start_time_inf,
+        }
+        print(pd.DataFrame([summary]).to_string(index=False))
+        return   
+    
     else:
-        val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
-        metrics_baseline = evaluate(recs, val_last, train, config, prefix='val_last')
+        train_loader, eval_loader = create_dataloaders(train, validation, config)
+        model = create_model(config, item_count=item_count)
+        start_time = time.time()
+        trainer, seqrec_module = training(model, train_loader, eval_loader, config)
+        training_time = time.time() - start_time
+        print('training_time', training_time)
 
-    baseline_prefix = 'test_last_' if config.get('test_metrics', True) else 'val_last_'
-    summary = {
-        f'Recall@10 ': metrics_baseline.get(f'{baseline_prefix}recall@10', 0),
-        f'NDCG@10 ': metrics_baseline.get(f'{baseline_prefix}ndcg@10', 0),
-        f'Coverage': metrics_baseline.get(f'{baseline_prefix}coverage@10', 0),
-        f'MRR ': metrics_baseline.get(f'{baseline_prefix}mrr@10', 0),
-        'Latency (s)': baseline_latency,
-    }
-    summary_df = pd.DataFrame([summary])
-    print(summary_df.to_string(index=False))
+        if config.test_metrics:
+            history_before_test = pd.concat([train, validation], ignore_index=True)
+            history_before_test = add_time_idx(history_before_test)
+            start_time_inf = time.perf_counter()
+            recs = predict(trainer, seqrec_module, history_before_test, config, test_data=test, last_evaluation=True)
+
+            # recs = predict(trainer, seqrec_module, train, config, test_data=test, last_evaluation=True)
+            # recs = predict(trainer, seqrec_module, train, config)
+            baseline_latency = time.perf_counter() - start_time_inf
+        else:
+            start_time_inf = time.perf_counter()
+            # recs = predict(trainer, seqrec_module, train[train.user_id.isin(validation.user_id.unique())], config,last_evaluation=True )
+            recs = predict(trainer, seqrec_module, train[train.user_id.isin(validation.user_id.unique())], config, test_data=validation, last_evaluation=True)
+            val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
+            evaluate(recs, val_last, train, config, prefix='val_last')
+            baseline_latency = time.perf_counter() - start_time_inf
+        
+        if hasattr(config, 'optuna_metrics'):
+            # val_metrics = evaluate(recs, validation[validation.time_idx == 0], train,  config, prefix='val')
+            val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
+            val_metrics = evaluate(recs, val_last, train, config, prefix='val_last')
+            return val_metrics[val_metrics['metric_name'] == config.optuna_metrics]['metric_value'].values
+        else:
+            evaluate(recs, validation, train,  config, prefix='val')
         
         
-    # if config.test_metrics:
-    #     # metrics_baseline = evaluate(recs, test, train,  config, prefix='test')
-    #     test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
-    #     metrics_baseline = evaluate(recs, test_last, train, config, prefix='test_last')
-    #     adapt = None
-    #     if adapt is not None and len(adapt) > 0: #адаптация
-    #         print("\nStarting adaptation\n")
-            
-    #         #объединяем train и adapt, пересчитываем time_idx
-    #         # train_adapt = pd.concat([train, adapt], ignore_index=True)
-    #         # train_adapt = add_time_idx(train_adapt)   # пересортировка и новый time_idx
-    #         train_adapt = pd.concat([train, validation, adapt], ignore_index=True)
-    #         train_adapt = add_time_idx(train_adapt)
-            
-    #         start_time_adapt = time.perf_counter()
-    #         #генерируем рекомендации на основе обновл истории
-    #         recs_adapt = predict(trainer, seqrec_module, train_adapt, config, test_data=test, last_evaluation=True)
-    #         adapt_latency = time.perf_counter() - start_time_adapt
-            
-    #         #оцениваем на тех же тестовых данных
-    #         print("\nAdaptation metrics on test")
-    #         # metrics_adapt = evaluate(recs_adapt, test, train_adapt, config, prefix='test_adapt')
-    #         metrics_adapt = evaluate(recs_adapt, test_last, train_adapt, config, prefix='test_adapt_last')
-            
-            
-    # baseline_prefix = 'test_last_' if config.get('test_metrics', True) else 'val_last_'
-    # summary = {
-    #     f'Recall@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}recall@10', 0),
-    #     f'NDCG@10 (Baseline)': metrics_baseline.get(f'{baseline_prefix}ndcg@10', 0),
-    #     f'Coverage (Baseline)': metrics_baseline.get(f'{baseline_prefix}coverage@10', 0),
-    #     f'MRR (Baseline)': metrics_baseline.get(f'{baseline_prefix}mrr@10', 0),
-    #     'Recall (adaptation)': metrics_adapt.get('test_adapt_last_recall@10', 0),
-    #     'NDCG (adaptation)': metrics_adapt.get('test_adapt_last_ndcg@10', 0),
-    #     'Coverage (adaptation)': metrics_adapt.get('test_adapt_last_coverage@10', 0),
-    #     'MRR (adaptation)': metrics_adapt.get('test_adapt_last_mrr@10', 0),
-    #     'Latency (baseline, s)': baseline_latency,
-    #     'Latency (adaptation, s)': adapt_latency,
-    # }
+        if config.test_metrics:
+            # metrics_baseline = evaluate(recs, test, train, config, prefix='test')
+            test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
+            metrics_baseline = evaluate(recs, test_last, train, config, prefix='test_last')
+        else:
+            val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
+            metrics_baseline = evaluate(recs, val_last, train, config, prefix='val_last')
 
-    # summary_df = pd.DataFrame([summary])
-    # print(summary_df.to_string(index=False))
-    torch.save(seqrec_module.model.state_dict(), "best_model.pt")
+        baseline_prefix = 'test_last_' if config.get('test_metrics', True) else 'val_last_'
+        summary = {
+            f'Recall@10 ': metrics_baseline.get(f'{baseline_prefix}recall@10', 0),
+            f'NDCG@10 ': metrics_baseline.get(f'{baseline_prefix}ndcg@10', 0),
+            f'Coverage': metrics_baseline.get(f'{baseline_prefix}coverage@10', 0),
+            f'MRR ': metrics_baseline.get(f'{baseline_prefix}mrr@10', 0),
+            'Latency (s)': baseline_latency,
+        }
+        summary_df = pd.DataFrame([summary])
+        print(summary_df.to_string(index=False))
+
+        torch.save(seqrec_module.model.state_dict(), "best_model.pt")
 
 def prepare_data(config):
     data = get_movielens_data(include_time=True)   
@@ -274,20 +273,6 @@ class PlottingCallback(Callback):
         )
         if (epoch % self.save_every == 0) or (epoch == trainer.max_epochs - 1):
             self.plotter.plot(save=True, show=False)
-    # def on_validation_epoch_end(self, trainer, pl_module):
-    #     epoch = trainer.current_epoch
-    #     metrics = trainer.callback_metrics
-    #     train_loss = metrics.get('train_loss')
-    #     val_loss = metrics.get('val_loss')
-    #     val_recall = metrics.get('val_hit_rate')   # hit_rate = recall@10
-    #     self.plotter.update(
-    #         epoch=epoch,
-    #         loss=train_loss,
-    #         val_loss=val_loss,
-    #         recall=val_recall
-    #     )
-    #     if (epoch % self.save_every == 0) or (epoch == trainer.max_epochs - 1):
-    #         self.plotter.plot(save=True, show=False)
 
 
 def training(model, train_loader, eval_loader, config):
@@ -309,7 +294,6 @@ def training(model, train_loader, eval_loader, config):
 
     from datetime import datetime
 
-    # внутри training, после определения callbacks (но до trainer)
     os.makedirs("./log", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     save_dir = f"./log/{timestamp}"
@@ -426,40 +410,50 @@ def evaluate(recs, test, train,  config, prefix='test'):
         print(f"\nSaved metrics_by_time_idx to metrics_csv/{prefix}_metrics_by_time_idx.csv")
         print(f"\nSaved metrics_by_time_idx_top_k_gt to metrics_csv/{prefix}_metrics_by_time_idx_top_k_gt.csv")
 
-    # if task:
-
-        # clearml_logger = task.get_logger()
-
-        # for key, value in metrics.items():
-        #     clearml_logger.report_single_value(key, value)
-
-        # if compute_by_time_idx_flag:
-        #     for metric_name in metrics_by_time_idx.columns:
-        #         for i, value in metrics_by_time_idx[metric_name].to_dict().items():
-        #             clearml_logger.report_scalar(title=prefix + '_' + metric_name,
-        #                                          series='by_time_idx', value=value, iteration=i)
-        #         for i, value in metrics_by_time_idx_top_k_gt[metric_name].to_dict().items():
-        #             clearml_logger.report_scalar(title=prefix + '_' + metric_name,
-        #                                          series='by_time_idx_top_k_gt',
-        #                                          value=value, iteration=i)
-
-        # metrics = pd.Series(metrics).to_frame().reset_index()
-        # metrics.columns = ['metric_name', 'metric_value']
-        # clearml_logger.report_table(title=f'{prefix}_metrics', series='dataframe',
-        #                             table_plot=metrics)
-        # task.upload_artifact(f'{prefix}_metrics', metrics)
-
-        # if compute_by_time_idx_flag:
-        #     clearml_logger.report_table(title=f'{prefix}_metrics_by_time_idx', series='dataframe',
-        #                                 table_plot=metrics_by_time_idx)
-        #     task.upload_artifact(f'{prefix}_metrics_by_time_idx', metrics_by_time_idx)
-        #     clearml_logger.report_table(title=f'{prefix}_metrics_by_time_idx_top_k_gt',
-        #                                 series='dataframe',
-        #                                 table_plot=metrics_by_time_idx_top_k_gt)
-        #     task.upload_artifact(f'{prefix}_metrics_by_time_idx_top_k_gt',
-        #                       metrics_by_time_idx_top_k_gt)
     return metrics
 
+def final_training(model, train_loader, config):
+    if config.model == 'GPT-2':
+        seqrec_module = SeqRecHuggingface(model, **config['seqrec_module'])
+    elif config.model == 'SASRec':
+        seqrec_module = SeqRec(model, **config['seqrec_module'])
+    elif config.model == 'BERT4Rec':
+        seqrec_module = SeqRec(model, **config['seqrec_module'])
+    else:
+        raise ValueError(f"Unknown model: {config.model}")
+
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    plotter = TrainingPlotter(save_dir=f"./log/{timestamp}",
+                              model_name=config.model,
+                              metrics=['loss'])
+
+    class FinalLossCallback(pl.Callback):
+        def __init__(self, plotter):
+            self.plotter = plotter
+        def on_train_epoch_end(self, trainer, pl_module):
+            loss = trainer.callback_metrics.get('train_loss')
+            if loss is not None:
+                self.plotter.update(epoch=trainer.current_epoch,
+                                    loss=loss.item())
+
+    loss_callback = FinalLossCallback(plotter)
+    progress_bar = TQDMProgressBar(refresh_rate=100)
+
+    trainer_params = dict(config.get('trainer_params', {}))
+    trainer_params.pop('max_epochs', None)
+
+    trainer = pl.Trainer(
+        callbacks=[progress_bar, loss_callback],
+        max_epochs=config.get('final_epochs', 80),
+        enable_checkpointing=False,
+        **trainer_params
+    )
+
+    trainer.fit(model=seqrec_module, train_dataloaders=train_loader)
+
+    plotter.plot(save=True, show=False)
+    return seqrec_module, trainer
 
 if __name__ == "__main__":
 
