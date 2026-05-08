@@ -9,8 +9,9 @@ from utils import *
 # import yaml
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import time
-from utils import Data_Train,Data_Val,Data_Test
 
+from utils import Data_Train,Data_Val,Data_Test
+from utils import load_and_split_gts
 
 
 def main():
@@ -20,7 +21,17 @@ def main():
     fix_random_seed_as(args.random_seed)
     args = item_num_create(args)
     model = choose_model(args)
-    tra_data_loader, val_data_loader, test_data_loader = load_data(args)
+    # tra_data_loader, val_data_loader, test_data_loader = load_data(args)
+
+    data_raw = load_and_split_gts(quantiles=(0.7, 0.8))
+    args.item_num = data_raw['item_count']
+    tra_data = Data_Train(data_raw['train'], args)
+    val_data = Data_Val(data_raw['val_seq'], data_raw['val_tgt'], args)
+    test_data = Data_Test(data_raw['test_seq'], [[] for _ in data_raw['test_tgt']], data_raw['test_tgt'], args)
+
+    tra_data_loader = tra_data.get_pytorch_dataloaders()
+    val_data_loader = val_data.get_pytorch_dataloaders()
+    test_data_loader = test_data.get_pytorch_dataloaders()
 
     # cold_hot_long_short(data_raw, args.dataset)
     print(args.description)

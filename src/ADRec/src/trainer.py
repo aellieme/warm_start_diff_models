@@ -15,7 +15,8 @@ def extract(data):
     return seq, seq[:,-1], diff_loss
 
 def item_num_create(args):
-    length = {"ml-100k":1008,
+    length = {"ml-1m": 3706,
+              "ml-100k":1008,
               'yelp': 64669,
               'sports':12301,
               'baby':4731,
