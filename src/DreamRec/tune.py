@@ -48,7 +48,7 @@ def objective(trial):
     dropout_rate = trial.suggest_float('dropout_rate', 0.0, 0.5)
     w = trial.suggest_float('w', 0.5, 4.0)
     p = trial.suggest_float('p', 0.0, 0.5)
-    hidden_factor = trial.suggest_categorical('hidden_factor', [32, 64, 128])
+    hidden_factor = trial.suggest_categorical('hidden_factor', [64])
     batch_size = trial.suggest_categorical('batch_size', [128, 256, 512])
     timesteps = trial.suggest_categorical('timesteps', [50, 100, 200])
     diffuser_type = trial.suggest_categorical('diffuser_type', ['mlp1', 'mlp2'])
