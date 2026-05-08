@@ -14,7 +14,7 @@ from load_and_split import load_and_preprocess_ml1m, global_temporal_split, prep
 from load_and_split import build_sequences, pad_and_format
 
 FIXED_ARGS = {
-    'epoch': 20,                
+    'epoch': 5,                
     'data': 'ml-1m',
     'random_seed': 100,
     'beta_end': 0.02,
@@ -103,7 +103,7 @@ if __name__ == '__main__':
     study = optuna.create_study(direction='maximize',
                                 sampler=optuna.samplers.TPESampler(seed=42),
                                 pruner=optuna.pruners.MedianPruner())
-    study.optimize(objective, n_trials=20, timeout=3600)
+    study.optimize(objective, n_trials=10, timeout=3600)
 
     print('Лучшие параметры:')
     for k, v in study.best_trial.params.items():
