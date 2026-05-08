@@ -211,16 +211,23 @@ class diffusion():
             noise = torch.randn_like(x)
 
             return model_mean + torch.sqrt(posterior_variance_t) * noise 
-        
+    
     @torch.no_grad()
     def sample(self, model_forward, model_forward_uncon, h):
         x = torch.randn_like(h)
-        # x = torch.randn_like(h) / 100
-
         for n in reversed(range(0, self.timesteps)):
-            x = self.p_sample(model_forward, model_forward_uncon, x, h, torch.full((h.shape[0], ), n, device=device, dtype=torch.long), n)
+            x = self.p_sample(model_forward, model_forward_uncon, x, h,
+                              torch.full((h.shape[0], ), n, device=h.device, dtype=torch.long), n)
+        return x    
+    # @torch.no_grad()
+    # def sample(self, model_forward, model_forward_uncon, h):
+    #     x = torch.randn_like(h)
+    #     # x = torch.randn_like(h) / 100
 
-        return x
+    #     for n in reversed(range(0, self.timesteps)):
+    #         x = self.p_sample(model_forward, model_forward_uncon, x, h, torch.full((h.shape[0], ), n, device=device, dtype=torch.long), n)
+
+    #     return x
 
 
 
