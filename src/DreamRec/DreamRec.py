@@ -169,11 +169,11 @@ class diffusion():
         if noise is None:
             noise = torch.randn_like(x_start) 
             # noise = torch.randn_like(x_start) / 100
-        print(f"[DEBUG] Mean of noise: {noise.mean().item():.4f}, Std of noise: {noise.std().item():.4f}")
+        # print(f"[DEBUG] Mean of noise: {noise.mean().item():.4f}, Std of noise: {noise.std().item():.4f}")
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
 
-        print(f"[DEBUG] Mean of x_start: {x_start.mean().item():.4f}, Std of x_start: {x_start.std().item():.4f}")
-        print(f"[DEBUG] Mean of x_noisy: {x_noisy.mean().item():.4f}, Std of x_noisy: {x_noisy.std().item():.4f}")
+        # print(f"[DEBUG] Mean of x_start: {x_start.mean().item():.4f}, Std of x_start: {x_start.std().item():.4f}")
+        # print(f"[DEBUG] Mean of x_noisy: {x_noisy.mean().item():.4f}, Std of x_noisy: {x_noisy.std().item():.4f}")
 
         predicted_x = denoise_model(x_noisy, h, t)
         

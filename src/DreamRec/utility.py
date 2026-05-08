@@ -7,7 +7,8 @@ from collections import deque
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
-# import tensorflow as tf
+import tensorflow as tf
+from torch.nn import init
 
 
 def extract_axis_1(data, indices):
