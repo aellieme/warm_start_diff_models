@@ -327,8 +327,11 @@ class Tenc(nn.Module):
         return res
 
     def forward_uncon(self, x, step):
+        # h = self.none_embedding(torch.tensor([0]).to(self.device))
+        # h = torch.cat([h.view(1, 64)]*x.shape[0], dim=0)
+        
         h = self.none_embedding(torch.tensor([0]).to(self.device))
-        h = torch.cat([h.view(1, 64)]*x.shape[0], dim=0)
+        h = torch.cat([h.view(1, self.hidden_size)]*x.shape[0], dim=0)
 
         t = self.step_mlp(step)
 
