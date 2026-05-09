@@ -48,6 +48,11 @@ def objective(trial, base_args, data_raw):
 
     fix_random_seed_as(trial_args.random_seed)
 
+    pretrain_path = os.path.join('saved', 'pretrain', trial_args.dataset, 'pretrain.pth')
+    if not os.path.exists(pretrain_path):
+        trial_args.pretrained = False
+        trial_args.freeze_emb = False
+
     tra_data = Data_Train(data_raw['train'], trial_args)
     val_data = Data_Val(data_raw['val_seq'], data_raw['val_tgt'], trial_args)
     tra_loader = tra_data.get_pytorch_dataloaders()
@@ -55,6 +60,10 @@ def objective(trial, base_args, data_raw):
 
     # Модель 
     model = choose_model(trial_args)
+    # pretrain_path = os.path.join('saved', 'pretrain', trial_args.dataset, 'pretrain.pth')
+    # if not os.path.exists(pretrain_path):
+    #     trial_args.pretrained = False
+    #     trial_args.freeze_emb = False
 
     # Обучение без теста
     best_model, _ = model_train(model, tra_loader, val_loader, None, trial_args, logger, train_time="tune")
@@ -126,6 +135,7 @@ def main():
     )
 
     fix_random_seed_as(base_args.random_seed)
+    
     data_raw = load_and_split_gts(quantiles=(0.7, 0.8))
     base_args = item_num_create(base_args) 
 
@@ -151,6 +161,12 @@ def main():
         setattr(final_args, k, v)
     final_args.epochs = 80
     final_args.mask_seen = True   # маскирование просмотренных айтемов
+    
+    pretrain_path = os.path.join('saved', 'pretrain', final_args.dataset, 'pretrain.pth')
+    if not os.path.exists(pretrain_path):
+        final_args.pretrained = False
+        final_args.freeze_emb = False
+    
 
     # Объединяем train и val_seq+val_tgt
     train_combined = []

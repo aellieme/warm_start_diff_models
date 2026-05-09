@@ -81,9 +81,15 @@ def choose_model(args):
     device = args.device
     if args.model in ['diffurec','adrec','dreamrec']:
         if args.model == 'adrec':
+            
+            pretrain_path = os.path.join('saved', 'pretrain', args.dataset, 'pretrain.pth')
+            if os.path.exists(pretrain_path):
+                args.pretrained = True
+                args.freeze_emb = True
+            # если файла нет – оставляем pretrained=False 
             # args.pcgrad=True
-            args.pretrained=True
-            args.freeze_emb=True
+            # args.pretrained=True
+            # args.freeze_emb=True
             pass
         if args.model == 'diffurec':
             args.split_onebyone=True
