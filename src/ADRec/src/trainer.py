@@ -97,6 +97,7 @@ def choose_model(args):
             args.is_causal = False
         model = Att_Diffuse_model(args)
     elif args.model == 'sasrec' or args.model == 'pretrain':
+        args.parallel_ag = False
         model = SASRec(args)
     else:
         model=None
