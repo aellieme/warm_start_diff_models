@@ -116,6 +116,7 @@ def main():
         loss_lambda=0.001,
         hidden_act='gelu',
         model='adrec',                  # фиксированная модель
+        independent=True,
         pcgrad=False,
         geodesic=False,
         pretrained=False,               # будет переопределено в choose_model
