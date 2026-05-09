@@ -224,6 +224,7 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
     torch.save(best_model.state_dict(), str(output_path))
     logger.info(best_metrics_dict)
     logger.info(best_epoch)
+    test_metrics_dict_mean = {}
     if test_data_loader is not None:
         print('start testing: ', datetime.datetime.now())
         logger.info('start testing: {}'.format(datetime.datetime.now()))
