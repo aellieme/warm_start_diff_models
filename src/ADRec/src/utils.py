@@ -64,16 +64,29 @@ def load_and_split_gts(quantiles=(0.7, 0.8)):
     test_seq_list = [test_seq_dict[uid] for uid in sorted(test_seq_dict.keys())]
     test_tgt_list = [test_tgt_dict[uid] for uid in sorted(test_seq_dict.keys())]
     
+    # return {
+    #     'train': list(train_dict.values()),          
+    #     'val_seq': val_seq_list,                     
+    #     'val_tgt': val_tgt_list,                     
+    #     'test_seq': test_seq_list,
+    #     'test_tgt': test_tgt_list,
+    #     'item_smap': item_smap,
+    #     'item_count': len(item_enc.classes_)
+    # }
     return {
-        'train': list(train_dict.values()),          
-        'val_seq': val_seq_list,                     
-        'val_tgt': val_tgt_list,                     
+        'train': list(train_dict.values()),
+        'val_seq': val_seq_list,
+        'val_tgt': val_tgt_list,
         'test_seq': test_seq_list,
         'test_tgt': test_tgt_list,
         'item_smap': item_smap,
-        'item_count': len(item_enc.classes_)
+        'item_count': len(item_enc.classes_),
+        'train_dict': train_dict,
+        'val_seq_dict': val_seq_dict,
+        'val_tgt_dict': val_tgt_dict,
+        'test_seq_dict': test_seq_dict,
+        'test_tgt_dict': test_tgt_dict,
     }
-
 
 
 class TrainDataset(torch.utils.data.Dataset):
