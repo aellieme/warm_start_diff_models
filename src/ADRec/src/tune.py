@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 SEARCH_SPACE = {
     'lr': [5e-4, 1e-3, 2e-3],
-    'batch_size': [256, 512, 1024],
+    'batch_size': [256, 512],
     'hidden_size': [64, 128, 256],
     'dropout': [0.1, 0.2, 0.3],
     'emb_dropout': [0.1, 0.2, 0.3],
