@@ -1,6 +1,7 @@
 import time
 import datetime
 import os
+from tqdm import tqdm
 import copy
 from metrics import *
 from utils import *
@@ -25,7 +26,8 @@ def evaluate_and_print(model, data_loader, args, logger, description="Validation
     all_predicted = []
     start_time = time.time()
     with torch.no_grad():
-        for batch in tqdm.tqdm(data_loader, leave=False, desc=f'{description}'):
+        # for batch in tqdm.tqdm(data_loader, leave=False, desc=f'{description}'):
+        for batch in tqdm(data_loader, leave=False, desc=f'{description}'):
             batch = [x.to(device) for x in batch]
             out_seq, last_item, *_ = model(batch[0], batch[1], train_flag=False)
             scores = model.calculate_score(last_item)
