@@ -18,9 +18,13 @@ def load_and_split_gts(quantiles=(0.7, 0.8)):
     
     user_enc = LabelEncoder()
     item_enc = LabelEncoder()
+    # df['userid'] = user_enc.fit_transform(df['userid'])
+    # df['movieid'] = item_enc.fit_transform(df['movieid'])
+    # item_smap = {idx: orig for idx, orig in enumerate(item_enc.classes_)}
     df['userid'] = user_enc.fit_transform(df['userid'])
-    df['movieid'] = item_enc.fit_transform(df['movieid'])
-    item_smap = {idx: orig for idx, orig in enumerate(item_enc.classes_)}
+    df['movieid'] = item_enc.fit_transform(df['movieid']) + 1  # сдвиг, 0 резервирован под паддинг
+    item_smap = {idx+1: orig for idx, orig in enumerate(item_enc.classes_)}  # сдвинутое сопоставление
+    # item_count остаётся len(item_enc.classes_) – 3706, макс. ID = 3706
     
     df = df.sort_values('timestamp').reset_index(drop=True)
     
@@ -159,8 +163,8 @@ class ValDataset(data_utils.Dataset):
         hist = seq[-self.max_len:]
         padding_len = self.max_len - len(hist)
         hist_pad = [0] * padding_len + hist
-        # answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + self.u2answer[index]
-        answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + [self.u2answer[index]]
+        answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + self.u2answer[index]
+        # answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + [self.u2answer[index]]
         assert sum([i>0 for i in hist_pad]) == sum([i>0 for i in answer_pad])
         return torch.LongTensor(hist_pad), torch.LongTensor(answer_pad)
 
@@ -198,6 +202,7 @@ class TestDataset(data_utils.Dataset):
         padding_len = self.max_len - len(hist)
         hist_pad = [0] * padding_len + hist
         answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + self.u2answer[index]
+        # answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + [self.u2answer[index]]
         assert sum([i>0 for i in hist_pad]) == sum([i>0 for i in answer_pad])
         return torch.LongTensor(hist_pad), torch.LongTensor(answer_pad)
 
