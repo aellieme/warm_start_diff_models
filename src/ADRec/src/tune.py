@@ -22,7 +22,7 @@ SEARCH_SPACE = {
     'dropout': [0.1, 0.2, 0.3],
     'emb_dropout': [0.1, 0.2, 0.3],
     'num_blocks': [2, 3, 4],
-    'diffusion_steps': [16, 32, 64],
+    'diffusion_steps': [32, 64],
     'lambda_uncertainty': [1e-4, 1e-3, 1e-2],
     'noise_schedule': ['trunc_lin', 'linear', 'cosine'],
     'schedule_sampler_name': ['uniform', 'lossaware'],
