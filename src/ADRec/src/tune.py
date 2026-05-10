@@ -42,8 +42,8 @@ def objective(trial, base_args, data_raw):
     trial_args.noise_schedule = trial.suggest_categorical('noise_schedule', SEARCH_SPACE['noise_schedule'])
     trial_args.schedule_sampler_name = trial.suggest_categorical('schedule_sampler_name', SEARCH_SPACE['schedule_sampler_name'])
 
-    trial_args.epochs = 7
-    trial_args.eval_interval = 7
+    trial_args.epochs = 20
+    trial_args.eval_interval = 10
     trial_args.patience = 3
 
     fix_random_seed_as(trial_args.random_seed)
@@ -148,7 +148,7 @@ def main():
     )
     study.optimize(
         partial(objective, base_args=base_args, data_raw=data_raw),
-        n_trials=20,
+        n_trials=15,
         timeout=3600,
         show_progress_bar=True
     )
