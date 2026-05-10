@@ -168,6 +168,7 @@ def main():
             config_dict = yaml.safe_load(f)
     parser = argparse.ArgumentParser(description="Final training script for recommendation models")
 
+    parser.add_argument('--config', type=str, default=None, help='Path to YAML config file')
     parser.add_argument('--dataset', type=str, default=config_dict.get('dataset', 'ml-1m'))
     parser.add_argument('--metric_ks', nargs='+', type=int, default=config_dict.get('metric_ks', [5,10,20]))
     parser.add_argument('--random_seed', type=int, default=config_dict.get('random_seed', 42))
