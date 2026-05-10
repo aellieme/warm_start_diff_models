@@ -160,7 +160,7 @@ def main():
     final_args = Namespace(**vars(base_args))
     for k, v in best_params.items():
         setattr(final_args, k, v)
-    final_args.epochs = 60
+    final_args.epochs = 150
     final_args.mask_seen = True   # маскирование просмотренных айтемов
     
     pretrain_path = os.path.join('saved', 'pretrain', final_args.dataset, 'pretrain.pth')
