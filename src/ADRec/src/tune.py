@@ -148,7 +148,7 @@ def main():
     )
     study.optimize(
         partial(objective, base_args=base_args, data_raw=data_raw),
-        n_trials=7,
+        n_trials=5,
         timeout=3600,
         show_progress_bar=True
     )
