@@ -255,6 +255,7 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
                     top_100_item.append(top100.cpu())
         test_elapsed = time.time() - start_test_time
         logger.info(f"Test inference time: {test_elapsed:.2f}s")
+        print(f"Test inference time: {test_elapsed:.2f}s")
         precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
             all_actual, all_predicted, metric_ks, args.item_num
         )
