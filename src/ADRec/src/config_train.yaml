@@ -1,0 +1,11 @@
+log_file: log/
+description: Diffu_norm_score
+epochs: 80
+eval_interval: 20
+batch_size: 256
+hidden_size: 256
+dropout: 0.2
+emb_dropout: 0.1
+noise_schedule: cosine
+independent: true
+mask_seen: true

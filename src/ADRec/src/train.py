@@ -7,6 +7,7 @@ import torch.optim as optim
 from tqdm import tqdm
 import numpy as np
 from copy import deepcopy
+import yaml
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -148,50 +149,63 @@ def final_training(args):
 
 
 def main():
+    def load_config(config_path):
+        with open(config_path, 'r') as f:
+            return yaml.safe_load(f)
+        
+    temp_parser = argparse.ArgumentParser(add_help=False)
+    temp_parser.add_argument('--config', type=str, default=None, help='Path to YAML config file')
+    temp_args, _ = temp_parser.parse_known_args()
+
+    # Загрузить конфиг, если указан
+    config_dict = {}
+    if temp_args.config:
+        with open(temp_args.config, 'r') as f:
+            config_dict = yaml.safe_load(f)
     parser = argparse.ArgumentParser(description="Final training script for recommendation models")
 
-    parser.add_argument('--dataset', type=str, default='ml-1m', help='Dataset name')
-    parser.add_argument('--metric_ks', nargs='+', type=int, default=[5,10,20], help='Metrics at k')
-    parser.add_argument('--random_seed', type=int, default=42, help='Random seed')
-    parser.add_argument('--log_file', type=str, default='logs/', help='Log directory')
-    parser.add_argument('--description', type=str, default='_final', help='Experiment description')
-    parser.add_argument('--epochs', type=int, default=300, help='Number of epochs')
-    parser.add_argument('--eval_interval', type=int, default=10, help='Print loss interval')
-    parser.add_argument('--max_len', type=int, default=50, help='Max sequence length')
-    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
-    parser.add_argument('--num_gpu', type=int, default=1)
-    parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--hidden_size', type=int, default=128)
-    parser.add_argument('--dropout', type=float, default=0.1)
-    parser.add_argument('--emb_dropout', type=float, default=0.3)
-    parser.add_argument('--num_blocks', type=int, default=4)
-    parser.add_argument('--diffusion_steps', type=int, default=32)
-    parser.add_argument('--lambda_uncertainty', type=float, default=0.001)
-    parser.add_argument('--noise_schedule', type=str, default='trunc_lin')
-    parser.add_argument('--schedule_sampler_name', type=str, default='uniform')
-    parser.add_argument('--optimizer', type=str, default='Adam')
-    parser.add_argument('--lr', type=float, default=0.001)
-    parser.add_argument('--weight_decay', type=float, default=0.0)
-    parser.add_argument('--momentum', type=float, default=None)
-    parser.add_argument('--model', type=str, default='adrec')
-    parser.add_argument('--loss', type=str, default='mse')
-    parser.add_argument('--loss_scale', type=float, default=1.0)
-    parser.add_argument('--cfg_scale', type=float, default=1.0)
-    parser.add_argument('--geodesic', action='store_true')
-    parser.add_argument('--independent', action='store_true')
-    parser.add_argument('--pcgrad', action='store_true')
-    parser.add_argument('--is_causal', action='store_true')
-    parser.add_argument('--parallel_ag', action='store_true')
-    parser.add_argument('--split_onebyone', action='store_true')
-    parser.add_argument('--dif_decoder', type=str, default='att')
-    parser.add_argument('--dif_objective', type=str, default='pred_x0')
-    parser.add_argument('--beta_a', type=float, default=0.3)
-    parser.add_argument('--beta_b', type=float, default=10.0)
-    parser.add_argument('--mask_seen', action='store_true')
-    parser.add_argument('--pretrained', action='store_true', help='Use pretrained embeddings')
-    parser.add_argument('--freeze_emb', action='store_true', help='Freeze embeddings')
-    parser.add_argument('--rescale_timesteps', action='store_true', default=True)
-
+    parser.add_argument('--dataset', type=str, default=config_dict.get('dataset', 'ml-1m'))
+    parser.add_argument('--metric_ks', nargs='+', type=int, default=config_dict.get('metric_ks', [5,10,20]))
+    parser.add_argument('--random_seed', type=int, default=config_dict.get('random_seed', 42))
+    parser.add_argument('--log_file', type=str, default=config_dict.get('log_file', 'logs/'))
+    parser.add_argument('--description', type=str, default=config_dict.get('description', '_final'))
+    parser.add_argument('--epochs', type=int, default=config_dict.get('epochs', 300))
+    parser.add_argument('--eval_interval', type=int, default=config_dict.get('eval_interval', 10))
+    parser.add_argument('--max_len', type=int, default=config_dict.get('max_len', 50))
+    parser.add_argument('--device', type=str, default=config_dict.get('device', 'cuda' if torch.cuda.is_available() else 'cpu'))
+    parser.add_argument('--num_gpu', type=int, default=config_dict.get('num_gpu', 1))
+    parser.add_argument('--batch_size', type=int, default=config_dict.get('batch_size', 512))
+    parser.add_argument('--hidden_size', type=int, default=config_dict.get('hidden_size', 128))
+    parser.add_argument('--dropout', type=float, default=config_dict.get('dropout', 0.1))
+    parser.add_argument('--emb_dropout', type=float, default=config_dict.get('emb_dropout', 0.3))
+    parser.add_argument('--num_blocks', type=int, default=config_dict.get('num_blocks', 4))
+    parser.add_argument('--diffusion_steps', type=int, default=config_dict.get('diffusion_steps', 32))
+    parser.add_argument('--lambda_uncertainty', type=float, default=config_dict.get('lambda_uncertainty', 0.001))
+    parser.add_argument('--noise_schedule', type=str, default=config_dict.get('noise_schedule', 'trunc_lin'))
+    parser.add_argument('--schedule_sampler_name', type=str, default=config_dict.get('schedule_sampler_name', 'uniform'))
+    parser.add_argument('--optimizer', type=str, default=config_dict.get('optimizer', 'Adam'))
+    parser.add_argument('--lr', type=float, default=config_dict.get('lr', 0.001))
+    parser.add_argument('--weight_decay', type=float, default=config_dict.get('weight_decay', 0.0))
+    parser.add_argument('--momentum', type=float, default=config_dict.get('momentum', None))
+    parser.add_argument('--model', type=str, default=config_dict.get('model', 'adrec'))
+    parser.add_argument('--loss', type=str, default=config_dict.get('loss', 'mse'))
+    parser.add_argument('--loss_scale', type=float, default=config_dict.get('loss_scale', 1.0))
+    parser.add_argument('--cfg_scale', type=float, default=config_dict.get('cfg_scale', 1.0))
+    parser.add_argument('--geodesic', action='store_true', default=config_dict.get('geodesic', False))
+    parser.add_argument('--independent', action='store_true', default=config_dict.get('independent', False))
+    parser.add_argument('--pcgrad', action='store_true', default=config_dict.get('pcgrad', False))
+    parser.add_argument('--is_causal', action='store_true', default=config_dict.get('is_causal', False))
+    parser.add_argument('--parallel_ag', action='store_true', default=config_dict.get('parallel_ag', False))
+    parser.add_argument('--split_onebyone', action='store_true', default=config_dict.get('split_onebyone', False))
+    parser.add_argument('--dif_decoder', type=str, default=config_dict.get('dif_decoder', 'att'))
+    parser.add_argument('--dif_objective', type=str, default=config_dict.get('dif_objective', 'pred_x0'))
+    parser.add_argument('--beta_a', type=float, default=config_dict.get('beta_a', 0.3))
+    parser.add_argument('--beta_b', type=float, default=config_dict.get('beta_b', 10.0))
+    parser.add_argument('--mask_seen', action='store_true', default=config_dict.get('mask_seen', False))
+    parser.add_argument('--pretrained', action='store_true', default=config_dict.get('pretrained', False))
+    parser.add_argument('--freeze_emb', action='store_true', default=config_dict.get('freeze_emb', False))
+    parser.add_argument('--rescale_timesteps', action='store_true', default=config_dict.get('rescale_timesteps', True))
+    
     args = parser.parse_args()
 
     args.hidden_act = 'gelu'
