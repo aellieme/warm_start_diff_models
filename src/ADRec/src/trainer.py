@@ -269,9 +269,14 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
         logger.info('Test------------------------------------------------------')
         print(test_metrics_dict_mean)
         logger.info(test_metrics_dict_mean)
-        print('Best Eval---------------------------------------------------------')
-        print(f"Best Recall@10: {best_recall10:.4f}")
-        logger.info(f"Best Recall@10: {best_recall10:.4f}")
+        if best_recall10 >= 0:
+            print('Best Eval---------------------------------------------------------')
+            print(f"Best Recall@10: {best_recall10:.4f}")
+            logger.info('Best Eval---------------------------------------------------------')
+            logger.info(f"Best Recall@10: {best_recall10:.4f}")
+        # print('Best Eval---------------------------------------------------------')
+        # print(f"Best Recall@10: {best_recall10:.4f}")
+        # logger.info(f"Best Recall@10: {best_recall10:.4f}")
         print(args)
 
     if args.diversity_measure:
