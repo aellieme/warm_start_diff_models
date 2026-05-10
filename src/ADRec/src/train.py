@@ -169,7 +169,7 @@ def main():
     parser.add_argument('--random_seed', type=int, default=config_dict.get('random_seed', 42))
     parser.add_argument('--log_file', type=str, default=config_dict.get('log_file', 'logs/'))
     parser.add_argument('--description', type=str, default=config_dict.get('description', '_final'))
-    parser.add_argument('--epochs', type=int, default=config_dict.get('epochs', 300))
+    parser.add_argument('--epochs', type=int, default=config_dict.get('epochs', 150))
     parser.add_argument('--eval_interval', type=int, default=config_dict.get('eval_interval', 10))
     parser.add_argument('--max_len', type=int, default=config_dict.get('max_len', 50))
     parser.add_argument('--device', type=str, default=config_dict.get('device', 'cuda' if torch.cuda.is_available() else 'cpu'))
