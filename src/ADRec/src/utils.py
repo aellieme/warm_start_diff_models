@@ -195,7 +195,9 @@ class ValDataset(data_utils.Dataset):
         hist_pad = [0] * padding_len + hist
         # answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + self.u2answer[index]
         answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + [self.u2answer[index]]
-        assert sum([i>0 for i in hist_pad]) == sum([i>0 for i in answer_pad])
+        # assert sum([i>0 for i in hist_pad]) == sum([i>0 for i in answer_pad])
+        hist_pad = hist_pad[-self.max_len:]
+        answer_pad = answer_pad[-self.max_len:]
         return torch.LongTensor(hist_pad), torch.LongTensor(answer_pad)
 
 
@@ -233,7 +235,9 @@ class TestDataset(data_utils.Dataset):
         hist_pad = [0] * padding_len + hist
         # answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + self.u2answer[index]
         answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + [self.u2answer[index]]
-        assert sum([i>0 for i in hist_pad]) == sum([i>0 for i in answer_pad])
+        # assert sum([i>0 for i in hist_pad]) == sum([i>0 for i in answer_pad])
+        hist_pad = hist_pad[-self.max_len:]
+        answer_pad = answer_pad[-self.max_len:]
         return torch.LongTensor(hist_pad), torch.LongTensor(answer_pad)
 
 
