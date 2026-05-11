@@ -100,7 +100,6 @@ class TrainDataset(torch.utils.data.Dataset):
         self.parallel = parallel_ag
     def __len__(self):
         return len(self.id2seq)
-
     def __getitem__(self, index):
         seq = self._getseq(index)
         hist = seq[:-1]
@@ -108,13 +107,28 @@ class TrainDataset(torch.utils.data.Dataset):
         mask_len = self.max_len - len(hist)
         hist_pad = [0] * mask_len + hist
         if self.parallel is True:
-            # mask_len = self.max_len - len(target)
             target = [0] * mask_len + seq[-len(hist):]
-            # assert sum([i>0 for i in hist_pad]) == sum([i>0 for i in target])
         else:
             target = [0] * (self.max_len-1) + [seq[-1]]
 
+        hist_pad = hist_pad[-self.max_len:]
+        target = target[-self.max_len:]
+
         return torch.LongTensor(hist_pad), torch.LongTensor(target)
+    # def __getitem__(self, index):
+    #     seq = self._getseq(index)
+    #     hist = seq[:-1]
+    #     hist = hist[-self.max_len:]
+    #     mask_len = self.max_len - len(hist)
+    #     hist_pad = [0] * mask_len + hist
+    #     if self.parallel is True:
+    #         # mask_len = self.max_len - len(target)
+    #         target = [0] * mask_len + seq[-len(hist):]
+    #         # assert sum([i>0 for i in hist_pad]) == sum([i>0 for i in target])
+    #     else:
+    #         target = [0] * (self.max_len-1) + [seq[-1]]
+
+    #     return torch.LongTensor(hist_pad), torch.LongTensor(target)
 
     def _getseq(self, idx):
         return self.id2seq[idx]
