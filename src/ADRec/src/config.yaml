@@ -9,7 +9,7 @@ dropout: 0.1  # Dropout of representation
 emb_dropout: 0.3  # Dropout of item embedding
 hidden_act: gelu  # Activation function: gelu or relu
 dif_blocks: 2  # Number of denoised decoder blocks
-epochs: 500 # Number of epochs for training (500)
+epochs: 300 # Number of epochs for training (500)
 decay_step: 100  # Decay step for StepLR
 gamma: 0.1  # Gamma for StepLR
 metric_ks:
@@ -49,3 +49,4 @@ loss: mse # Loss function: 'ce', 'mse'
 loss_scale: 1.
 pcgrad: false
 description: _ # Model brief introduction
+mask_seen: True

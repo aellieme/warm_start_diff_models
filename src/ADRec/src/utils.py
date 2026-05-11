@@ -8,65 +8,65 @@ from collections import Counter
 import random
 from scipy.stats import beta
 
-import polara
-from polara.datasets.movielens import get_movielens_data
+# import polara
+# from polara.datasets.movielens import get_movielens_data
 from sklearn.preprocessing import LabelEncoder
 
-def load_and_split_gts(quantiles=(0.7, 0.8)):
+# def load_and_split_gts(quantiles=(0.7, 0.8)):
 
-    df = get_movielens_data(include_time=True)
+#     df = get_movielens_data(include_time=True)
     
-    user_enc = LabelEncoder()
-    item_enc = LabelEncoder()
-    # df['userid'] = user_enc.fit_transform(df['userid'])
-    # df['movieid'] = item_enc.fit_transform(df['movieid'])
-    # item_smap = {idx: orig for idx, orig in enumerate(item_enc.classes_)}
-    df['userid'] = user_enc.fit_transform(df['userid'])
-    df['movieid'] = item_enc.fit_transform(df['movieid']) + 1  # сдвиг, 0 резервирован под паддинг
-    item_smap = {idx+1: orig for idx, orig in enumerate(item_enc.classes_)}  # сдвинутое сопоставление
-    # item_count остаётся len(item_enc.classes_) – 3706, макс. ID = 3706
+#     user_enc = LabelEncoder()
+#     item_enc = LabelEncoder()
+#     # df['userid'] = user_enc.fit_transform(df['userid'])
+#     # df['movieid'] = item_enc.fit_transform(df['movieid'])
+#     # item_smap = {idx: orig for idx, orig in enumerate(item_enc.classes_)}
+#     df['userid'] = user_enc.fit_transform(df['userid'])
+#     df['movieid'] = item_enc.fit_transform(df['movieid']) + 1  # сдвиг, 0 резервирован под паддинг
+#     item_smap = {idx+1: orig for idx, orig in enumerate(item_enc.classes_)}  # сдвинутое сопоставление
+#     # item_count остаётся len(item_enc.classes_) – 3706, макс. ID = 3706
     
-    df = df.sort_values('timestamp').reset_index(drop=True)
+#     df = df.sort_values('timestamp').reset_index(drop=True)
     
-    T_valid = df['timestamp'].quantile(quantiles[0])   # 0.7
-    T_test  = df['timestamp'].quantile(quantiles[1])   # 0.8
+#     T_valid = df['timestamp'].quantile(quantiles[0])   # 0.7
+#     T_test  = df['timestamp'].quantile(quantiles[1])   # 0.8
     
-    train_dict = {}
-    val_seq_dict = {}
-    val_tgt_dict = {}
-    test_seq_dict = {}
-    test_tgt_dict = {}
+#     train_dict = {}
+#     val_seq_dict = {}
+#     val_tgt_dict = {}
+#     test_seq_dict = {}
+#     test_tgt_dict = {}
     
-    for uid, group in df.groupby('userid'):
-        group = group.sort_values('timestamp')
-        items = group['movieid'].tolist()
-        times = group['timestamp'].tolist()
+#     for uid, group in df.groupby('userid'):
+#         group = group.sort_values('timestamp')
+#         items = group['movieid'].tolist()
+#         times = group['timestamp'].tolist()
         
-        train_seq = [item for item, ts in zip(items, times) if ts <= T_valid]
-        if len(train_seq) > 0:
-            train_dict[uid] = train_seq
+#         train_seq = [item for item, ts in zip(items, times) if ts <= T_valid]
+#         if len(train_seq) > 0:
+#             train_dict[uid] = train_seq
         
-        val_window = [(item, ts) for item, ts in zip(items, times) if T_valid < ts <= T_test]
-        if val_window:
-            val_tgt = val_window[-1][0]
-            val_hist = [item for item, _ in val_window[:-1]]
-            val_seq_dict[uid] = train_seq + val_hist
-            val_tgt_dict[uid] = val_tgt
+#         val_window = [(item, ts) for item, ts in zip(items, times) if T_valid < ts <= T_test]
+#         if val_window:
+#             val_tgt = val_window[-1][0]
+#             val_hist = [item for item, _ in val_window[:-1]]
+#             val_seq_dict[uid] = train_seq + val_hist
+#             val_tgt_dict[uid] = val_tgt
         
-        test_window = [(item, ts) for item, ts in zip(items, times) if ts > T_test]
-        if test_window:
-            test_tgt = test_window[-1][0]
-            test_hist = [item for item, _ in test_window[:-1]]
+#         test_window = [(item, ts) for item, ts in zip(items, times) if ts > T_test]
+#         if test_window:
+#             test_tgt = test_window[-1][0]
+#             test_hist = [item for item, _ in test_window[:-1]]
             
-            full_val_seq = [item for item, _ in val_window] if val_window else []
-            test_seq_dict[uid] = train_seq + full_val_seq + test_hist
-            test_tgt_dict[uid] = test_tgt
+#             full_val_seq = [item for item, _ in val_window] if val_window else []
+#             test_seq_dict[uid] = train_seq + full_val_seq + test_hist
+#             test_tgt_dict[uid] = test_tgt
     
-    val_seq_list = [val_seq_dict[uid] for uid in sorted(val_seq_dict.keys())]
-    val_tgt_list = [val_tgt_dict[uid] for uid in sorted(val_seq_dict.keys())]
+    # val_seq_list = [val_seq_dict[uid] for uid in sorted(val_seq_dict.keys())]
+    # val_tgt_list = [val_tgt_dict[uid] for uid in sorted(val_seq_dict.keys())]
     
-    test_seq_list = [test_seq_dict[uid] for uid in sorted(test_seq_dict.keys())]
-    test_tgt_list = [test_tgt_dict[uid] for uid in sorted(test_seq_dict.keys())]
+    # test_seq_list = [test_seq_dict[uid] for uid in sorted(test_seq_dict.keys())]
+    # test_tgt_list = [test_tgt_dict[uid] for uid in sorted(test_seq_dict.keys())]
     
     # return {
     #     'train': list(train_dict.values()),          
@@ -77,20 +77,20 @@ def load_and_split_gts(quantiles=(0.7, 0.8)):
     #     'item_smap': item_smap,
     #     'item_count': len(item_enc.classes_)
     # }
-    return {
-        'train': list(train_dict.values()),
-        'val_seq': val_seq_list,
-        'val_tgt': val_tgt_list,
-        'test_seq': test_seq_list,
-        'test_tgt': test_tgt_list,
-        'item_smap': item_smap,
-        'item_count': len(item_enc.classes_),
-        'train_dict': train_dict,
-        'val_seq_dict': val_seq_dict,
-        'val_tgt_dict': val_tgt_dict,
-        'test_seq_dict': test_seq_dict,
-        'test_tgt_dict': test_tgt_dict,
-    }
+    # return {
+    #     'train': list(train_dict.values()),
+    #     'val_seq': val_seq_list,
+    #     'val_tgt': val_tgt_list,
+    #     'test_seq': test_seq_list,
+    #     'test_tgt': test_tgt_list,
+    #     'item_smap': item_smap,
+    #     'item_count': len(item_enc.classes_),
+    #     'train_dict': train_dict,
+    #     'val_seq_dict': val_seq_dict,
+    #     'val_tgt_dict': val_tgt_dict,
+    #     'test_seq_dict': test_seq_dict,
+    #     'test_tgt_dict': test_tgt_dict,
+    # }
 
 
 class TrainDataset(torch.utils.data.Dataset):

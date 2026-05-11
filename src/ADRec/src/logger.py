@@ -124,6 +124,7 @@ def cmdline_args():
     parser.add_argument('--description', type=str)
     parser.add_argument('--pcgrad', type=str2bool)
     parser.add_argument('--geodesic', type=str2bool)
+    parser.add_argument('--mask_seen', type=str2bool, help='Mask seen items')
     parser.add_argument('--final', action='store_true', help='Use train+val for final training')
     # 解析命令行参数
     args = parser.parse_args()
