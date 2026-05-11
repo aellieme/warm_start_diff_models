@@ -58,7 +58,7 @@ def extract(data):
 
 def item_num_create(args):
     length = {"ml-1m": 3706,
-              "ml-100k":1008,
+              "ml-100k":1682,#1008
               'yelp': 64669,
               'sports':12301,
               'baby':4731,
@@ -112,8 +112,10 @@ def load_data(args):
     with open(path_data, 'rb') as f:
         data_raw = pickle.load(f)
     tra_data = Data_Train(data_raw['train'], args)
-    val_data = Data_Val(data_raw['train'], data_raw['val'], args)
-    test_data = Data_Test(data_raw['train'], data_raw['val'], data_raw['test'], args)
+    # val_data = Data_Val(data_raw['train'], data_raw['val'], args)
+    val_data = Data_Val(data_raw['val_seq'], data_raw['val_tgt'], args)
+    # test_data = Data_Test(data_raw['train'], data_raw['val'], data_raw['test'], args)
+    test_data = Data_Test(data_raw['test_seq'], [[] for _ in data_raw['test_tgt']], data_raw['test_tgt'], args) 
     tra_data_loader = tra_data.get_pytorch_dataloaders()
     val_data_loader = val_data.get_pytorch_dataloaders()
     test_data_loader = test_data.get_pytorch_dataloaders()
