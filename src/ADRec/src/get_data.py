@@ -136,10 +136,10 @@ def prepare_ml1m():
     save_dataset_with_gts('ml-1m', df)
     os.remove(zip_path)
     
-def download_from_huggingface(dataset_name, repo_id, filename):
-    """Helper to download a dataset file from Hugging Face Hub."""
-    local_path = hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset")
-    return pd.read_csv(local_path)
+# def download_from_huggingface(dataset_name, repo_id, filename):
+#     """Helper to download a dataset file from Hugging Face Hub."""
+#     local_path = hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset")
+#     return pd.read_csv(local_path)
 
 def clean_amazon_reviews(df):
     """Keep only necessary columns for our processing."""
