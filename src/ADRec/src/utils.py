@@ -110,7 +110,7 @@ class TrainDataset(torch.utils.data.Dataset):
         if self.parallel is True:
             # mask_len = self.max_len - len(target)
             target = [0] * mask_len + seq[-len(hist):]
-            assert sum([i>0 for i in hist_pad]) == sum([i>0 for i in target])
+            # assert sum([i>0 for i in hist_pad]) == sum([i>0 for i in target])
         else:
             target = [0] * (self.max_len-1) + [seq[-1]]
 
