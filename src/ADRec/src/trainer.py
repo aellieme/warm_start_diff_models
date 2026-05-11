@@ -229,6 +229,13 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
     if not os.path.exists(saved_dir):
         os.makedirs(saved_dir)
     output_path = os.path.join(saved_dir, str(train_time) + args.description + '.pth')
+    # Специальное сохранение для pretrain модели
+    if args.model == 'pretrain':
+        pretrain_saved_dir = os.path.join('saved', 'pretrain', args.dataset)
+        os.makedirs(pretrain_saved_dir, exist_ok=True)
+        pretrain_output_path = os.path.join(pretrain_saved_dir, 'pretrain.pth')
+        torch.save(best_model.state_dict(), pretrain_output_path)
+        print(f"Pretrained embeddings saved to {pretrain_output_path}")
     torch.save(best_model.state_dict(), str(output_path))
     logger.info(best_metrics_dict)
     logger.info(best_epoch)
