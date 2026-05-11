@@ -11,7 +11,7 @@ from utils import *
 import time
 
 from utils import Data_Train,Data_Val,Data_Test
-from utils import load_and_split_gts
+# from utils import load_and_split_gts
 
 
 def main():
