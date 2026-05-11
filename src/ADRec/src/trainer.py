@@ -111,6 +111,7 @@ def load_data(args):
     path_data = '../datasets/data/' + args.dataset + '/dataset.pkl'
     with open(path_data, 'rb') as f:
         data_raw = pickle.load(f)
+    args.item_num = data_raw['item_count']
     tra_data = Data_Train(data_raw['train'], args)
     # val_data = Data_Val(data_raw['train'], data_raw['val'], args)
     val_data = Data_Val(data_raw['val_seq'], data_raw['val_tgt'], args)
@@ -119,6 +120,7 @@ def load_data(args):
     tra_data_loader = tra_data.get_pytorch_dataloaders()
     val_data_loader = val_data.get_pytorch_dataloaders()
     test_data_loader = test_data.get_pytorch_dataloaders()
+    # args.item_num = data_raw['item_count']
 
     return tra_data_loader, val_data_loader, test_data_loader
 

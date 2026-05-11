@@ -150,12 +150,28 @@ class Data_Train():
         self.id_seq = {}
         idx = 0
         for seq_temp in self.u2seq:
-            seq_temp = seq_temp[-self.max_len-1:]
-            # 只能从预截取长度后进行子序列切分
-            # 加一是为了包含tgt
+            # Ограничиваем длину исходной последовательности до max_len+1
+            if len(seq_temp) > self.max_len + 1:
+                seq_temp = seq_temp[-self.max_len-1:]
+            # Генерируем подпоследовательности
             for star in range(len(seq_temp) - 1):
-                self.id_seq[idx] = seq_temp[:star + 2]
+                subseq = seq_temp[:star+2]
+                # Дополнительно обрезаем, если вдруг subseq длиннее max_len+1
+                if len(subseq) > self.max_len + 1:
+                    subseq = subseq[-self.max_len-1:]
+                self.id_seq[idx] = subseq
                 idx += 1
+    
+    # def split_onebyone(self):
+    #     self.id_seq = {}
+    #     idx = 0
+    #     for seq_temp in self.u2seq:
+    #         seq_temp = seq_temp[-self.max_len-1:]
+    #         # 只能从预截取长度后进行子序列切分
+    #         # 加一是为了包含tgt
+    #         for star in range(len(seq_temp) - 1):
+    #             self.id_seq[idx] = seq_temp[:star + 2]
+    #             idx += 1
 
     def get_pytorch_dataloaders(self):
         dataset = TrainDataset(self.id_seq, self.max_len,self.parallel_ag)
