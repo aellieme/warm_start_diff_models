@@ -39,26 +39,39 @@ def main():
     # seqs = data_to_sequences(train_val_data, data_description)
     # print(np.mean([len(s) for s in seqs]))
 
-    # Фиксированные гиперпараметры
-    config = {
-        'num_epochs': 250,
-        'maxlen': 50,
-        'hidden_units': 256,
-        'dropout_rate': 0.2,
-        'num_blocks': 2,
-        'num_heads': 2,
-        'batch_size': 128,
-        'sampler_seed': 42,
-        'manual_seed': 42,
-        'learning_rate': 1e-3,
-        'l2_emb': 1e-4,
-    }
+    # Выбор конфига в зависимости от датасета
+    if args.dataset == 'ml-1m':
+        config = {
+            'num_epochs': 250,
+            'maxlen': 50,
+            'hidden_units': 256,
+            'dropout_rate': 0.2,
+            'num_blocks': 2,
+            'num_heads': 2,
+            'batch_size': 128,
+            'sampler_seed': 42,
+            'manual_seed': 42,
+            'learning_rate': 1e-3,
+            'l2_emb': 1e-4,
+            }
+    else:  # любой Amazon-датасет
+        config = {
+            'num_epochs': 150,
+            'maxlen': 30,
+            'hidden_units': 128,
+            'dropout_rate': 0.3,
+            'num_blocks': 2,
+            'num_heads': 2,
+            'batch_size': 256,
+            'sampler_seed': 42,
+            'manual_seed': 42,
+            'learning_rate': 1e-3,
+            'l2_emb': 1e-4,
+        }
 
     print("Training SASRec on train+val (80%)...")
     # Используем build_final_sasrec_model – она обучает на всех переданных данных без валидации
     model = build_final_sasrec_model(config, train_val_data, data_description, num_epochs=config['num_epochs'])
-    
-
 
     log_dir = './log/'
     # Ищем все файлы с суффиксом '_final.png'
@@ -102,7 +115,7 @@ def main():
     # for k, p, r, ndcg, mrr, cov in zip([10], precisions, recalls, ndcgs, mrrs, covs):
     #     print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
     for k, p, r, ndcg, mrr, cov in zip([10, 20, 100], precisions, recalls, ndcgs, mrrs, covs):
-        print(f"k={k}: Recall(HR)={r:.4f}, NDCG={ndcg:.4f}, MRR={mrr:.4f}, Coverage={cov:.4f}")
+        print(f"k={k}: Recall(HR)={r:.6f}, NDCG={ndcg:.6f}, MRR={mrr:.6f}, Coverage={cov:.6f}")
 
     # Пример рекомендаций
     if users:
