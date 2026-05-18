@@ -10,14 +10,38 @@ from evaluate_metrics import downvote_seen_items, topn_recommendations
 from evaluate_topk_dp import compute_all_metrics
 from training import sasrec_model_scoring
 
+def load_amazon(dataset_name, data_dir='../data/amazon'):
+    file_map = {
+        'amazon_Baby':               'reviews_Baby.json',
+        # 'amazon_Beauty':             'reviews_Beauty.json',
+        'amazon_Sports_and_Outdoors':'reviews_Sports_and_Outdoors.json',
+        # 'amazon_Toys_and_Games':     'reviews_Toys_and_Games.json'
+    }
+    fname = file_map[dataset_name]
+    path = os.path.join(data_dir, fname)
 
-def prepare_data_and_description():
-    mldata = get_movielens_data(include_time=True)
-    userid_col = 'userid'
-    itemid_col = 'movieid'
-    time_col = 'timestamp'
+    df = pd.read_json(path, lines=True)
+    df = df.rename(columns={
+        'reviewerID': 'userid',
+        'asin': 'itemid',
+        'unixReviewTime': 'timestamp'
+    })
+    df = df[['userid', 'itemid', 'timestamp']]
+    return df
 
-    all_data, data_index = transform_indices(mldata.copy(), userid_col, itemid_col)
+def prepare_data_and_description(dataset):
+    if dataset == 'ml-1m':
+        raw_data = get_movielens_data(include_time=True)
+        userid_col = 'userid'
+        itemid_col = 'movieid'
+        time_col = 'timestamp'
+    else:  # Amazon
+        raw_data = load_amazon(dataset)
+        userid_col = 'userid'
+        itemid_col = 'itemid'
+        time_col = 'timestamp'
+
+    all_data, data_index = transform_indices(raw_data.copy(), userid_col, itemid_col)
     all_data_sorted = all_data.sort_values(time_col).reset_index(drop=True)
 
     T_valid = all_data_sorted[time_col].quantile(0.70)
@@ -101,20 +125,9 @@ def run_inference_pipeline(
     userid_col,
     itemid_col,
     time_col,
-    val_seq_dict,      # новый аргумент
+    val_seq_dict,     
     topn=10
 ):
-# def run_inference_pipeline(
-#     model,
-#     history_data,
-#     train_data,         
-#     test_examples,
-#     data_description,
-#     userid_col,
-#     itemid_col,
-#     time_col,
-#     topn=10
-# ):
     start_time = time.perf_counter()   
     train_users = set(train_data[userid_col].unique())
     history_sorted = history_data.sort_values([userid_col, time_col])
@@ -174,7 +187,7 @@ def run_inference_pipeline(
     return recs, user_order, (precisions, recalls, ndcgs, mrrs, covs), inference_time  
 
 
-def load_movies_metadata(data_dir='../data/info'):
+def load_movies_metadata(dataset, data_dir='../data/info'):
     """
     Загружает метаданные (базово - MovieLens-1M) из указанной папки,
     если папка отсутствует, автоматически скачивает и распаковывает архив.
@@ -182,6 +195,8 @@ def load_movies_metadata(data_dir='../data/info'):
     Параметры: data_dir : str - путь к папке, в которой лежит movies.dat
     Возвращает: movie_dict : dict - словарь movieId: title
     """
+    if dataset != 'ml-1m':
+        return None
     if not os.path.exists(data_dir):
         os.makedirs(data_dir, exist_ok=True)
         os.system('wget -O ml-1m.zip https://files.grouplens.org/datasets/movielens/ml-1m.zip')
@@ -227,7 +242,8 @@ def print_example_user(
     data_description,
     userid_col,
     itemid_col,
-    time_col
+    time_col,
+    dataset
 ):
     """
     Печатает рекомендации для одного пользователя
@@ -240,7 +256,8 @@ def print_example_user(
     data_description : dict
     userid_col, itemid_col, time_col : str - названия колонок
     """
-    movie_dict = load_movies_metadata()
+    movie_dict = load_movies_metadata(dataset)
+    # movie_dict = load_movies_metadata()
 
     user_train = train_data[train_data[userid_col] == example_user].sort_values(time_col)
     # user_adapt = adapt_data[adapt_data[userid_col] == example_user].sort_values(time_col)

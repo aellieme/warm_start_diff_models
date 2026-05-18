@@ -9,6 +9,7 @@ from load_evaluate_pipeline import (
 )
 import random
 import numpy as np
+import argparse 
 
 seed = 42
 random.seed(seed)
@@ -17,7 +18,16 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 torch.backends.cudnn.deterministic = True
 def main():
-    (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict, _) = prepare_data_and_description()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='ml-1m',
+                        choices=['ml-1m', 'amazon_Baby', 
+                                 'amazon_Sports_and_Outdoors' ],)
+    args = parser.parse_args()
+# 'amazon_Beauty','amazon_Toys_and_Games'
+    (train_data, val_data, test_data, test_examples,
+     data_index, data_description, userid_col, itemid_col, time_col,
+     val_seq_dict, _) = prepare_data_and_description(args.dataset)
+    # (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict, _) = prepare_data_and_description()
     #  Загрузка модели 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model_path = get_latest_model_path()
@@ -38,27 +48,13 @@ def main():
     for k, p, r, ndcg, mrr, cov in zip([10], precisions, recalls, ndcgs, mrrs, covs):
         print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
 
-    # Adaptation 
-    # print("\nadaptation")
-    # inference_history = pd.concat([train_data, adapt_data], ignore_index=True)
-    # recs_adapt, users_adapt, metrics_adapt, inf_time_adapt = run_inference_pipeline(
-    #     model, inference_history, train_data, test_examples,
-    #     data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
-    # )
-    # precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a = metrics_adapt
-
-    # print(f"Total inference time: {inf_time_adapt:.4f} sec")
-    # print(f"Evaluated users: {len(users_adapt)}")
-    # for k, p, r, ndcg, mrr, cov in zip([10], precisions_a, recalls_a, ndcgs_a, mrrs_a, covs_a):
-    #     print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
-
-    # Пример для пользователя 
+    
     example_user = users[1]
     print_example_user(
         example_user, users, recs,
         train_data, test_examples,
         data_index, data_description,
-        userid_col, itemid_col, time_col
+        userid_col, itemid_col, time_col, args.dataset
     )
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from load_evaluate_pipeline import (
 )
 import random
 import torch
+import argparse
 
 seed = 42
 random.seed(seed)
@@ -20,7 +21,17 @@ torch.cuda.manual_seed_all(seed)
 torch.backends.cudnn.deterministic = True
 
 def main():
-    (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict, _) = prepare_data_and_description()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='ml-1m',
+                        choices=['ml-1m', 'amazon_Baby', 'amazon_Beauty',
+                                 'amazon_Sports_and_Outdoors', 'amazon_Toys_and_Games'],
+                        help='Dataset to use')
+    args = parser.parse_args()
+
+    (train_data, val_data, test_data, test_examples,
+     data_index, data_description, userid_col, itemid_col, time_col,
+     val_seq_dict, _) = prepare_data_and_description(args.dataset)
+    # (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict, _) = prepare_data_and_description()
 
 
     print(f"Train: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}, len test_examples: {len(test_examples)}")
@@ -68,7 +79,7 @@ def main():
         example_user, users, recs,
         train_data, test_examples,
         data_index, data_description,
-        userid_col, itemid_col, time_col
+        userid_col, itemid_col, time_col, args.dataset
     )
 
 if __name__ == "__main__":
