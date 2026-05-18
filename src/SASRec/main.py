@@ -41,7 +41,7 @@ def main():
 
     # Фиксированные гиперпараметры
     config = {
-        'num_epochs': 200,
+        'num_epochs': 250,
         'maxlen': 50,
         'hidden_units': 256,
         'dropout_rate': 0.2,
