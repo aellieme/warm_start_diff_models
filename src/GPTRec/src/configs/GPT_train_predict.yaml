@@ -44,4 +44,4 @@ generation_params: {}
 generation: False
 
 final_train: true   
-final_epochs: 80     
+final_epochs: 150     
