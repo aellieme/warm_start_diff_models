@@ -162,9 +162,21 @@ def main():
 
     print("\n Оценка финальной модели на тесте")
 
+    # recs_baseline, users_baseline, metrics_baseline, time_base = run_inference_pipeline(
+    #     final_model, train_data, train_data, test_examples,
+    #     data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
+    # )
     recs_baseline, users_baseline, metrics_baseline, time_base = run_inference_pipeline(
-        final_model, train_data, train_data, test_examples,
-        data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
+        final_model, 
+        train_val_data,      # вместо train_data (первый аргумент)
+        train_val_data,      # вместо train_data (второй аргумент – history_data)
+        test_examples,
+        data_description, 
+        userid_col, 
+        itemid_col, 
+        time_col, 
+        {},                  # val_seq_dict = пустой, потому что валидация уже внутри train_val_data
+        topn=10
     )
     prec, rec, ndcg, mrr, cov = metrics_baseline
     print(f"Инференс: Recall@10={rec[0]:.4f}, MRR={mrr[0]:.4f}, NDCG={ndcg[0]:.4f}, Cov={cov[0]:.4f}, Latency = {time_base:.4f}")
