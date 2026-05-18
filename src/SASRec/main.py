@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import pandas as pd 
 import random
 import argparse
 from model import save_sasrec_model, get_model_path, generate_model_name
@@ -92,14 +93,16 @@ def main():
         itemid_col=itemid_col,
         time_col=time_col,
         val_seq_dict={},                  # val_seq_dict не нужен, т.к. история уже полная
-        topn=10
+        topn=100
     )
 
     precisions, recalls, ndcgs, mrrs, covs = metrics
     print(f"Inference time: {inf_time:.4f} sec")
     print(f"Evaluated users: {len(users)}")
-    for k, p, r, ndcg, mrr, cov in zip([10], precisions, recalls, ndcgs, mrrs, covs):
-        print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
+    # for k, p, r, ndcg, mrr, cov in zip([10], precisions, recalls, ndcgs, mrrs, covs):
+    #     print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
+    for k, p, r, ndcg, mrr, cov in zip([10, 20, 100], precisions, recalls, ndcgs, mrrs, covs):
+        print(f"k={k}: Recall(HR)={r:.4f}, NDCG={ndcg:.4f}, MRR={mrr:.4f}, Coverage={cov:.4f}")
 
     # Пример рекомендаций
     if users:
@@ -110,7 +113,13 @@ def main():
             data_index, data_description,
             userid_col, itemid_col, time_col, args.dataset
         )
-
+    # Сохраняем рекомендации
+    recommendations_df = pd.DataFrame({
+        'userid': users,
+        'recommendations': [list(rec) for rec in recs]   # каждый rec - массив из topn айтемов
+    })
+    recommendations_df.to_csv('recommendations_top20.csv', index=False)
+    print("Recommendations saved to recommendations_top20.csv")
 if __name__ == "__main__":
     main()
 # import time

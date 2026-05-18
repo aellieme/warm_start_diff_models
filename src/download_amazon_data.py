@@ -6,7 +6,7 @@ TARGET_DIR = "data/amazon"
 os.makedirs(TARGET_DIR, exist_ok=True)
 
 def download_and_extract_raw(category):
-    file_name = f"reviews_{category}.json.gz"
+    file_name = f"reviews_{category}_5.json.gz"
     local_gz = os.path.join(TARGET_DIR, file_name)
     local_json = local_gz.replace(".gz", "")
 
