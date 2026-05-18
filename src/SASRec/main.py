@@ -54,7 +54,7 @@ def main():
             'learning_rate': 1e-3,
             'l2_emb': 1e-4,
             }
-    else:  # любой Amazon-датасет
+    else:  
         config = {
             'num_epochs': 250,
             'maxlen': 50,
