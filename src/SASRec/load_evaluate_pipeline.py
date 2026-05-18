@@ -13,9 +13,9 @@ from training import sasrec_model_scoring
 def load_amazon(dataset_name, data_dir='../data/amazon'):
     file_map = {
         'amazon_Baby':               'reviews_Baby.json',
-        # 'amazon_Beauty':             'reviews_Beauty.json',
+        'amazon_Beauty':             'reviews_Beauty.json',
         'amazon_Sports_and_Outdoors':'reviews_Sports_and_Outdoors.json',
-        # 'amazon_Toys_and_Games':     'reviews_Toys_and_Games.json'
+        'amazon_Toys_and_Games':     'reviews_Toys_and_Games.json'
     }
     fname = file_map[dataset_name]
     path = os.path.join(data_dir, fname)

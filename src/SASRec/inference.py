@@ -20,10 +20,9 @@ torch.backends.cudnn.deterministic = True
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='ml-1m',
-                        choices=['ml-1m', 'amazon_Baby', 
+                        choices=['ml-1m', 'amazon_Baby', 'amazon_Beauty','amazon_Toys_and_Games',
                                  'amazon_Sports_and_Outdoors' ],)
     args = parser.parse_args()
-# 'amazon_Beauty','amazon_Toys_and_Games'
     (train_data, val_data, test_data, test_examples,
      data_index, data_description, userid_col, itemid_col, time_col,
      val_seq_dict, _) = prepare_data_and_description(args.dataset)
