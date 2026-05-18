@@ -56,8 +56,8 @@ def main():
             }
     else:  # любой Amazon-датасет
         config = {
-            'num_epochs': 150,
-            'maxlen': 30,
+            'num_epochs': 250,
+            'maxlen': 50,
             'hidden_units': 128,
             'dropout_rate': 0.3,
             'num_blocks': 2,
