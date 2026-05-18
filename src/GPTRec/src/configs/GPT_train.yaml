@@ -1,15 +1,15 @@
 cuda_visible_devices: 0
 
 project_name: sequential_recsys/generation_paper
-task_name: GPT_train_predict
+task_name: GPT_train
 seed: 1337
 
-data_path: ../data/ml-20m.csv
+data_path: data/ml-20m.csv
 last_n_items: 10
 
 dataset:
-  max_length: 128
-  shift_labels: True #False
+  max_length: 50 #128
+  shift_labels: False
 
 dataloader:
   batch_size: 64
@@ -19,7 +19,7 @@ dataloader:
 
 model: 'GPT-2'
 model_params:
-  n_positions: 128
+  n_positions: 50 #128
   n_embd: 64
   n_layer: 2
   n_head: 1
@@ -32,16 +32,3 @@ seqrec_module:
 trainer_params:
   max_epochs: 100
 patience: 10
-
-evaluator:
-  top_k: [10]
-test_metrics: True
-
-mode: 'reciprocal_rank_aggregation'
-
-generation_params: {}
-
-generation: False
-
-final_train: true   
-final_epochs: 80     

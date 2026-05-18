@@ -39,7 +39,7 @@ def objective(trial):
 
     cfg = OmegaConf.create(base_cfg)  
     cfg.model_params = {
-        "n_positions": 128,
+        "n_positions": 50, #128
         "n_embd": n_embd,
         "n_layer": n_layer,
         "n_head": n_head,
@@ -74,7 +74,7 @@ study = optuna.create_study(
 study.optimize(objective, n_trials=base_cfg.hydra.sweeper.n_trials)
 
 best_params = study.best_params
-best_params["n_positions"] = 128  
+best_params["n_positions"] = 50 #128
 with open("best_params.json", "w") as f:
     json.dump(best_params, f, indent=2)
 print("Лучшие параметры сохранены в best_params.json")
@@ -82,7 +82,7 @@ print("Лучшие параметры сохранены в best_params.json")
 final_cfg = OmegaConf.create(base_cfg)
 
 final_cfg.model_params = {
-    "n_positions": 128,
+    "n_positions": 50, #128
     "n_embd": best_params["n_embd"],
     "n_layer": best_params["n_layer"],
     "n_head": best_params["n_head"],

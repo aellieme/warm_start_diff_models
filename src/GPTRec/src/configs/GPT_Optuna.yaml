@@ -15,7 +15,7 @@ data_path: ../data/ml-20m.csv
 last_n_items: 10
 
 dataset:
-  max_length: 128
+  max_length: 50 # 128
   shift_labels: False
 
 dataloader:

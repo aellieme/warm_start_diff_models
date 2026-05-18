@@ -7,12 +7,12 @@ global_time_col: timestamp
 split_ratios: [0.7, 0.1, 0.2]
 
 dataset:
-  max_length: 128
+  max_length: 50 #128
   shift_labels: false
 
 model: GPT-2
 model_params:
-  n_positions: 128
+  n_positions: 50 #128
   n_embd: 64      
   n_layer: 2
   n_head: 1

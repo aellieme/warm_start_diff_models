@@ -4,6 +4,8 @@ Run full experiment - train + predict.
 
 import time
 import os
+import gzip
+import json
 
 import hydra
 import numpy as np
@@ -147,6 +149,41 @@ def main(config):
         print(summary_df.to_string(index=False))
 
         torch.save(seqrec_module.model.state_dict(), "best_model.pt")
+
+
+def load_amazon(dataset_name, data_dir='../data/amazon'):
+    file_map = {
+        'amazon_Baby':               'reviews_Baby.json',
+        'amazon_Beauty':             'reviews_Beauty.json',
+        'amazon_Sports_and_Outdoors':'reviews_Sports_and_Outdoors.json',
+        'amazon_Toys_and_Games':     'reviews_Toys_and_Games.json'
+    }
+    fname = file_map[dataset_name]
+    path = os.path.join(data_dir, fname)
+    
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Amazon data not found: {path}")
+    
+    records = []
+    with open(path, 'r', encoding='utf-8') as f:
+        for line in f:
+            records.append(json.loads(line))
+    df = pd.DataFrame(records)
+    
+    df = df.rename(columns={
+        'reviewerID': 'user_id',
+        'asin': 'item_id',
+        'unixReviewTime': 'timestamp'
+    })
+    df = df[['user_id', 'item_id', 'timestamp']]
+    
+    user_codes = pd.Categorical(df['user_id']).codes
+    item_codes = pd.Categorical(df['item_id']).codes + 1   # +1, чтобы не было нуля
+    df['user_id'] = user_codes
+    df['item_id'] = item_codes
+    
+    # df = df.drop_duplicates()   
+    return df
 
 def prepare_data(config):
     data = get_movielens_data(include_time=True)   
