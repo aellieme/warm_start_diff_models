@@ -26,6 +26,8 @@ def main():
     parser.add_argument('--dataset', type=str, default='ml-1m',
                         choices=['ml-1m', 'amazon_Baby', 'amazon_Beauty',
                                  'amazon_Sports_and_Outdoors', 'amazon_Toys_and_Games'])
+    parser.add_argument('--maxlen', type=int, default=None, help='Override maxlen')
+    parser.add_argument('--num_epochs', type=int, default=None, help='Override num_epochs')
     args = parser.parse_args()
 
     # Получаем все данные, включая train_val_data (80% до T_test)
@@ -68,6 +70,10 @@ def main():
             'learning_rate': 1e-3,
             'l2_emb': 1e-4,
         }
+    if args.maxlen is not None:
+        config['maxlen'] = args.maxlen
+    if args.num_epochs is not None:
+        config['num_epochs'] = args.num_epochs
 
     print("Training SASRec on train+val (80%)...")
     # Используем build_final_sasrec_model – она обучает на всех переданных данных без валидации
