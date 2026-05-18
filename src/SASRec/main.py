@@ -37,7 +37,7 @@ def main():
     print(f"Train: {len(train_data)}, Val: {len(val_data)}, Test: {len(test_data)}, len test_examples: {len(test_examples)}")
 
     config = {
-        'num_epochs': 500,
+        'num_epochs': 200,
         'maxlen': 200,
         'hidden_units': 128,
         'dropout_rate': 0.5,

@@ -27,7 +27,7 @@ from training import build_sasrec_model
 from training import build_final_sasrec_model
 
 BASE_CONFIG = {
-    'num_epochs': 500,
+    'num_epochs': 200,
     'tune_epochs': 30,
     'patience': 3,
     'maxlen': 200,
