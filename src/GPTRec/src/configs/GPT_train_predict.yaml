@@ -21,7 +21,7 @@ dataloader:
 
 model: 'GPT-2'
 model_params:
-  n_positions: 50 #128
+  n_positions: ${dataset.max_length}   # 128
   n_embd: 64
   n_layer: 2
   n_head: 1

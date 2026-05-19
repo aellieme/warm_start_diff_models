@@ -80,6 +80,8 @@ def main(config):
         start_time_inf = time.perf_counter()
         recs = predict(trainer, seqrec_module, history_before_test, config,
                        test_data=test, last_evaluation=True)
+        inf_time = time.perf_counter() - start_time_inf
+        print(f"Inference time: {inf_time:.4f} seconds")
         recs.to_csv('recommendations.csv', index=False)
         print("Recommendations saved to recommendations.csv")
         
