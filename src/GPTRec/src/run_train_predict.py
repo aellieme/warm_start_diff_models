@@ -80,19 +80,30 @@ def main(config):
         start_time_inf = time.perf_counter()
         recs = predict(trainer, seqrec_module, history_before_test, config,
                        test_data=test, last_evaluation=True)
+        recs.to_csv('recommendations.csv', index=False)
+        print("Recommendations saved to recommendations.csv")
 
         test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
         metrics = evaluate(recs, test_last, train, config, prefix='test_last')
-        print("Final test metrics:", metrics)
 
-        summary = {
-            'Recall@10': metrics.get('test_last_recall@10', 0),
-            'NDCG@10': metrics.get('test_last_ndcg@10', 0),
-            'Coverage': metrics.get('test_last_coverage@10', 0),
-            'MRR': metrics.get('test_last_mrr@10', 0),
-            'Latency (s)': time.perf_counter() - start_time_inf,
-        }
-        print(pd.DataFrame([summary]).to_string(index=False))
+        print("Final test metrics:")
+        for key in sorted(metrics.keys()):
+            if any(metric in key for metric in ['recall', 'ndcg', 'mrr', 'coverage']):
+                print(f"{key}: {metrics[key]:.6f}")
+            else:
+                print(f"{key}: {metrics[key]}")
+        
+        
+        # print("Final test metrics:", metrics)
+
+        # summary = {
+        #     'Recall@10': metrics.get('test_last_recall@10', 0),
+        #     'NDCG@10': metrics.get('test_last_ndcg@10', 0),
+        #     'Coverage': metrics.get('test_last_coverage@10', 0),
+        #     'MRR': metrics.get('test_last_mrr@10', 0),
+        #     'Latency (s)': time.perf_counter() - start_time_inf,
+        # }
+        # print(pd.DataFrame([summary]).to_string(index=False))
         return   
     
     else:
@@ -153,14 +164,15 @@ def main(config):
 
 def load_amazon(dataset_name, data_dir='../data/amazon'):
     file_map = {
-        'amazon_Baby':               'reviews_Baby.json',
-        'amazon_Beauty':             'reviews_Beauty.json',
-        'amazon_Sports_and_Outdoors':'reviews_Sports_and_Outdoors.json',
-        'amazon_Toys_and_Games':     'reviews_Toys_and_Games.json'
+        'amazon_Baby':               'reviews_Baby_5.json',
+        'amazon_Beauty':             'reviews_Beauty_5.json',
+        'amazon_Sports_and_Outdoors':'reviews_Sports_and_Outdoors_5.json',
+        'amazon_Toys_and_Games':     'reviews_Toys_and_Games_5.json'
     }
-    fname = file_map[dataset_name]
+    fname = file_map.get(dataset_name)
+    if fname is None:
+        raise ValueError(f"Unknown Amazon dataset: {dataset_name}")
     path = os.path.join(data_dir, fname)
-    
     if not os.path.exists(path):
         raise FileNotFoundError(f"Amazon data not found: {path}")
     
@@ -169,25 +181,32 @@ def load_amazon(dataset_name, data_dir='../data/amazon'):
         for line in f:
             records.append(json.loads(line))
     df = pd.DataFrame(records)
-    
     df = df.rename(columns={
         'reviewerID': 'user_id',
         'asin': 'item_id',
         'unixReviewTime': 'timestamp'
     })
     df = df[['user_id', 'item_id', 'timestamp']]
-    
-    user_codes = pd.Categorical(df['user_id']).codes
-    item_codes = pd.Categorical(df['item_id']).codes + 1   # +1, чтобы не было нуля
-    df['user_id'] = user_codes
-    df['item_id'] = item_codes
-    
-    # df = df.drop_duplicates()   
+    #item_id начинаются с 1 для padding=0
+    df['user_id'] = pd.Categorical(df['user_id']).codes
+    df['item_id'] = pd.Categorical(df['item_id']).codes + 1
     return df
 
 def prepare_data(config):
-    data = get_movielens_data(include_time=True)   
-    data = data.rename(columns={'userid': 'user_id', 'movieid': 'item_id'})
+    dataset_name = config.get('dataset_name', 'ml-1m')
+    
+    if dataset_name == 'ml-1m':
+        data = get_movielens_data(include_time=True)
+        data = data.rename(columns={'userid': 'user_id', 'movieid': 'item_id'})
+        # унифицируем индексацию (item_id с 1)
+        data['user_id'] = pd.Categorical(data['user_id']).codes
+        data['item_id'] = pd.Categorical(data['item_id']).codes + 1
+    else:
+        amazon_data_dir = config.get('amazon_data_dir', '../data/amazon')
+        data = load_amazon(dataset_name, amazon_data_dir)
+    
+    # data = get_movielens_data(include_time=True)   
+    # data = data.rename(columns={'userid': 'user_id', 'movieid': 'item_id'})
     
     
     print('GTS')

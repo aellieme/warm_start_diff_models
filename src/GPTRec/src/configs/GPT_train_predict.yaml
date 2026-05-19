@@ -4,7 +4,9 @@ project_name: sequential_recsys/generation_paper
 task_name: GPT_train_predict
 seed: 1337
 
-data_path: ../data/ml-20m.csv
+dataset_name: ml-1m
+amazon_data_dir: ../data/amazon
+# data_path: ../data/ml-20m.csv
 last_n_items: 10
 
 dataset:
@@ -34,7 +36,8 @@ trainer_params:
 patience: 10
 
 evaluator:
-  top_k: [10]
+  # top_k: [10]
+  top_k: [10, 20, 100]
 test_metrics: True
 
 mode: 'reciprocal_rank_aggregation'
