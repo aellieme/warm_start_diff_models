@@ -82,16 +82,36 @@ def main(config):
                        test_data=test, last_evaluation=True)
         recs.to_csv('recommendations.csv', index=False)
         print("Recommendations saved to recommendations.csv")
-
+        
         test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
-        metrics = evaluate(recs, test_last, train, config, prefix='test_last')
+        # Объединяем все данные для корректного coverage (полный каталог)
+        all_items_df = pd.concat([train, validation, test])
+        metrics = evaluate(recs, test_last, all_items_df, config, prefix='test_last')
 
-        print("Final test metrics:")
-        for key in sorted(metrics.keys()):
-            if any(metric in key for metric in ['recall', 'ndcg', 'mrr', 'coverage']):
-                print(f"{key}: {metrics[key]:.6f}")
-            else:
-                print(f"{key}: {metrics[key]}")
+        # test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
+        # metrics = evaluate(recs, test_last, train, config, prefix='test_last')
+
+        # print("Final test metrics:")
+        # for key in sorted(metrics.keys()):
+        #     if any(metric in key for metric in ['recall', 'ndcg', 'mrr', 'coverage']):
+        #         print(f"{key}: {metrics[key]:.6f}")
+        #     else:
+        #         print(f"{key}: {metrics[key]}")
+        # Формируем таблицу для top_k
+        top_k_list = config.evaluator.top_k  # [10, 20, 100]
+        print("\nFinal test metrics:")
+        print(f"{'k':<5} {'recall':<12} {'ndcg':<12} {'mrr':<12} {'coverage':<12}")
+        print("-" * 55)
+        for k in top_k_list:
+            recall_key = f'test_last_recall@{k}'
+            ndcg_key   = f'test_last_ndcg@{k}'
+            mrr_key    = f'test_last_mrr@{k}'
+            cov_key    = f'test_last_coverage@{k}'
+            recall = metrics.get(recall_key, 0.0)
+            ndcg   = metrics.get(ndcg_key, 0.0)
+            mrr    = metrics.get(mrr_key, 0.0)
+            cov    = metrics.get(cov_key, 0.0)
+            print(f"{k:<5} {recall:<12.6f} {ndcg:<12.6f} {mrr:<12.6f} {cov:<12.6f}")
         
         
         # print("Final test metrics:", metrics)
