@@ -5,7 +5,7 @@ task_name: GPT_train_predict
 seed: 1337
 
 dataset_name: ml-1m
-amazon_data_dir: ../data/amazon
+amazon_data_dir: ../../data/amazon
 # data_path: ../data/ml-20m.csv
 last_n_items: 10
 
