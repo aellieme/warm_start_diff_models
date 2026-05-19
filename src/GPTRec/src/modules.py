@@ -246,7 +246,8 @@ class FilterSeenProcessor(LogitsProcessor):
 class SeqRec(SeqRecBase):
 
     def training_step(self, batch, batch_idx):
-
+        if 'input_ids' in batch:
+            batch['input_ids'] = batch['input_ids'].long()
         outputs = self.model(batch['input_ids'], batch['attention_mask'])
         loss = self.compute_loss(outputs, batch)
         self.log('train_loss', loss, on_step=False, on_epoch=True, prog_bar=False)

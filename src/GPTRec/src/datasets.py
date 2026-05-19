@@ -64,9 +64,14 @@ class CausalLMDataset(LMDataset):
         if len(item_sequence) > self.max_length + 1:
             item_sequence = item_sequence[-self.max_length - 1:]
 
-        input_ids = np.array(item_sequence[:-1])
+        # input_ids = np.array(item_sequence[:-1])
+        # if self.shift_labels:
+        #     labels = np.array(item_sequence[1:])
+        # else:
+        #     labels = input_ids
+        input_ids = np.array(item_sequence[:-1], dtype=np.int64)
         if self.shift_labels:
-            labels = np.array(item_sequence[1:])
+            labels = np.array(item_sequence[1:], dtype=np.int64)
         else:
             labels = input_ids
 
@@ -201,6 +206,8 @@ class PaddingCollateFn:
 
             if np.isscalar(batch[0][key]):
                 collated_batch[key] = torch.tensor([example[key] for example in batch])
+                if key in ('input_ids', 'labels'):
+                    collated_batch[key] = collated_batch[key].long()
                 continue
 
             if key == 'labels':
@@ -216,6 +223,9 @@ class PaddingCollateFn:
                 values = [torch.tensor(example[key]) for example in batch]
                 collated_batch[key] = pad_sequence(values, batch_first=True,
                                                    padding_value=padding_value)
+            if key in ('input_ids', 'labels'):
+                collated_batch[key] = collated_batch[key].long()
+            
         if 'input_ids' in collated_batch:
             attention_mask = collated_batch['input_ids'] != self.padding_value
             collated_batch['attention_mask'] = attention_mask.to(dtype=torch.float32)
