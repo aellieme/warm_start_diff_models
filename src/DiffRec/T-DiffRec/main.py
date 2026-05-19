@@ -283,7 +283,8 @@ if __name__ == '__main__':
             loss.backward()
             optimizer.step()
 
-        avg_loss = total_loss / len(train_loader)
+        # avg_loss = total_loss / len(train_loader)
+        avg_loss = (total_loss / len(train_loader)).item()
         plotter.update(epoch=epoch, loss=avg_loss)
         
         # Валидация и сохранение модели только при обычном обучении (не final_train)
