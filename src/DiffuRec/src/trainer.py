@@ -74,7 +74,7 @@ def LSHT_inference(model_joint, args, data_loader):
         test_metrics_dict_mean[key_temp] = values_mean
     print(test_metrics_dict_mean)
 
-def evaluate_and_print(model, data_loader, args, logger, description="evaluation"):
+def evaluate_and_print(model, data_loader, args, logger, description="evaluation", save_recs=False):
     """ инференс на data_loader, выводит время и метрики @10"""
     device = args.device
     model.eval()
@@ -86,8 +86,16 @@ def evaluate_and_print(model, data_loader, args, logger, description="evaluation
             batch = [x.to(device) for x in batch]
             _, rep_diffu, _, _, _, _ = model(batch[0], batch[1], train_flag=False)
             scores = model.diffu_rep_pre(rep_diffu)
+            seq = batch[0]  # [batch_size, max_len]
+            # Создаём маску: для каждого пользователя все item_id из seq (кроме 0)
+            for i in range(scores.shape[0]):
+                seen = seq[i][seq[i] != 0]  # убираем padding
+                if len(seen) > 0:
+                    scores[i, seen] = -float('inf')
             k_max = max(args.metric_ks)
             _, topk = torch.topk(scores, k=k_max, dim=-1)
+            # k_max = max(args.metric_ks)
+            # _, topk = torch.topk(scores, k=k_max, dim=-1)
             for i in range(len(batch[1])):
                 all_actual.append([batch[1][i].item()])
                 all_predicted.append(topk[i].cpu().tolist())
@@ -96,11 +104,22 @@ def evaluate_and_print(model, data_loader, args, logger, description="evaluation
         print(f"{description} inference time: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
         logger.info(f"{description} inference time: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
         
-        # метрики только для k=10
-        _, recalls, ndcgs, mrrs, covs = compute_all_metrics(all_actual, all_predicted, [10], args.item_num)
-        rec, nd, mrr, cov = recalls[0], ndcgs[0], mrrs[0], covs[0]
-        print(f"k=10: Recall={rec:.4f}, MRR={mrr:.4f}, NDCG={nd:.4f}, Coverage={cov:.4f}")
-        logger.info(f"k=10: Recall={rec:.4f}, MRR={mrr:.4f}, NDCG={nd:.4f}, Coverage={cov:.4f}")
+        topN_list = args.metric_ks
+        n_items = args.item_num
+        prec, rec, ndcg, mrr, cov = compute_all_metrics(all_actual, all_predicted, topN_list, n_items)
+        print("\nTest results:")
+        print(f"{'k':<5} {'recall':<12} {'ndcg':<12} {'mrr':<12} {'coverage':<12}")
+        for i, k in enumerate(topN_list):
+            print(f"{k:<5} {rec[i]:<12.6f} {ndcg[i]:<12.6f} {mrr[i]:<12.6f} {cov[i]:<12.6f}")
+
+        if save_recs:
+            import pandas as pd
+            recs_df = pd.DataFrame({'user_id': list(range(len(all_actual))), 'recommendations': all_predicted})
+            recs_df.to_csv('recommendations.csv', index=False)
+            print("Recommendations saved to recommendations.csv")
+        
+        # Логирование (опционально, без ошибок):
+        logger.info(f"{description} inference: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms/user")
 
 def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint, args, logger):
     plotter = TrainingPlotter(

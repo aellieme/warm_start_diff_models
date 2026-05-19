@@ -16,14 +16,20 @@ from polara.datasets.movielens import get_movielens_data
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
+import json
+import torch.optim as optim
 
 from trainer import evaluate_and_print
 # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', default='ml-1m', help='Dataset name: toys, amazon_beauty, steam, ml-1m')
+parser.add_argument('--dataset', type=str, default='ml-1m',
+                    choices=['ml-1m', 'amazon_Baby', 'amazon_Beauty',
+                             'amazon_Sports_and_Outdoors', 'amazon_Toys_and_Games'])
+# parser.add_argument('--dataset', default='ml-1m', help='Dataset name: toys, amazon_beauty, steam, ml-1m')
 parser.add_argument('--log_file', default='log/', help='log dir path')
+parser.add_argument('--final_train', action='store_true', help='Train on train+val without validation')
 parser.add_argument('--random_seed', type=int, default=1997, help='Random seed')  
 parser.add_argument('--max_len', type=int, default=50, help='The max length of sequence')
 parser.add_argument('--device', type=str, default='cuda', choices=['cpu', 'cuda'])
@@ -78,7 +84,39 @@ def fix_random_seed_as(random_seed):
     cudnn.deterministic = True
     cudnn.benchmark = False
 
+def load_amazon(dataset_name, data_dir='../../data/amazon'):
+    file_map = {
+        'amazon_Baby':               'reviews_Baby_5.json',
+        'amazon_Beauty':             'reviews_Beauty_5.json',
+        'amazon_Sports_and_Outdoors':'reviews_Sports_and_Outdoors_5.json',
+        'amazon_Toys_and_Games':     'reviews_Toys_and_Games_5.json'
+    }
+    fname = file_map.get(dataset_name)
+    if fname is None:
+        raise ValueError(f"Unknown Amazon dataset: {dataset_name}")
+    path = os.path.join(data_dir, fname)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Amazon data not found: {path}")
 
+    records = []
+    with open(path, 'r', encoding='utf-8') as f:
+        for line in f:
+            records.append(json.loads(line))
+    df = pd.DataFrame(records)
+    df = df.rename(columns={
+        'reviewerID': 'userid',
+        'asin': 'itemid',
+        'unixReviewTime': 'timestamp'
+    })
+    df = df[['userid', 'itemid', 'timestamp']]
+    # кодирование
+    from sklearn.preprocessing import LabelEncoder
+    user_enc = LabelEncoder()
+    item_enc = LabelEncoder()
+    df['userid'] = user_enc.fit_transform(df['userid'])
+    df['itemid'] = item_enc.fit_transform(df['itemid'])
+    smap = {idx: original for idx, original in enumerate(item_enc.classes_)}
+    return df, smap
 def item_num_create(args, item_num):
     args.item_num = item_num
     return args
@@ -142,21 +180,34 @@ def cold_hot_long_short(data_raw, dataset_name):
             len_seq_dict['long'].append(temp_seq)
     return cold_hot_dict, len_seq_dict, split_num, [len_short, len_midshort, len_midlong, len_long], len_list, list(item_num_count.values())
 
-def load_and_split_gts(quantiles=(0.7, 0.8)):
+def load_and_split_gts(quantiles=(0.7, 0.8), dataset_name='ml-1m'):
     """
     Global Temporal Split 
     quantiles: (validation_quantile, test_quantile)
     Default: 70% train, 10% validation (70-80), 20% test (>80)
     """
-    # 1. Загрузка MovieLens-1M с временными метками
-    df = get_movielens_data(include_time=True)
+    if dataset_name == 'ml-1m':
+        df = get_movielens_data(include_time=True)
+        user_enc = LabelEncoder()
+        item_enc = LabelEncoder()
+        df['userid'] = user_enc.fit_transform(df['userid'])
+        df['movieid'] = item_enc.fit_transform(df['movieid'])
+        smap = {idx: original for idx, original in enumerate(item_enc.classes_)}
+        df = df.rename(columns={'movieid': 'itemid'})   # унификация
+    else:
+        df, smap = load_amazon(dataset_name)
+        # убедимся, что колонка называется 'itemid'
+        if 'itemid' not in df.columns:
+            df = df.rename(columns={'item_id': 'itemid'})
+    # # 1. Загрузка MovieLens-1M с временными метками
+    # df = get_movielens_data(include_time=True)
     
-    # 2. Сквозная переиндексация пользователей и айтемов
-    user_enc = LabelEncoder()
-    item_enc = LabelEncoder()
-    df['userid'] = user_enc.fit_transform(df['userid'])
-    df['movieid'] = item_enc.fit_transform(df['movieid'])
-    smap = {idx: original for idx, original in enumerate(item_enc.classes_)}
+    # # 2. Сквозная переиндексация пользователей и айтемов
+    # user_enc = LabelEncoder()
+    # item_enc = LabelEncoder()
+    # df['userid'] = user_enc.fit_transform(df['userid'])
+    # df['movieid'] = item_enc.fit_transform(df['movieid'])
+    # smap = {idx: original for idx, original in enumerate(item_enc.classes_)}
     
     # 3. Глобальная сортировка по времени
     df = df.sort_values('timestamp').reset_index(drop=True)
@@ -172,7 +223,8 @@ def load_and_split_gts(quantiles=(0.7, 0.8)):
     
     for uid, group in df.groupby('userid'):
         group = group.sort_values('timestamp')
-        items = group['movieid'].tolist()
+        # items = group['movieid'].tolist()
+        items = group['itemid'].tolist()
         timestamps = group['timestamp'].tolist()
         
         # Обучающая история (всё до T_valid)
@@ -326,7 +378,8 @@ def load_and_split_gts(quantiles=(0.7, 0.8)):
 def main(args):    
     fix_random_seed_as(args.random_seed)
     torch.backends.cudnn.benchmark = True
-    data_raw = load_and_split_gts(quantiles=(0.7, 0.8))
+    # data_raw = load_and_split_gts(quantiles=(0.7, 0.8))
+    data_raw = load_and_split_gts(quantiles=(0.7, 0.8), dataset_name=args.dataset)
     
     print("Train users:", len(data_raw['train']))
     print("Item vocab size:", len(data_raw['smap']))
@@ -359,7 +412,52 @@ def main(args):
     
     diffu_rec = create_model_diffu(args)
     rec_diffu_joint_model = Att_Diffuse_model(diffu_rec, args)
-    
+    # if args.final_train:
+        
+    if args.final_train:
+        merged_train = {**data_raw['train']}
+        for uid, seq in data_raw['val_seq'].items():
+            if uid in merged_train:
+                merged_train[uid] = merged_train[uid] + seq   # присоединяем последовательность валидации (без таргета)
+            else:
+                merged_train[uid] = seq
+        tra_data = Data_Train(merged_train, args)
+        tra_loader = tra_data.get_pytorch_dataloaders()
+
+        diffu_rec = create_model_diffu(args)
+        model = Att_Diffuse_model(diffu_rec, args).to(args.device)
+        optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        
+        from plotting import TrainingPlotter
+        plotter = TrainingPlotter(save_dir=args.log_file + args.dataset,
+                                model_name=f"DiffuRec_final_{time.strftime('%Y%m%d_%H%M%S')}",
+                                metrics=['loss'])
+        
+        for epoch in range(1, args.epochs+1):
+            model.train()
+            total_loss = 0
+            for batch in tra_loader:
+                batch = [x.to(args.device) for x in batch]
+                optimizer.zero_grad()
+                _, rep_diffu, _, _, _, _ = model(batch[0], batch[1], train_flag=True)
+                loss = model.loss_diffu_ce(rep_diffu, batch[1])
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
+            avg_loss = total_loss / len(tra_loader)
+            plotter.update(epoch=epoch, loss=avg_loss)
+            if epoch % 10 == 0:
+                plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')
+            print(f"Epoch {epoch:03d} loss {avg_loss:.4f}")
+        plotter.plot(save=True, show=False, suffix='_final')
+        
+        # Сохраняем модель
+        os.makedirs('best_models', exist_ok=True)
+        torch.save(model.state_dict(), f'best_models/final_model_{args.dataset}.pt')
+        
+        # Оценка на тесте
+        evaluate_and_print(model, test_data_loader, args, logger, description="test", save_recs=True)
+        return
     best_model, test_results = model_train(tra_data_loader, val_data_loader, test_data_loader, rec_diffu_joint_model, args, logger)
     
     evaluate_and_print(best_model, test_data_loader, args, logger, description="test")
