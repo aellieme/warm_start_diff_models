@@ -73,16 +73,13 @@ def ndcg_at_k(actual: list, predicted: list, k: int) -> float:
     return float(np.mean(ndcg_scores)) if ndcg_scores else 0.0
 
 def coverage(predicted: list, n_items: int) -> float:
-    """
-    количество уникальных рекомендованных предметов / общее количество предметов.
-    predicted: список списков рекомендованных предметов (top-k для каждого пользователя)
-    n_items: общее количество предметов в датасете
-    """
     all_recommended = set()
     for user_recs in predicted:
         if hasattr(user_recs, 'tolist'):
             user_recs = user_recs.tolist()
-        all_recommended.update(user_recs)
+        for item in user_recs:
+            if item != 0:          # пропускаем padding
+                all_recommended.add(item)
     return len(all_recommended) / n_items if n_items > 0 else 0.0
 
 def compute_all_metrics(actual: list, predicted: list, topN_list: list, n_items: int):
