@@ -1,9 +1,10 @@
-# src/data_split/data_load.py
 import os
 import sys
+import json
 import numpy as np
 import pandas as pd
 from polara import get_movielens_data
+import argparse
 
 current_file_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_file_dir)
@@ -11,13 +12,41 @@ project_root = os.path.dirname(current_file_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-DATA_DIR = '../../data/ml-1m/'
-T_VALUES = [10, 20, 50, 100]      # количество шагов диффузии для экспериментов
-
-def ensure_dirs():
-    # Создание каталогов, если их нет
-    for d in [DATA_DIR]:
-        os.makedirs(d, exist_ok=True)
+# DATA_DIR = '../../data/ml-1m/'
+T_VALUES = [10, 20, 50, 100]      
+# def ensure_dirs():
+#     for d in [DATA_DIR]:
+#         os.makedirs(d, exist_ok=True)
+def load_amazon(dataset_name, data_dir='../../data/amazon/'):
+    file_map = {
+        'amazon_Baby':               'reviews_Baby_5.json',
+        'amazon_Beauty':             'reviews_Beauty_5.json',
+        'amazon_Sports_and_Outdoors':'reviews_Sports_and_Outdoors_5.json',
+        'amazon_Toys_and_Games':     'reviews_Toys_and_Games_5.json'
+    }
+    fname = file_map.get(dataset_name)
+    if fname is None:
+        raise ValueError(f"Unknown Amazon dataset: {dataset_name}")
+    path = os.path.join(data_dir, fname)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Amazon data not found: {path}")
+    
+    records = []
+    with open(path, 'r', encoding='utf-8') as f:
+        for line in f:
+            records.append(json.loads(line))
+    df = pd.DataFrame(records)
+    df = df.rename(columns={
+        'reviewerID': 'user_id',
+        'asin': 'item_id',
+        'unixReviewTime': 'timestamp'
+    })
+    df = df[['user_id', 'item_id', 'timestamp']]
+    # преобразование в последовательные индексы (item_id с 1)
+    df['user_id'] = pd.Categorical(df['user_id']).codes
+    df['item_id'] = pd.Categorical(df['item_id']).codes + 1
+    df = df.rename(columns={'user_id': 'userid', 'item_id': 'movieid'})
+    return df
 
 class GlobalTemporalSplitter:
     """
@@ -126,21 +155,30 @@ class GlobalTemporalSplitter:
 
         print("[Verification] PASSED: No data leakage detected between splits.")
 
-
-def initialize_data():
-    print("Preparing data splits using Global Temporal Split")
-    # data = pd.read_csv('src\data\ml-20m.csv')
-    print('GTS')
-    df = get_movielens_data(include_time=True)   # загружаем датасет
+def initialize_data(dataset='ml-1m'):
+    data_dir = f'../../data/{dataset}/'
+    os.makedirs(data_dir, exist_ok=True)
+    if dataset == 'ml-1m':
+        df = get_movielens_data(include_time=True)
+    else:
+        df = load_amazon(dataset)
     print('Dataset loaded')
     print(df.head(3))
+    print("Preparing data splits using Global Temporal Split")
+    print('GTS')
 
     splitter = GlobalTemporalSplitter(df)
     data = splitter.split(train_p=0.7, val_p=0.1)
-    splitter.save_splits(data, DATA_DIR)
-    print('Dataset prepared, splits saved to', DATA_DIR)
+    splitter.save_splits(data, data_dir)  
+    # splitter.save_splits(data, DATA_DIR)
+    print('Dataset prepared, splits saved to', data_dir)
 
 
 if __name__ == "__main__":
-    initialize_data()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='ml-1m',
+                        choices=['ml-1m', 'amazon_Baby', 'amazon_Beauty',
+                                 'amazon_Sports_and_Outdoors', 'amazon_Toys_and_Games'])
+    args = parser.parse_args()
+    initialize_data(dataset=args.dataset)
 
