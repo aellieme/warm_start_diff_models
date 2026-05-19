@@ -509,6 +509,7 @@ def final_training(model, train_loader, config):
     trainer.fit(model=seqrec_module, train_dataloaders=train_loader)
 
     plotter.plot(save=True, show=False)
+    print(f"График сохранён в: {plotter.save_dir}") 
     return seqrec_module, trainer
 
 if __name__ == "__main__":
