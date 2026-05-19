@@ -18,6 +18,7 @@ import numpy as np
 from sklearn.preprocessing import LabelEncoder
 import json
 import torch.optim as optim
+from tqdm import tqdm
 
 from trainer import evaluate_and_print
 # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
@@ -267,112 +268,6 @@ def load_and_split_gts(quantiles=(0.7, 0.8), dataset_name='ml-1m'):
         'test_seq': test_u2seq,
     }
     return data_raw
-# def load_and_split_gts(quantiles=(0.7, 0.8, 0.9)):
-#     """
-#     Global Temporal Split 
-#     """
-#     val_all_seq = {}
-#     adapt_seq = {}
-#     # 1. Загрузка MovieLens-1M с временными метками
-#     df = get_movielens_data(include_time=True) #, data_dir='../datasets/raw/ml-1m')
-    
-#     # 2. Сквозная переиндексация пользователей и айтемов
-#     user_enc = LabelEncoder()
-#     item_enc = LabelEncoder()
-#     df['userid'] = user_enc.fit_transform(df['userid'])
-#     df['movieid'] = item_enc.fit_transform(df['movieid'])
-#     smap = {idx: original for idx, original in enumerate(item_enc.classes_)}
-    
-#     # 3. Глобальная сортировка по времени
-#     df = df.sort_values('timestamp').reset_index(drop=True)
-    
-#     # 4. Вычисление глобальных квантилей
-#     T_valid = df['timestamp'].quantile(quantiles[0])   # 70%
-#     T_adapt = df['timestamp'].quantile(quantiles[1])   # 80%
-#     T_test  = df['timestamp'].quantile(quantiles[2])   # 90%
-    
-#     # 5. Разделение по пользователям
-#     train_data = {}      # обучающая история (до T_valid)
-#     adapt_data = {}      # адаптационная история (T_adapt < ts <= T_test)
-#     val_examples = {}    # валидация: вход = train + валидационная история, цель = последний в окне (T_valid, T_adapt]
-#     test_examples = {}   # тест: вход = train + adapt + тестовая история, цель = последний в окне (T_test, inf)
-    
-#     for uid, group in df.groupby('userid'):
-#         group = group.sort_values('timestamp')
-#         items = group['movieid'].tolist()
-#         timestamps = group['timestamp'].tolist()
-        
-#         # --- Обучающая история (всё до T_valid) ---
-#         train_items = [item for item, ts in zip(items, timestamps) if ts <= T_valid]
-        
-#         # --- Адаптационная история (между T_adapt и T_test) ---
-#         adapt_items = [item for item, ts in zip(items, timestamps) if T_adapt < ts <= T_test]
-        
-#         # --- Валидационное окно (T_valid < ts <= T_adapt) ---
-#         val_window = [(item, ts) for item, ts in zip(items, timestamps) if T_valid < ts <= T_adapt]
-#         if val_window:
-#             # target = последний айтем в валидационном окне
-#             target_item = val_window[-1][0]
-#             # входная последовательность из валидационного окна (все до target)
-#             val_history = [item for item, _ in val_window[:-1]]
-#             # полная входная последовательность для модели: обучение + валидационная история
-#             full_input = train_items + val_history
-#             val_examples[uid] = (full_input, [target_item])
-        
-#         # --- Тестовое окно (ts > T_test) ---
-#         val_window_all = [item for item, ts in zip(items, timestamps) if T_valid < ts <= T_adapt]
-#         if val_window_all:
-#             val_all_seq[uid] = val_window_all   
-#         test_window = [(item, ts) for item, ts in zip(items, timestamps) if ts > T_test]
-#         if test_window:
-#             target_item = test_window[-1][0]                     # последний в тестовом окне
-#             test_history = [item for item, _ in test_window[:-1]] # все до последнего
-#             # полная входная последовательность: обучение + адаптация + тестовая история
-#             full_input = train_items + val_window_all + adapt_items + test_history
-#             test_examples[uid] = (full_input, [target_item])
-        
-
-        
-#         # --- Адаптационная история ---
-#         adapt_items = [item for item, ts in zip(items, timestamps) if T_adapt < ts <= T_test]
-#         if adapt_items:
-#             adapt_seq[uid] = adapt_items  
-        
-#         # Сохраняем обучающую и адаптационную последовательности (для полноты)
-#         if train_items:
-#             train_data[uid] = train_items
-#         if adapt_items:
-#             adapt_data[uid] = adapt_items
-    
-#     for uid, (full_input, target) in val_examples.items():
-#         group = df[df['userid'] == uid].sort_values('timestamp')
-#         val_window = group[(group['timestamp'] > T_valid) & (group['timestamp'] <= T_adapt)]
-#         if len(val_window) > 0:
-#             last_in_window = val_window.iloc[-1]['movieid']
-#             assert target[0] == last_in_window, f"!!Target mismatch for user {uid}"
-
-#     print("Validation targets are last items in window (ok)")
-#     # 6. Преобразование в формат, ожидаемый классами Data_Val и Data_Test
-#     # Для валидации: u2seq = полная входная последовательность, u2answer = цель
-#     val_u2seq = {uid: val_examples[uid][0] for uid in val_examples}
-#     val_u2answer = {uid: val_examples[uid][1] for uid in val_examples}
-    
-#     # Для теста: u2seq = полная входная последовательность, u2answer = цель
-#     test_u2seq = {uid: test_examples[uid][0] for uid in test_examples}
-#     test_u2answer = {uid: test_examples[uid][1] for uid in test_examples}
-    
-#     data_raw = {
-#         'train': train_data,          # используется только для обучения модели (через Data_Train)
-#         'val': val_u2answer,          # для Data_Val нужен словарь u2answer
-#         'test': test_u2answer,        # для Data_Test нужен словарь u2answer
-#         'smap': smap,
-#         # Дополнительные поля, чтобы Data_Val/Test могли восстановить полную историю
-#         'val_seq': val_u2seq,
-#         'test_seq': test_u2seq,
-#         'val_all_seq': val_all_seq,
-#         'adapt_seq': adapt_seq,
-#     }
-#     return data_raw
 
 
 def main(args):    
@@ -436,7 +331,7 @@ def main(args):
         for epoch in range(1, args.epochs+1):
             model.train()
             total_loss = 0
-            for batch in tra_loader:
+            for batch in tqdm(tra_loader, desc=f"Epoch {epoch:03d}/{args.epochs}", unit="batch"):
                 batch = [x.to(args.device) for x in batch]
                 optimizer.zero_grad()
                 _, rep_diffu, _, _, _, _ = model(batch[0], batch[1], train_flag=True)

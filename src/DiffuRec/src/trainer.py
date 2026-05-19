@@ -6,6 +6,7 @@ import numpy as np
 import copy
 import time
 import pickle
+from tqdm import tqdm
 
 from evaluate_topk_dp import compute_all_metrics
 from plotting import TrainingPlotter
@@ -149,7 +150,8 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
         model_joint.train()
     
         flag_update = 0
-        for index_temp, train_batch in enumerate(tra_data_loader):
+        # for index_temp, train_batch in enumerate(tra_data_loader):
+        for index_temp, train_batch in enumerate(tqdm(tra_data_loader, desc=f"Epoch {epoch_temp:03d}/{epochs}", unit="batch")):
             train_batch = [x.to(device) for x in train_batch]
             optimizer.zero_grad()
             scores, diffu_rep, weights, t, item_rep_dis, seq_rep_dis = model_joint(train_batch[0], train_batch[1], train_flag=True)  
