@@ -63,7 +63,7 @@ def main():
     # print(args)
     
 
-    best_model, test_results = model_train(model,tra_data_loader, val_data_loader, test_data_loader, args, logger,train_time)
+    best_model, test_results = model_train(model,tra_data_loader, val_data_loader, test_data_loader, args, logger,train_time, final=True)
     training_duration_seconds = time.time()-start_time
     minutes = training_duration_seconds // 60
     seconds = training_duration_seconds % 60

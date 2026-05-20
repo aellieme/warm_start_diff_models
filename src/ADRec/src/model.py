@@ -134,7 +134,7 @@ class Att_Diffuse_model(nn.Module):
         # position_ids = torch.arange(sequence.shape[1], dtype=torch.long, device=sequence.device)
         # position_ids = position_ids.unsqueeze(0).expand_as(sequence)
         # position_embeddings = self.position_embeddings(position_ids)
-
+        sequence = torch.clamp(sequence, 0, self.item_num)
         item_embeddings = self.item_embedding(sequence)
         tag_embeddings = self.item_embedding(tag)
         if self.geodesic:

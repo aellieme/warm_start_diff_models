@@ -12,6 +12,7 @@ from torch import optim
 from sasrec import SASRec
 from evaluate_topk_dp import compute_all_metrics
 from plotting import TrainingPlotter
+import pandas as pd
 
 def downvote_seen_items(scores, hist_pad):
     for i in range(scores.shape[0]):
@@ -45,8 +46,8 @@ def evaluate_and_print(model, data_loader, args, logger, description="Validation
     print(f'{description} results ({elapsed:.2f}s):')
     logger.info(f'{description} results ({elapsed:.2f}s):')
     for k, r, n, m, c in zip(metric_ks, recalls, ndcgs, mrrs, covs):
-        print(f"k={k}: Recall={r:.4f}, NDCG={n:.4f}, MRR={m:.4f}, Cov={c:.4f}")
-        logger.info(f"k={k}: Recall={r:.4f}, NDCG={n:.4f}, MRR={m:.4f}, Cov={c:.4f}")
+        print(f"k={k}: Recall={r:.6f}, NDCG={n:.6f}, MRR={m:.6f}, Cov={c:.6f}")
+        logger.info(f"k={k}: Recall={r:.6f}, NDCG={n:.6f}, MRR={m:.6f}, Cov={c:.6f}")
     return recalls[metric_ks.index(10)] if 10 in metric_ks else 0.0
 
 
@@ -125,7 +126,7 @@ def load_data(args):
     return tra_data_loader, val_data_loader, test_data_loader
 
 
-def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader, args, logger, train_time):
+def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader, args, logger, train_time, final=False):
     epochs = args.epochs
     device = args.device
     metric_ks = args.metric_ks
@@ -196,6 +197,10 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
                         for i in range(len(val_batch[1])):
                             all_actual.append([val_batch[1][i, -1].item()])
                             all_predicted.append(topk_idx[i].cpu().tolist())
+                    if final:
+                        recs_df = pd.DataFrame({'user_id': list(range(len(all_actual))), 'recommendations': all_predicted})
+                        recs_df.to_csv('recommendations.csv', index=False)
+                        print("Recommendations saved to recommendations.csv")
 
                 precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
                     all_actual, all_predicted, metric_ks, args.item_num
@@ -264,6 +269,10 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
                 if args.diversity_measure:
                     _, top100 = torch.topk(scores, k=100, dim=-1)
                     top_100_item.append(top100.cpu())
+            if final:
+                recs_df = pd.DataFrame({'user_id': list(range(len(all_actual))), 'recommendations': all_predicted})
+                recs_df.to_csv('recommendations.csv', index=False)
+                print("Recommendations saved to recommendations.csv")
         test_elapsed = time.time() - start_test_time
         logger.info(f"Test inference time: {test_elapsed:.2f}s")
         print(f"Test inference time: {test_elapsed:.2f}s")
