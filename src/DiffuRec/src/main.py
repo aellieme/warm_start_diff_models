@@ -121,7 +121,22 @@ def load_amazon(dataset_name, data_dir='../../data/amazon'):
 def item_num_create(args, item_num):
     args.item_num = item_num
     return args
-
+def load_movielens_local(data_dir='../../data/info/'):
+    import pandas as pd
+    from sklearn.preprocessing import LabelEncoder
+    ratings_path = os.path.join(data_dir, 'ratings.dat')
+    if not os.path.exists(ratings_path):
+        raise FileNotFoundError(f"ratings.dat not found at {ratings_path}")
+    df = pd.read_csv(ratings_path, sep='::', engine='python',
+                     names=['userid', 'movieid', 'rating', 'timestamp'])
+    df = df[['userid', 'movieid', 'timestamp']]
+    user_enc = LabelEncoder()
+    item_enc = LabelEncoder()
+    df['userid'] = user_enc.fit_transform(df['userid'])
+    df['movieid'] = item_enc.fit_transform(df['movieid'])
+    smap = {idx: original for idx, original in enumerate(item_enc.classes_)}
+    df = df.rename(columns={'movieid': 'itemid'})
+    return df, smap
 
 def cold_hot_long_short(data_raw, dataset_name):
     item_list = []
@@ -187,14 +202,18 @@ def load_and_split_gts(quantiles=(0.7, 0.8), dataset_name='ml-1m'):
     quantiles: (validation_quantile, test_quantile)
     Default: 70% train, 10% validation (70-80), 20% test (>80)
     """
+    # if dataset_name == 'ml-1m':
+    #     df = get_movielens_data(include_time=True)
+    #     user_enc = LabelEncoder()
+    #     item_enc = LabelEncoder()
+    #     df['userid'] = user_enc.fit_transform(df['userid'])
+    #     df['movieid'] = item_enc.fit_transform(df['movieid'])
+    #     smap = {idx: original for idx, original in enumerate(item_enc.classes_)}
+    #     df = df.rename(columns={'movieid': 'itemid'})  
     if dataset_name == 'ml-1m':
-        df = get_movielens_data(include_time=True)
-        user_enc = LabelEncoder()
-        item_enc = LabelEncoder()
-        df['userid'] = user_enc.fit_transform(df['userid'])
-        df['movieid'] = item_enc.fit_transform(df['movieid'])
-        smap = {idx: original for idx, original in enumerate(item_enc.classes_)}
-        df = df.rename(columns={'movieid': 'itemid'})   # унификация
+        df, smap = load_movielens_local(data_dir='../../data/info/')
+        if 'itemid' not in df.columns:
+            df = df.rename(columns={'movieid': 'itemid'})
     else:
         df, smap = load_amazon(dataset_name)
         # убедимся, что колонка называется 'itemid'
