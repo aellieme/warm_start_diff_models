@@ -19,13 +19,14 @@ def main():
     train_time=time.strftime("%Y-%m-%d_%H-%M-%S",  time.localtime())
     logger,args = make_logger(train_time)
     fix_random_seed_as(args.random_seed)
-    args = item_num_create(args)
+    # args = item_num_create(args)
     
     if args.final:
         with open(f'../datasets/data/{args.dataset}/dataset.pkl', 'rb') as f:
             data_raw = pickle.load(f)
         # объединяем train_dict и val_seq_dict + val_tgt для каждого пользователя
         train_combined = []
+        args.item_num = data_raw['item_count']
         # берём всех пользователей, у которых есть train (или все из train_dict)
         for uid in data_raw['train_dict'].keys():
             # если есть val_seq и val_tgt для этого пользователя
