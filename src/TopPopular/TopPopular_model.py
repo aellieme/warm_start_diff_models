@@ -1,18 +1,82 @@
+import os
+import argparse
+import time
+import json
 import pandas as pd
 import numpy as np
-import random
-from polara import get_movielens_data
+from sklearn.preprocessing import LabelEncoder
 from evaluate_topk_dp import compute_all_metrics
-import time
+import random
 
 random.seed(42)
 np.random.seed(42)
 
+def load_movielens_local(data_dir='../data/info'):
+    ratings_path = os.path.join(data_dir, 'ratings.dat')
+    if not os.path.exists(ratings_path):
+        raise FileNotFoundError(f"ratings.dat not found at {ratings_path}")
+    df = pd.read_csv(ratings_path, sep='::', engine='python',
+                     names=['userid', 'movieid', 'rating', 'timestamp'])
+    df = df[['userid', 'movieid', 'timestamp']]
+    user_enc = LabelEncoder()
+    item_enc = LabelEncoder()
+    df['userid'] = user_enc.fit_transform(df['userid'])
+    df['movieid'] = item_enc.fit_transform(df['movieid']) + 1
+    return df
+
+def load_amazon(dataset_name, data_dir='../data/amazon'):
+    file_map = {
+        'baby':   'reviews_Baby_5.json',
+        'beauty': 'reviews_Beauty_5.json',
+        'sports': 'reviews_Sports_and_Outdoors_5.json',
+        'toys':   'reviews_Toys_and_Games_5.json'
+    }
+    fname = file_map.get(dataset_name)
+    if fname is None:
+        raise ValueError(f"Unknown Amazon dataset: {dataset_name}")
+    path = os.path.join(data_dir, fname)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Amazon data not found: {path}")
+
+    records = []
+    with open(path, 'r', encoding='utf-8') as f:
+        for line in f:
+            records.append(json.loads(line))
+    df = pd.DataFrame(records)
+    df = df.rename(columns={
+        'reviewerID': 'userid',
+        'asin': 'movieid',
+        'unixReviewTime': 'timestamp'
+    })
+    df = df[['userid', 'movieid', 'timestamp']]
+    user_enc = LabelEncoder()
+    item_enc = LabelEncoder()
+    df['userid'] = user_enc.fit_transform(df['userid'])
+    df['movieid'] = item_enc.fit_transform(df['movieid']) + 1
+    return df
+
+def global_temporal_split(df, train_ratio=0.7, val_ratio=0.1):
+    df = df.sort_values('timestamp').reset_index(drop=True)
+    total = len(df)
+    train_cutoff = df['timestamp'].quantile(train_ratio)
+    val_cutoff   = df['timestamp'].quantile(train_ratio + val_ratio)
+
+    train_df = df[df['timestamp'] <= train_cutoff].copy()
+    val_df   = df[(df['timestamp'] > train_cutoff) & (df['timestamp'] <= val_cutoff)].copy()
+    test_df  = df[df['timestamp'] > val_cutoff].copy()
+
+    assert len(train_df) == 0 or len(val_df) == 0 or train_df['timestamp'].max() <= val_df['timestamp'].min(), \
+        "Train и Val пересекаются по времени"
+    assert len(val_df) == 0 or len(test_df) == 0 or val_df['timestamp'].max() <= test_df['timestamp'].min(), \
+        "Val и Test пересекаются по времени"
+
+    print(f"Split: Train {len(train_df)} ({len(train_df)/total:.1%}), "
+          f"Val {len(val_df)} ({len(val_df)/total:.1%}), "
+          f"Test {len(test_df)} ({len(test_df)/total:.1%})")
+    all_items = df['movieid'].unique().tolist()
+    return train_df, val_df, test_df, all_items
+
 def get_top_k_recommendations(user_histories, popular_items, k=20):
-    """
-    Генерирует top-k рекомендаций на основе глобальной популярности.
-    Исключает уже просмотренные пользователем items.
-    """
     recommendations = []
     for history in user_histories:
         seen_items = set(history)
@@ -28,63 +92,56 @@ def get_top_k_recommendations(user_histories, popular_items, k=20):
         recommendations.append(recs)
     return recommendations
 
-def print_results(title, topN_list, recalls, ndcgs, mrrs, covs, latencies=None):
-    print(f"\nResults for {title}:")
-    header = f"{'K':<5} | {'Recall@K':<10} | {'NDCG@K':<10} | {'MRR@K':<10} | {'Coverage':<10}"
-    if latencies is not None:
-        header += f" | {'Latency (s)':<12}"
-    print("-" * len(header))
+def run_experiment(histories, popular_items, k_list):
+    max_k = max(k_list)
+    start_time = time.perf_counter()
+    preds_full = get_top_k_recommendations(histories, popular_items, k=max_k)
+    total_latency = time.perf_counter() - start_time
+
+    results = {'recalls': [], 'ndcgs': [], 'mrrs': [], 'covs': [], 'latencies': []}
+    for k in k_list:
+        preds_k = [rec[:k] for rec in preds_full]
+        (_, recalls, ndcgs, mrrs, covs) = compute_all_metrics(ground_truth, preds_k, [k], len(popular_items))
+        results['recalls'].append(recalls[0])
+        results['ndcgs'].append(ndcgs[0])
+        results['mrrs'].append(mrrs[0])
+        results['covs'].append(covs[0])
+        results['latencies'].append(total_latency)
+    return results
+
+def print_results(title, topN_list, res):
+    print(f"\n===== {title} =====")
+    header = f"{'K':<5} | {'Recall@K':<10} | {'NDCG@K':<10} | {'MRR@K':<10} | {'Coverage':<10} | {'Latency (s)':<12}"
     print(header)
     print("-" * len(header))
     for i, k in enumerate(topN_list):
-        row = f"{k:<5} | {recalls[i]:.6f} | {ndcgs[i]:.6f} | {mrrs[i]:.6f} | {covs[i]:.6f}"
-        if latencies is not None:
-            row += f" | {latencies[i]:.6f}"
-        print(row)
+        print(f"{k:<5} | {res['recalls'][i]:.6f} | {res['ndcgs'][i]:.6f} | {res['mrrs'][i]:.6f} | {res['covs'][i]:.6f} | {res['latencies'][i]:.6f}")
 
-df = get_movielens_data(include_time=True)
-df = df.sort_values('timestamp').reset_index(drop=True)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='ml-1m',
+                        choices=['ml-1m', 'baby', 'beauty', 'sports', 'toys'])
+    parser.add_argument('--topk_list', nargs='+', type=int, default=[10, 20, 100])
+    args = parser.parse_args()
 
-train_cutoff = df['timestamp'].quantile(0.7)   # 70%
-val_cutoff   = df['timestamp'].quantile(0.8)   # 10% validation
-# test — оставшиеся 20% (от 0.8 до 1.0)
+    if args.dataset == 'ml-1m':
+        print("Loading MovieLens-1M...")
+        data = load_movielens_local(data_dir='../data/info')
+    else:
+        print(f"Loading Amazon {args.dataset}...")
+        data = load_amazon(args.dataset, data_dir='../data/amazon')
 
-train_df = df[df['timestamp'] <= train_cutoff].copy()
-val_df   = df[(df['timestamp'] > train_cutoff) & (df['timestamp'] <= val_cutoff)].copy()
-test_df  = df[df['timestamp'] > val_cutoff].copy()
+    train_df, val_df, test_df, item_catalog = global_temporal_split(data)
 
-# Проверка непересекаемости временных интервалов
-assert train_df['timestamp'].max() <= val_df['timestamp'].min(), "Train и Val пересекаются по времени"
-assert val_df['timestamp'].max() <= test_df['timestamp'].min(), "Val и Test пересекаются по времени"
+    history_baseline = pd.concat([train_df, val_df]).groupby('userid')['movieid'].apply(list).to_dict()
 
-print(f"Разбиение: Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
-print(f"Train time: {train_df['timestamp'].min()} -> {train_df['timestamp'].max()}")
-print(f"Test time:  {test_df['timestamp'].min()} -> {test_df['timestamp'].max()}")
+    test_users = test_df['userid'].unique()
+    ground_truth = [test_df[test_df['userid'] == u]['movieid'].tolist() for u in test_users]
 
-all_items_count = df['movieid'].nunique()  # общее количество фильмов во всём датасете
+    user_histories = [history_baseline.get(u, []) for u in test_users]
 
-# popularity_scores = train_df['movieid'].value_counts().index.tolist()
-popularity_scores = pd.concat([train_df, val_df])['movieid'].value_counts().index.tolist()
+    train_val_df = pd.concat([train_df, val_df])
+    popular_items = train_val_df['movieid'].value_counts().index.tolist()
 
-test_users = test_df['userid'].unique()
-test_grouped = test_df.groupby('userid')['movieid'].apply(list).reindex(test_users).tolist()
-
-history_baseline = pd.concat([train_df, val_df]).groupby('userid')['movieid'].apply(list)
-users_hist_baseline = [history_baseline.get(u, []) for u in test_users]
-
-TOP_K_LIST = [1, 10, 20, 50, 100]
-print("\n Inference (train+val → test)")
-
-MMAX_K = max(TOP_K_LIST)
-start_time = time.perf_counter()
-preds_full = get_top_k_recommendations(users_hist_baseline, popularity_scores, k=MAX_K)
-total_latency = time.perf_counter() - start_time
-
-(_, recalls, ndcgs, mrrs, covs) = compute_all_metrics(
-    test_grouped, preds_full, TOP_K_LIST, all_items_count
-)
-latencies = [total_latency] * len(TOP_K_LIST)
-
-print_results("Top-Popular", TOP_K_LIST,
-              recalls, ndcgs, mrrs, covs,
-              latencies=latencies)
+    results = run_experiment(user_histories, popular_items, args.topk_list)
+    print_results(f"TopPopular ({args.dataset})", args.topk_list, results)
