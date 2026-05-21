@@ -5,7 +5,6 @@ from polara import get_movielens_data
 from evaluate_topk_dp import compute_all_metrics
 import time
 
-# ========== 1. Фиксация случайного seed = 42 ==========
 random.seed(42)
 np.random.seed(42)
 
