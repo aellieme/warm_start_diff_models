@@ -55,6 +55,9 @@ def main():
         # test_data_loader = test_data.get_pytorch_dataloaders()
 
     # cold_hot_long_short(data_raw, args.dataset)
+    if args.dataset == 'toys':
+        args.item_num = 11924
+        print("Forced item_num to", args.item_num, "for toys dataset")
     model = choose_model(args)
     print(args.description)
     logger.info(args.description)
