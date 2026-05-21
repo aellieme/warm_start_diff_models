@@ -81,8 +81,11 @@ print("Интервалы не пересекаются")
 print(f"Разбиение: Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
 
 all_items_count = df['movieid'].nunique()
-item_catalog = train_df['movieid'].unique().tolist()
-
+# item_catalog = train_df['movieid'].unique().tolist()
+# item_catalog = set(train_df['movieid'].unique()) | set(val_df['movieid'].unique())
+# item_catalog = list(item_catalog)
+all_items = df['movieid'].unique().tolist()   # все фильмы из всего датасета
+item_catalog = all_items
 # Список пользователей теста (только те, у которых есть взаимодействия в test_df)
 test_users = test_df['userid'].unique()
 test_grouped = test_df.groupby('userid')['movieid'].apply(list).reindex(test_users).tolist()
