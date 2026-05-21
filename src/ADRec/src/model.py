@@ -40,12 +40,29 @@ class Att_Diffuse_model(nn.Module):
         return pretrained_emb_weight
     def embed_item(self,pretrained=False):
         if pretrained:
-            embedding = nn.Embedding.from_pretrained(
-                self.load_pretrained_emb_weight(), padding_idx=0, freeze=self.args.freeze_emb
-            )
+            pretrained_weight = self.load_pretrained_emb_weight()
+            pretrained_num = pretrained_weight.size(0)
+            target_num = self.item_num + 1
+            print(f"Pretrained embedding size: {pretrained_num}, target size: {target_num}")
+            if pretrained_num == target_num:
+                embedding = nn.Embedding.from_pretrained(
+                    self.load_pretrained_emb_weight(), padding_idx=0, freeze=self.args.freeze_emb
+                )
+            else:
+                print(f"Warning: pretrained embedding size {pretrained_num} != target size {target_num}. Extending/truncating.")
+                embedding = nn.Embedding(target_num, self.emb_dim, padding_idx=0)
+                copy_num = min(pretrained_num, target_num)
+                embedding.weight.data[:copy_num] = pretrained_weight[:copy_num]
+                if target_num > pretrained_num:
+                    nn.init.normal_(embedding.weight.data[pretrained_num:], mean=0.0, std=0.1)
+                if self.args.freeze_emb:
+                    embedding.weight.requires_grad = False
         else:
-            embedding = nn.Embedding(self.item_num+1, self.emb_dim, padding_idx=0)
+            embedding = nn.Embedding(self.item_num + 1, self.emb_dim, padding_idx=0)
         return embedding
+        # else:
+        #     embedding = nn.Embedding(self.item_num+1, self.emb_dim, padding_idx=0)
+        # return embedding
 
 
     def loss_rec(self, scores, labels):
