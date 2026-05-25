@@ -25,6 +25,7 @@ class PointWiseFeedForward(nn.Module):
 class SASRec(nn.Module):
     def __init__(self, item_num, config):
         super(SASRec, self).__init__()
+        print(f"[DEBUG] SASRec initialized with maxlen={config['maxlen']}")
         self.item_num = item_num
         self.pad_token = item_num
 

@@ -37,9 +37,14 @@ def main():
 
     print(f"Train+Val (80%): {len(train_val_data)} interactions")
     print(f"Test examples: {len(test_examples)} users")
+    from data_utils import data_to_sequences
+    seqs = data_to_sequences(train_val_data, data_description)
+    lengths = [len(s) for s in seqs]
+    print(f"Max length: {max(lengths)}, mean: {np.mean(lengths):.1f}, median: {np.median(lengths):.1f}")
+    print(np.percentile(lengths, 95))
+    # print(f"Max length: {max(lengths)}, mean: {np.mean(lengths):.1f}, median: {np.median(lengths):.1f}")
+    print(f"Users with length > 50: {sum(1 for l in lengths if l > 50)}")
     
-    # seqs = data_to_sequences(train_val_data, data_description)
-    # print(np.mean([len(s) for s in seqs]))
 
     # Выбор конфига в зависимости от датасета
     if args.dataset == 'ml-1m':
