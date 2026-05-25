@@ -64,7 +64,7 @@ def item_num_create(args):
               'sports':12301,
               'baby':4731,
               'toys':7309,
-              'beauty':6086
+              'beauty':12101
               }
     args.item_num = length[args.dataset]
     return args
