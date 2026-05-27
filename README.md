@@ -1,9 +1,8 @@
-```markdown
 # Warm-Start Diffusion Models for Sequential Recommendation
 
-This repository contains the experimental code and configurations for the comparative analysis of **diffusion-based** and **transformer-based** sequential recommender systems. The work is part of a Bachelor’s thesis at HSE University (Nizhny Novgorod).
+This repository contains the experimental code and configurations for the comparative analysis of **diffusion-based** and **transformer-based** sequential recommender systems.
 
-The main goal is to evaluate whether diffusion models (DiffuRec, ADRec, T‑DiffRec) can outperform classical transformers (SASRec, GPTRec) in terms of **accuracy**, **catalogue coverage**, and **inference latency** under a strictly controlled, reproducible protocol (global temporal split, fixed random seed, identical hyperparameter search, limited compute budget).
+The main goal is to evaluate whether diffusion models (DiffuRec, ADRec, T‑DiffRec) can outperform classical transformers (SASRec, GPTRec) in terms of **accuracy**, **catalogue coverage**, and **inference latency** under a strictly controlled, reproducible protocol (global temporal split, fixed random seed, limited compute budget).
 
 **Key findings** (in brief):
 - Diffusion models (especially DiffuRec and ADRec) consistently achieve higher Recall@K, NDCG@K, and MRR@K than SASRec and GPTRec on MovieLens‑1M, Amazon Baby, and Amazon Toys.
@@ -13,7 +12,6 @@ The main goal is to evaluate whether diffusion models (DiffuRec, ADRec, T‑Diff
 
 For full details, please refer to the [thesis document](https://github.com/aellieme/warm_start_diff_models/blob/main/PekerskayaDaniela_diploma2026.pdf) (in Russian).
 
----
 
 ## Repository structure
 
@@ -28,7 +26,6 @@ warm_start_diff_models/
 │   ├── TopPopular/          # Non‑personalized baseline
 │   ├── RandomRecs/          # Random baseline
 │   └── download_amazon_data.py
-├── notebooks/               # (optional) exploration notebooks
 ├── README.md
 └── requirements.txt
 ```
@@ -86,15 +83,12 @@ All commands assume you are currently in the root of the repository and change d
 
 > Note: Not every model supports all arguments. Check the model’s own `main.py` for exact parameter names (e.g., GPTRec uses `dataset.max_length=50`). Below we provide the exact commands used in the experiments.
 
-### 1. DiffuRec
+### 1. DiffuRec samples
 
 ```bash
 cd src/DiffuRec/src
 
-# Train on ml-1m, max_len=50, batch_size=512, epochs=30
-python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 512 --epochs 30 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --random_seed 42
-
-# Longer training on ml-1m (100 epochs)
+# Train on ml-1m, 100 epochs
 python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 100 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --random_seed 42
 
 # Amazon Baby, max_len=50, 150 epochs
@@ -213,7 +207,7 @@ Metrics are also printed to the console at the end of training and saved in log 
 ## Reproducibility notes
 
 - **Global temporal split**: All experiments use the split recommended by [Gusak et al. (RecSys 2025)](https://dl.acm.org/doi/10.1145/3705328.3748164): 70% train, 10% validation, 20% test, sorted by global timestamp.
-- **Fixed random seed**: 42 is used wherever possible (in data shuffling, model initialisation, negative sampling).
+- **Fixed random seed**: 42 is used wherever possible
 - **Hyperparameter search**: For each model we performed a grid search on the validation set using Recall@10 as the target metric. The best configuration was then used for the final training (train+validation) and test evaluation.
 - **Compute budget**: Training was limited to 4 hours per model on an NVIDIA Tesla T4 GPU.
 
@@ -227,7 +221,7 @@ If you use this code or results in your own work, please cite the original paper
 @thesis{Pekerskaya2026,
   author = {Pekerskaya, Daniela M.},
   title = {Fast recommendations in the warm-start scenario using diffusion models},
-  school = {HSE University, Nizhny Novgorod},
+  university = {HSE University, Nizhny Novgorod},
   year = {2026}
 }
 ```
@@ -250,5 +244,4 @@ Also consider citing the methodological paper:
 This project is released under the MIT License. The original repositories of the included models may have their own licenses – please refer to them separately.
 
 **Maintainer**: [aellieme](https://github.com/aellieme)  
-**Thesis advisor**: Evgeny Frolov (HSE University)
 ```
