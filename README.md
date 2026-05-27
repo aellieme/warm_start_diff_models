@@ -242,6 +242,4 @@ Also consider citing the methodological paper:
 ## License
 
 This project is released under the MIT License. The original repositories of the included models may have their own licenses – please refer to them separately.
-
 **Maintainer**: [aellieme](https://github.com/aellieme)  
-```
