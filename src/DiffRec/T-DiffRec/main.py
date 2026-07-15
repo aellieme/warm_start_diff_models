@@ -1,5 +1,7 @@
 import pandas as pd
 import argparse
+import sys
+from pathlib import Path
 from ast import parse
 import os
 import time
@@ -24,6 +26,9 @@ import data_utils
 from copy import deepcopy
 
 from plotting import TrainingPlotter
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
 
 import random
 # random_seed = 1
@@ -246,7 +251,16 @@ if __name__ == '__main__':
                             print(f"  Rec : {rec_names}")
                 
                 
-        precisions, recalls, ndcgs, mrrs, covs = eval_metrics.compute_all_metrics(target_items, predict_items, topN, n_item)
+        candidate_items = set(
+            np.asarray(mask_his.sum(axis=0)).ravel().nonzero()[0].tolist()
+        )
+        precisions, recalls, ndcgs, mrrs, covs = eval_metrics.compute_all_metrics(
+            target_items,
+            predict_items,
+            topN,
+            len(candidate_items),
+            candidate_items=candidate_items,
+        )
         return (precisions, recalls, ndcgs, mrrs, covs), predict_items
 
     best_recall, best_epoch = -100, 0
@@ -258,6 +272,10 @@ if __name__ == '__main__':
             model_name=f"T-DiffRec_{time.strftime('%Y%m%d_%H%M%S')}",
             metrics=['loss', 'recall@10']
         )
+    tracker = ExperimentTracker(args.dataset, "T-DiffRec")
+    train_item_counts = np.asarray(train_data_ori.sum(axis=0)).ravel()
+    train_item_popularity = {i: int(v) for i, v in enumerate(train_item_counts) if v > 0}
+    save_dataset_popularity(args.dataset, train_item_popularity)
     
     print("Start training...")
     for epoch in range(1, args.epochs + 1):
@@ -286,12 +304,19 @@ if __name__ == '__main__':
         # avg_loss = total_loss / len(train_loader)
         avg_loss = (total_loss / len(train_loader)).item()
         plotter.update(epoch=epoch, loss=avg_loss)
+        tracker.log_epoch(epoch, train_loss=avg_loss)
         
         # Валидация и сохранение модели только при обычном обучении (не final_train)
         if not args.final_train and epoch % 5 == 0:
             valid_results, _ = evaluate(test_loader, valid_y_data, train_data_ori, eval(args.topN))
             recall10 = valid_results[1][0]  # recall@10
             plotter.update(epoch=epoch, val_recall=recall10)
+            idx10 = eval(args.topN).index(10) if 10 in eval(args.topN) else 0
+            tracker.log_epoch(epoch, **{
+                "val_recall@10": valid_results[1][idx10],
+                "val_ndcg@10": valid_results[2][idx10],
+                "val_mrr@10": valid_results[3][idx10],
+            })
             plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')
             if args.tst_w_val:
                 test_results, _ = evaluate(test_twv_loader, test_y_data, mask_tv, eval(args.topN))
@@ -333,6 +358,14 @@ if __name__ == '__main__':
         
         # Выводим таблицу метрик с точностью .6f
         print_table_metrics(test_results, eval(args.topN))
+        tracker.log_final_metrics(
+            {k: {"recall": test_results[1][i], "ndcg": test_results[2][i],
+                 "mrr": test_results[3][i], "coverage": test_results[4][i]}
+             for i, k in enumerate(eval(args.topN))},
+            split="global_temporal_70_10_20", mask_seen=True,
+            seed=getattr(args, "random_seed", 42), inference_total_sec=inf_time,
+            popularity_bias=recommendation_popularity(test_preds, train_item_popularity, eval(args.topN)),
+        )
         
         # Сохраняем финальную модель
         if not os.path.exists(args.save_path):
@@ -341,11 +374,21 @@ if __name__ == '__main__':
         torch.save(model, final_model_path)
         print(f"Final model saved to {final_model_path}")
         plotter.plot(save=True, show=False, suffix='_final')
+        tracker.close()
         print("End time: ", time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
         exit(0)  #
 
     print("End. Best Epoch {:03d} ".format(best_epoch))
     plotter.plot(save=True, show=False, suffix='_final')
+    if best_test_results is not None:
+        tracker.log_final_metrics(
+            {k: {"recall": best_test_results[1][i], "ndcg": best_test_results[2][i],
+                 "mrr": best_test_results[3][i], "coverage": best_test_results[4][i]}
+             for i, k in enumerate(eval(args.topN))},
+            split="global_temporal_70_10_20", mask_seen=True,
+            seed=getattr(args, "random_seed", 42),
+        )
+    tracker.close()
     print_results(None, best_results, best_test_results)   
     print("End time: ", time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
 # import argparse

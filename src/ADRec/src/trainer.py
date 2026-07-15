@@ -13,6 +13,12 @@ from sasrec import SASRec
 from evaluate_topk_dp import compute_all_metrics
 from plotting import TrainingPlotter
 import pandas as pd
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from experiment_tracking import (ExperimentTracker, popularity_from_sequences,
+                                 recommendation_popularity, save_dataset_popularity)
 
 def downvote_seen_items(scores, hist_pad):
     for i in range(scores.shape[0]):
@@ -41,7 +47,11 @@ def evaluate_and_print(model, data_loader, args, logger, description="Validation
                 all_predicted.append(topk_idx[i].cpu().tolist())
     elapsed = time.time() - start_time
     precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
-        all_actual, all_predicted, metric_ks, args.item_num
+        all_actual,
+        all_predicted,
+        metric_ks,
+        len(args.coverage_candidate_items),
+        candidate_items=args.coverage_candidate_items,
     )
     print(f'{description} results ({elapsed:.2f}s):')
     logger.info(f'{description} results ({elapsed:.2f}s):')
@@ -113,6 +123,11 @@ def load_data(args):
     with open(path_data, 'rb') as f:
         data_raw = pickle.load(f)
     args.item_num = data_raw['item_count']
+    args.coverage_candidate_items = {
+        item for sequence in data_raw['train'] for item in sequence
+    }
+    args.train_item_popularity = popularity_from_sequences(data_raw['train'])
+    save_dataset_popularity(args.dataset, args.train_item_popularity)
     tra_data = Data_Train(data_raw['train'], args)
     # val_data = Data_Val(data_raw['train'], data_raw['val'], args)
     val_data = Data_Val(data_raw['val_seq'], data_raw['val_tgt'], args)
@@ -136,6 +151,7 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
         model_name=f"{args.model}_{args.dataset}_{train_time}",
         metrics=['loss', 'recall@10']
     )
+    tracker = ExperimentTracker(args.dataset, args.model, str(train_time))
     optimizer = PCGrad(optimizers(model_joint, args), args)
     lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer.optim, T_max=500)
     best_metrics_dict = {'Best_Recall@5': 0, 'Best_NDCG@5': 0, 'Best_Recall@10': 0, 'Best_NDCG@10': 0, 'Best_Recall@20': 0, 'Best_NDCG@20': 0}
@@ -177,6 +193,7 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
         logger.info(f"loss in epoch {epoch_temp}: ce_loss {sum(ce_losses)/len(ce_losses):.3f}, dif_loss {sum(dif_losses)/len(dif_losses):.3f}")
         avg_loss = sum(ce_losses) / len(ce_losses)
         plotter.update(epoch=epoch_temp, loss=avg_loss)
+        tracker.log_epoch(epoch_temp, train_loss=avg_loss, diffusion_loss=sum(dif_losses) / len(dif_losses))
         lr_scheduler.step()
         # plotter.plot(save=True, show=False, suffix=f'_epoch{epoch_temp}')
 
@@ -203,10 +220,19 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
                         print("Recommendations saved to recommendations.csv")
 
                 precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
-                    all_actual, all_predicted, metric_ks, args.item_num
+                    all_actual,
+                    all_predicted,
+                    metric_ks,
+                    len(args.coverage_candidate_items),
+                    candidate_items=args.coverage_candidate_items,
                 )
                 idx10 = metric_ks.index(10) if 10 in metric_ks else 0
                 recall10 = recalls[idx10]
+                tracker.log_epoch(epoch_temp, **{
+                    "val_recall@10": recalls[idx10],
+                    "val_ndcg@10": ndcgs[idx10],
+                    "val_mrr@10": mrrs[idx10],
+                })
 
                 if recall10 > best_recall10:
                     best_recall10 = recall10
@@ -277,7 +303,11 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
         logger.info(f"Test inference time: {test_elapsed:.2f}s")
         print(f"Test inference time: {test_elapsed:.2f}s")
         precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
-            all_actual, all_predicted, metric_ks, args.item_num
+            all_actual,
+            all_predicted,
+            metric_ks,
+            len(args.coverage_candidate_items),
+            candidate_items=args.coverage_candidate_items,
         )
         test_metrics_dict_mean = {}
         for k, r, n, m, c in zip(metric_ks, recalls, ndcgs, mrrs, covs):
@@ -285,6 +315,15 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
             test_metrics_dict_mean['NDCG@{}'.format(k)] = n
             test_metrics_dict_mean['MRR@{}'.format(k)] = m
             test_metrics_dict_mean['Coverage@{}'.format(k)] = c
+        tracker.log_final_metrics(
+            {k: {"recall": r, "ndcg": n, "mrr": m, "coverage": c}
+             for k, r, n, m, c in zip(metric_ks, recalls, ndcgs, mrrs, covs)},
+            split="global_temporal_70_10_20",
+            mask_seen=bool(getattr(args, "mask_seen", False)),
+            seed=getattr(args, "random_seed", 42),
+            inference_total_sec=test_elapsed,
+            popularity_bias=recommendation_popularity(all_predicted, args.train_item_popularity, metric_ks),
+        )
 
         print('Test------------------------------------------------------')
         logger.info('Test------------------------------------------------------')
@@ -303,4 +342,5 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
     if args.diversity_measure:
         pass
 
+    tracker.close()
     return best_model, test_metrics_dict_mean

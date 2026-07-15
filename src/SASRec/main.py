@@ -13,6 +13,11 @@ from load_evaluate_pipeline import (
 import os
 import glob
 import matplotlib.pyplot as plt
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
 
 seed = 42
 random.seed(seed)
@@ -82,7 +87,13 @@ def main():
 
     print("Training SASRec on train+val (80%)...")
     # Используем build_final_sasrec_model – она обучает на всех переданных данных без валидации
-    model = build_final_sasrec_model(config, train_val_data, data_description, num_epochs=config['num_epochs'])
+    tracker = ExperimentTracker(args.dataset, "SASRec")
+    train_item_popularity = train_val_data[itemid_col].value_counts().to_dict()
+    save_dataset_popularity(args.dataset, train_item_popularity)
+    model = build_final_sasrec_model(
+        config, train_val_data, data_description,
+        num_epochs=config['num_epochs'], tracker=tracker,
+    )
 
     log_dir = './log/'
     # Ищем все файлы с суффиксом '_final.png'
@@ -127,6 +138,14 @@ def main():
     #     print(f"k={k}: Recall(HR)={r:.4f}, MRR={mrr:.4f}, NDCG={ndcg:.4f}, Coverage={cov:.4f}")
     for k, p, r, ndcg, mrr, cov in zip([10, 20, 100], precisions, recalls, ndcgs, mrrs, covs):
         print(f"k={k}: Recall(HR)={r:.6f}, NDCG={ndcg:.6f}, MRR={mrr:.6f}, Coverage={cov:.6f}")
+    tracker.log_final_metrics(
+        {k: {"recall": r, "ndcg": n, "mrr": m, "coverage": c}
+         for k, r, n, m, c in zip([10, 20, 100], recalls, ndcgs, mrrs, covs)},
+        split="global_temporal_70_10_20", mask_seen=True, seed=seed,
+        inference_total_sec=inf_time,
+        popularity_bias=recommendation_popularity(recs.tolist(), train_item_popularity, [10, 20, 100]),
+    )
+    tracker.close()
 
     # Пример рекомендаций
     if users:

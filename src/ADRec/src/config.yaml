@@ -1,6 +1,6 @@
 dataset: toys  # Dataset name: toys, beauty, steam, ml-1m
 log_file: logs/  # log dir path
-random_seed: 2025  # Random seed
+random_seed: 42  # Shared experiment seed; CLI --random_seed can override it
 max_len: 50 # The max length of sequence
 device: cuda:0  # Device selection: 'cpu', 'cuda:0', 'cuda:1'
 batch_size: 512  # Batch Size

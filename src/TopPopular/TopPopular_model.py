@@ -7,6 +7,11 @@ import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from evaluate_topk_dp import compute_all_metrics
 import random
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
 
 random.seed(42)
 np.random.seed(42)
@@ -101,12 +106,15 @@ def run_experiment(histories, popular_items, k_list):
     results = {'recalls': [], 'ndcgs': [], 'mrrs': [], 'covs': [], 'latencies': []}
     for k in k_list:
         preds_k = [rec[:k] for rec in preds_full]
-        (_, recalls, ndcgs, mrrs, covs) = compute_all_metrics(ground_truth, preds_k, [k], len(popular_items))
+        (_, recalls, ndcgs, mrrs, covs) = compute_all_metrics(
+            ground_truth, preds_k, [k], len(popular_items), candidate_items=popular_items
+        )
         results['recalls'].append(recalls[0])
         results['ndcgs'].append(ndcgs[0])
         results['mrrs'].append(mrrs[0])
         results['covs'].append(covs[0])
         results['latencies'].append(total_latency)
+    results['predictions'] = preds_full
     return results
 
 def print_results(title, topN_list, res):
@@ -145,3 +153,16 @@ if __name__ == "__main__":
 
     results = run_experiment(user_histories, popular_items, args.topk_list)
     print_results(f"TopPopular ({args.dataset})", args.topk_list, results)
+    dataset_name = {"baby": "amazon_Baby", "toys": "amazon_Toys_and_Games"}.get(args.dataset, args.dataset)
+    popularity = train_val_df['movieid'].value_counts().to_dict()
+    save_dataset_popularity(dataset_name, popularity)
+    tracker = ExperimentTracker(dataset_name, "TopPopular")
+    tracker.log_final_metrics(
+        {k: {"recall": results['recalls'][i], "ndcg": results['ndcgs'][i],
+             "mrr": results['mrrs'][i], "coverage": results['covs'][i]}
+         for i, k in enumerate(args.topk_list)},
+        split="global_temporal_70_10_20", mask_seen=True, seed=42,
+        inference_total_sec=results['latencies'][0],
+        popularity_bias=recommendation_popularity(results['predictions'], popularity, args.topk_list),
+    )
+    tracker.close()

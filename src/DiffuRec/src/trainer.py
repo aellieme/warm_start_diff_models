@@ -6,10 +6,15 @@ import numpy as np
 import copy
 import time
 import pickle
+import sys
+from pathlib import Path
 from tqdm import tqdm
 
 from evaluate_topk_dp import compute_all_metrics
 from plotting import TrainingPlotter
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from experiment_tracking import ExperimentTracker, recommendation_popularity
 
 def optimizers(model, args):
     if args.optimizer.lower() == 'adam':
@@ -106,12 +111,32 @@ def evaluate_and_print(model, data_loader, args, logger, description="evaluation
         logger.info(f"{description} inference time: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
         
         topN_list = args.metric_ks
-        n_items = args.item_num
-        prec, rec, ndcg, mrr, cov = compute_all_metrics(all_actual, all_predicted, topN_list, n_items)
+        candidate_items = args.coverage_candidate_items
+        prec, rec, ndcg, mrr, cov = compute_all_metrics(
+            all_actual,
+            all_predicted,
+            topN_list,
+            len(candidate_items),
+            candidate_items=candidate_items,
+        )
         print("\nTest results:")
         print(f"{'k':<5} {'recall':<12} {'ndcg':<12} {'mrr':<12} {'coverage':<12}")
         for i, k in enumerate(topN_list):
             print(f"{k:<5} {rec[i]:<12.6f} {ndcg[i]:<12.6f} {mrr[i]:<12.6f} {cov[i]:<12.6f}")
+        tracker = getattr(args, "experiment_tracker", None)
+        if tracker is not None and description.lower() == "test":
+            tracker.log_final_metrics(
+                {k: {"recall": rec[i], "ndcg": ndcg[i], "mrr": mrr[i], "coverage": cov[i]}
+                 for i, k in enumerate(topN_list)},
+                split="global_temporal_70_10_20",
+                mask_seen=True,
+                seed=args.random_seed,
+                inference_total_sec=inference_time,
+                popularity_bias=recommendation_popularity(
+                    all_predicted, getattr(args, "train_item_popularity", {}), topN_list
+                ),
+            )
+            tracker.close()
 
         if save_recs:
             import pandas as pd
@@ -123,6 +148,8 @@ def evaluate_and_print(model, data_loader, args, logger, description="evaluation
         logger.info(f"{description} inference: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms/user")
 
 def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint, args, logger):
+    tracker = ExperimentTracker(args.dataset, "DiffuRec")
+    args.experiment_tracker = tracker
     plotter = TrainingPlotter(
         save_dir=args.log_file + args.dataset,
         model_name=f"{args.description}_{time.strftime('%Y%m%d_%H%M%S')}",
@@ -166,6 +193,7 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
                 logger.info('[%d/%d] Loss: %.4f' % (index_temp, len(tra_data_loader), loss_all.item()))
         print("loss in epoch {}: {}".format(epoch_temp, loss_all.item()))
         plotter.update(epoch=epoch_temp, loss=loss_all.item())
+        tracker.log_epoch(epoch_temp, train_loss=loss_all.item())
         lr_scheduler.step()
 
         if epoch_temp != 0 and epoch_temp % args.eval_interval == 0:
@@ -193,9 +221,12 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
             
             # Вычисляем метрики
             topN_list = args.metric_ks
-            n_items = args.item_num   # общее количество айтемов (без учёта padding)
             precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
-                all_actual, all_predicted, topN_list, n_items
+                all_actual,
+                all_predicted,
+                topN_list,
+                len(args.coverage_candidate_items),
+                candidate_items=args.coverage_candidate_items,
             )
             
             # Формируем словарь для логирования (precision не нужен)
@@ -235,6 +266,12 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
             #     val_recall=recall10
             # )
             plotter.update(epoch=epoch_temp, val_recall=recall10)
+            idx10 = topN_list.index(10) if 10 in topN_list else 0
+            tracker.log_epoch(epoch_temp, **{
+                "val_recall@10": recalls[idx10],
+                "val_ndcg@10": ndcgs[idx10],
+                "val_mrr@10": mrrs[idx10],
+            })
             plotter.plot(save=True, show=False, suffix=f'_epoch{epoch_temp}')
             # Сохранять график каждые eval_interval для отслеживания прогресса
             # plotter.plot(save=True, show=False, suffix=f'_epoch{epoch_temp}')

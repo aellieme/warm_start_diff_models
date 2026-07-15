@@ -72,20 +72,25 @@ def ndcg_at_k(actual: list, predicted: list, k: int) -> float:
             ndcg_scores.append(0.0)
     return float(np.mean(ndcg_scores)) if ndcg_scores else 0.0
 
-def coverage(predicted: list, n_items: int) -> float:
+def coverage(predicted: list, n_items: int, candidate_items=None) -> float:
     """
     Coverage: количество уникальных рекомендованных предметов / общее количество предметов.
     predicted: список списков рекомендованных предметов (top-k для каждого пользователя)
     n_items: общее количество предметов в датасете
     """
+    allowed_items = set(candidate_items) if candidate_items is not None else None
     all_recommended = set()
     for user_recs in predicted:
         if hasattr(user_recs, 'tolist'):
             user_recs = user_recs.tolist()
-        all_recommended.update(user_recs)
-    return len(all_recommended) / n_items if n_items > 0 else 0.0
+        if allowed_items is None:
+            all_recommended.update(user_recs)
+        else:
+            all_recommended.update(item for item in user_recs if item in allowed_items)
+    denominator = len(allowed_items) if allowed_items is not None else n_items
+    return len(all_recommended) / denominator if denominator > 0 else 0.0
 
-def compute_all_metrics(actual: list, predicted: list, topN_list: list, n_items: int):
+def compute_all_metrics(actual: list, predicted: list, topN_list: list, n_items: int, candidate_items=None):
     """
     Вычисляет precision, recall, ndcg, mrr, coverage для каждого topN.
     Возвращает кортеж из пяти списков (по одному для каждой метрики),
@@ -102,5 +107,5 @@ def compute_all_metrics(actual: list, predicted: list, topN_list: list, n_items:
         ndcgs.append(ndcg_at_k(actual, predicted, k))
         mrrs.append(mrr(actual, predicted, k))
         predicted_k = [rec[:k] for rec in predicted]
-        covs.append(coverage(predicted_k, n_items))  
+        covs.append(coverage(predicted_k, n_items, candidate_items=candidate_items))
     return precisions, recalls, ndcgs, mrrs, covs

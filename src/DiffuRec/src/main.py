@@ -1,6 +1,12 @@
 import os
 import random
 import argparse
+import sys
+from pathlib import Path
+from collections import Counter
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from experiment_tracking import ExperimentTracker, save_dataset_popularity
 import torch
 import torch.backends.cudnn as cudnn
 import numpy as np
@@ -323,6 +329,13 @@ def main(args):
     tra_data_loader = tra_data.get_pytorch_dataloaders()
     val_data_loader = val_data.get_pytorch_dataloaders()
     test_data_loader = test_data.get_pytorch_dataloaders()
+    args.coverage_candidate_items = {
+        item for sequence in data_raw['train'].values() for item in sequence
+    }
+    args.train_item_popularity = Counter(
+        item for sequence in data_raw['train'].values() for item in sequence
+    )
+    save_dataset_popularity(args.dataset, args.train_item_popularity)
     
     diffu_rec = create_model_diffu(args)
     rec_diffu_joint_model = Att_Diffuse_model(diffu_rec, args)
@@ -337,6 +350,16 @@ def main(args):
                 merged_train[uid] = seq
         tra_data = Data_Train(merged_train, args)
         tra_loader = tra_data.get_pytorch_dataloaders()
+        args.coverage_candidate_items = {
+            item for sequence in merged_train.values() for item in sequence
+        }
+        args.coverage_candidate_items.update(
+            item for targets in data_raw['val'].values() for item in targets
+        )
+        args.train_item_popularity = Counter(
+            item for sequence in merged_train.values() for item in sequence
+        )
+        args.experiment_tracker = ExperimentTracker(args.dataset, "DiffuRec")
 
         diffu_rec = create_model_diffu(args)
         model = Att_Diffuse_model(diffu_rec, args).to(args.device)
@@ -360,6 +383,7 @@ def main(args):
                 total_loss += loss.item()
             avg_loss = total_loss / len(tra_loader)
             plotter.update(epoch=epoch, loss=avg_loss)
+            args.experiment_tracker.log_epoch(epoch, train_loss=avg_loss)
             if epoch % 10 == 0:
                 plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')
             print(f"Epoch {epoch:03d} loss {avg_loss:.4f}")

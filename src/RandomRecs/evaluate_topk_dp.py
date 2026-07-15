@@ -72,17 +72,21 @@ def ndcg_at_k(actual: list, predicted: list, k: int) -> float:
             ndcg_scores.append(0.0)
     return float(np.mean(ndcg_scores)) if ndcg_scores else 0.0
 
-def coverage(predicted: list, n_items: int, pad_token=-1) -> float:
+def coverage(predicted: list, n_items: int, pad_token=-1, candidate_items=None) -> float:
+    allowed_items = set(candidate_items) if candidate_items is not None else None
     all_recommended = set()
     for user_recs in predicted:
         if hasattr(user_recs, 'tolist'):
             user_recs = user_recs.tolist()
         for item in user_recs:
             if item != pad_token:
+                if allowed_items is not None and item not in allowed_items:
+                    continue
                 all_recommended.add(item)
-    return len(all_recommended) / n_items if n_items > 0 else 0.0
+    denominator = len(allowed_items) if allowed_items is not None else n_items
+    return len(all_recommended) / denominator if denominator > 0 else 0.0
 
-def compute_all_metrics(actual: list, predicted: list, topN_list: list, n_items: int):
+def compute_all_metrics(actual: list, predicted: list, topN_list: list, n_items: int, candidate_items=None):
     precisions = []
     recalls = []
     ndcgs = []
@@ -94,5 +98,5 @@ def compute_all_metrics(actual: list, predicted: list, topN_list: list, n_items:
         ndcgs.append(ndcg_at_k(actual, predicted, k))
         mrrs.append(mrr(actual, predicted, k))
         predicted_k = [rec[:k] for rec in predicted]
-        covs.append(coverage(predicted_k, n_items, pad_token=-1))
+        covs.append(coverage(predicted_k, n_items, pad_token=-1, candidate_items=candidate_items))
     return precisions, recalls, ndcgs, mrrs, covs

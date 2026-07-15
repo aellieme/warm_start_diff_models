@@ -6,6 +6,8 @@ import time
 import os
 import gzip
 import json
+import sys
+from pathlib import Path
 
 import hydra
 import numpy as np
@@ -27,6 +29,9 @@ from transformers import GPT2Config, GPT2LMHeadModel, BertConfig, BertModel
 
 from plotting import TrainingPlotter
 from pytorch_lightning.callbacks import Callback
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
 
 from datasets import CausalLMDataset, CausalLMPredictionDataset, PaddingCollateFn, MaskedLMDataset, MaskedLMPredictionDataset, LastEvaluationDataset
 # from datasets import CausalLMDataset, CausalLMPredictionDataset, PaddingCollateFn, MaskedLMDataset, MaskedLMPredictionDataset
@@ -55,6 +60,9 @@ def main(config):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(config.cuda_visible_devices)
 
     train, validation, test, item_count = prepare_data(config)
+    tracker = ExperimentTracker(config.dataset_name, str(config.model))
+    train_item_popularity = train.item_id.value_counts().to_dict()
+    save_dataset_popularity(config.dataset_name, train_item_popularity)
     
     if config.get('final_train', False):
         train_val = pd.concat([train, validation], ignore_index=True)
@@ -71,7 +79,7 @@ def main(config):
 
         model = create_model(config, item_count=item_count)
 
-        seqrec_module, trainer = final_training(model, train_loader, config)
+        seqrec_module, trainer = final_training(model, train_loader, config, tracker=tracker)
 
         torch.save(seqrec_module.model.state_dict(), "final_model.pt")
 
@@ -87,9 +95,9 @@ def main(config):
         print("Recommendations saved to recommendations.csv")
         
         test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
-        # Объединяем все данные для корректного coverage (полный каталог)
-        all_items_df = pd.concat([train, validation, test])
-        metrics = evaluate(recs, test_last, all_items_df, config, prefix='test_last')
+        # Финальная модель обучена на train+validation: это warm-start каталог.
+        train_val_items_df = pd.concat([train, validation], ignore_index=True)
+        metrics = evaluate(recs, test_last, train_val_items_df, config, prefix='test_last')
 
         # test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
         # metrics = evaluate(recs, test_last, train, config, prefix='test_last')
@@ -115,6 +123,21 @@ def main(config):
             mrr    = metrics.get(mrr_key, 0.0)
             cov    = metrics.get(cov_key, 0.0)
             print(f"{k:<5} {recall:<12.6f} {ndcg:<12.6f} {mrr:<12.6f} {cov:<12.6f}")
+        tracker.log_final_metrics(
+            {int(k): {
+                "recall": metrics.get(f"test_last_recall@{k}", 0.0),
+                "ndcg": metrics.get(f"test_last_ndcg@{k}", 0.0),
+                "mrr": metrics.get(f"test_last_mrr@{k}", 0.0),
+                "coverage": metrics.get(f"test_last_coverage@{k}", 0.0),
+            } for k in top_k_list},
+            split="global_temporal_70_10_20", mask_seen=True, seed=42,
+            inference_total_sec=inf_time,
+            popularity_bias=recommendation_popularity(
+                recs.groupby("user_id")["item_id"].apply(list).tolist(),
+                train_item_popularity, top_k_list,
+            ),
+        )
+        tracker.close()
         
         
         # print("Final test metrics:", metrics)
@@ -133,7 +156,7 @@ def main(config):
         train_loader, eval_loader = create_dataloaders(train, validation, config)
         model = create_model(config, item_count=item_count)
         start_time = time.time()
-        trainer, seqrec_module = training(model, train_loader, eval_loader, config)
+        trainer, seqrec_module = training(model, train_loader, eval_loader, config, tracker=tracker)
         training_time = time.time() - start_time
         print('training_time', training_time)
 
@@ -166,7 +189,14 @@ def main(config):
         if config.test_metrics:
             # metrics_baseline = evaluate(recs, test, train, config, prefix='test')
             test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
-            metrics_baseline = evaluate(recs, test_last, train, config, prefix='test_last')
+            train_val_items_df = pd.concat([train, validation], ignore_index=True)
+            metrics_baseline = evaluate(
+                recs,
+                test_last,
+                train_val_items_df,
+                config,
+                prefix='test_last',
+            )
         else:
             val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
             metrics_baseline = evaluate(recs, val_last, train, config, prefix='val_last')
@@ -181,6 +211,22 @@ def main(config):
         }
         summary_df = pd.DataFrame([summary])
         print(summary_df.to_string(index=False))
+        if config.test_metrics:
+            tracker.log_final_metrics(
+                {int(k): {
+                    "recall": metrics_baseline.get(f"test_last_recall@{k}", 0.0),
+                    "ndcg": metrics_baseline.get(f"test_last_ndcg@{k}", 0.0),
+                    "mrr": metrics_baseline.get(f"test_last_mrr@{k}", 0.0),
+                    "coverage": metrics_baseline.get(f"test_last_coverage@{k}", 0.0),
+                } for k in config.evaluator.top_k},
+                split="global_temporal_70_10_20", mask_seen=True, seed=42,
+                inference_total_sec=baseline_latency,
+                popularity_bias=recommendation_popularity(
+                    recs.groupby("user_id")["item_id"].apply(list).tolist(),
+                    train_item_popularity, config.evaluator.top_k,
+                ),
+            )
+        tracker.close()
 
         torch.save(seqrec_module.model.state_dict(), "best_model.pt")
 
@@ -326,9 +372,10 @@ def create_model(config, item_count, weights_path=None):
     return model
 
 class PlottingCallback(Callback):
-    def __init__(self, plotter, save_every=5):
+    def __init__(self, plotter, save_every=5, tracker=None):
         self.plotter = plotter
         self.save_every = save_every
+        self.tracker = tracker
     def on_validation_epoch_end(self, trainer, pl_module):
         epoch = trainer.current_epoch
         metrics = trainer.callback_metrics
@@ -350,11 +397,19 @@ class PlottingCallback(Callback):
             val_loss=val_loss,
             recall=val_recall
         )
+        if self.tracker is not None:
+            self.tracker.log_epoch(epoch, **{
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+                "val_recall@10": val_recall,
+                "val_ndcg@10": metrics.get("val_ndcg"),
+                "val_mrr@10": metrics.get("val_mrr"),
+            })
         if (epoch % self.save_every == 0) or (epoch == trainer.max_epochs - 1):
             self.plotter.plot(save=True, show=False)
 
 
-def training(model, train_loader, eval_loader, config):
+def training(model, train_loader, eval_loader, config, tracker=None):
 
     if config.model == 'GPT-2':
         seqrec_module = SeqRecHuggingface(model, **config['seqrec_module'])
@@ -377,7 +432,7 @@ def training(model, train_loader, eval_loader, config):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     save_dir = f"./log/{timestamp}"
     plotter = TrainingPlotter(save_dir, model_name=config.model, metrics=['loss', 'val_loss', 'recall'])
-    plotting_callback = PlottingCallback(plotter, save_every=5)
+    plotting_callback = PlottingCallback(plotter, save_every=5, tracker=tracker)
 
     callbacks.append(plotting_callback)   # добавляем в существующий список
     
@@ -491,7 +546,7 @@ def evaluate(recs, test, train,  config, prefix='test'):
 
     return metrics
 
-def final_training(model, train_loader, config):
+def final_training(model, train_loader, config, tracker=None):
     if config.model == 'GPT-2':
         seqrec_module = SeqRecHuggingface(model, **config['seqrec_module'])
     elif config.model == 'SASRec':
@@ -508,15 +563,18 @@ def final_training(model, train_loader, config):
                               metrics=['loss'])
 
     class FinalLossCallback(pl.Callback):
-        def __init__(self, plotter):
+        def __init__(self, plotter, tracker=None):
             self.plotter = plotter
+            self.tracker = tracker
         def on_train_epoch_end(self, trainer, pl_module):
             loss = trainer.callback_metrics.get('train_loss')
             if loss is not None:
                 self.plotter.update(epoch=trainer.current_epoch,
                                     loss=loss.item())
+                if self.tracker is not None:
+                    self.tracker.log_epoch(trainer.current_epoch, train_loss=loss.item())
 
-    loss_callback = FinalLossCallback(plotter)
+    loss_callback = FinalLossCallback(plotter, tracker=tracker)
     progress_bar = TQDMProgressBar(refresh_rate=100)
 
     trainer_params = dict(config.get('trainer_params', {}))

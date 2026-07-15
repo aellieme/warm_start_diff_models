@@ -178,10 +178,11 @@ def run_inference_pipeline(
 
     actual = [[t] for t in targets_list]
     predicted = recs.tolist()
+    candidate_items = set(history_data[itemid_col].unique().tolist())
     # topN_list = [topn]
     topN_list = [10, 20, topn] if topn >= 20 else [topn]
     precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
-        actual, predicted, topN_list, data_description['n_items']
+        actual, predicted, topN_list, len(candidate_items), candidate_items=candidate_items
     )
     inference_time = time.perf_counter() - start_time
     print(f"DEBUG: inference_time = {inference_time:.10f}")

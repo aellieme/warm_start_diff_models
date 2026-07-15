@@ -6,6 +6,11 @@ from tqdm.auto import tqdm
 from plotting import TrainingPlotter
 from data_utils import data_to_sequences
 import time
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from experiment_tracking import ExperimentTracker
 
 def random_neq(l, r, s, random_state):
     t = random_state.randint(l, r)
@@ -227,7 +232,7 @@ def validate_last_item(model, val_data, train_data, data_description, topn=10):
     mrr = np.mean(reciprocal_ranks) if reciprocal_ranks else 0.0
     return hr, mrr
 
-def build_final_sasrec_model(config, train_val_data, data_description, num_epochs=None):
+def build_final_sasrec_model(config, train_val_data, data_description, num_epochs=None, tracker=None):
     if num_epochs is None:
         num_epochs = config['num_epochs']
 
@@ -249,6 +254,8 @@ def build_final_sasrec_model(config, train_val_data, data_description, num_epoch
         )
         avg_loss = np.mean(epoch_loss)
         plotter.update(epoch=epoch, loss=avg_loss)
+        if tracker is not None:
+            tracker.log_epoch(epoch, train_loss=avg_loss)
 
         if (epoch % 5 == 0) or (epoch == num_epochs - 1):
             plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')

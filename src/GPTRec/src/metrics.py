@@ -57,11 +57,19 @@ class Evaluator:
         actual_list, predicted_list = self._prepare_lists(test, recs)
 
         # Общее количество предметов (для coverage)
-        n_items = train[self.col_item].nunique() if train is not None else 0
+        candidate_items = (
+            set(train[self.col_item].unique().tolist())
+            if train is not None
+            else set()
+        )
 
         # Вычисляем все метрики сразу для всех top_k
         precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
-            actual_list, predicted_list, self.top_k, n_items
+            actual_list,
+            predicted_list,
+            self.top_k,
+            len(candidate_items),
+            candidate_items=candidate_items,
         )
 
         result = {}

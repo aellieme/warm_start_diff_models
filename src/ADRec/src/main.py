@@ -35,6 +35,9 @@ def main():
             else:
                 combined = data_raw['train_dict'][uid]
             train_combined.append(combined)
+        args.coverage_candidate_items = {
+            item for sequence in train_combined for item in sequence
+        }
         # создаём Data_Train и Data_Test (val не нужен)
         tra_data = Data_Train(train_combined, args)
         test_data = Data_Test(data_raw['test_seq'], [[] for _ in data_raw['test_tgt']], data_raw['test_tgt'], args)

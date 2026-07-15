@@ -8,6 +8,11 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from evaluate_topk_dp import compute_all_metrics
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
 
 random.seed(42)
 np.random.seed(42)
@@ -99,12 +104,15 @@ def run_experiment(histories, catalog, k_list, rng):
     results = {'recalls': [], 'ndcgs': [], 'mrrs': [], 'covs': [], 'latencies': []}
     for k in k_list:
         preds_k = [rec[:k] for rec in preds_full]
-        (_, recalls, ndcgs, mrrs, covs) = compute_all_metrics(ground_truth, preds_k, [k], len(catalog))
+        (_, recalls, ndcgs, mrrs, covs) = compute_all_metrics(
+            ground_truth, preds_k, [k], len(catalog), candidate_items=catalog
+        )
         results['recalls'].append(recalls[0])
         results['ndcgs'].append(ndcgs[0])
         results['mrrs'].append(mrrs[0])
         results['covs'].append(covs[0])
         results['latencies'].append(total_latency)
+    results['predictions'] = preds_full
     return results
 
 def print_results(title, topN_list, res):
@@ -129,7 +137,9 @@ if __name__ == "__main__":
         print(f"Loading Amazon {args.dataset}...")
         data = load_amazon(args.dataset, data_dir='../data/amazon')
 
-    train_df, val_df, test_df, item_catalog = global_temporal_split(data)
+    train_df, val_df, test_df, _ = global_temporal_split(data)
+    train_val_df = pd.concat([train_df, val_df], ignore_index=True)
+    item_catalog = train_val_df['movieid'].unique().tolist()
 
     history_baseline = pd.concat([train_df, val_df]).groupby('userid')['movieid'].apply(list).to_dict()
 
@@ -141,3 +151,16 @@ if __name__ == "__main__":
     rng = np.random.default_rng(42)
     results = run_experiment(user_histories, item_catalog, args.topk_list, rng)
     print_results(f"Random ({args.dataset})", args.topk_list, results)
+    dataset_name = {"baby": "amazon_Baby", "toys": "amazon_Toys_and_Games"}.get(args.dataset, args.dataset)
+    popularity = train_val_df['movieid'].value_counts().to_dict()
+    save_dataset_popularity(dataset_name, popularity)
+    tracker = ExperimentTracker(dataset_name, "RandomRecs")
+    tracker.log_final_metrics(
+        {k: {"recall": results['recalls'][i], "ndcg": results['ndcgs'][i],
+             "mrr": results['mrrs'][i], "coverage": results['covs'][i]}
+         for i, k in enumerate(args.topk_list)},
+        split="global_temporal_70_10_20", mask_seen=True, seed=42,
+        inference_total_sec=results['latencies'][0],
+        popularity_bias=recommendation_popularity(results['predictions'], popularity, args.topk_list),
+    )
+    tracker.close()
