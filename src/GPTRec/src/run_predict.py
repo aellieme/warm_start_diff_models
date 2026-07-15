@@ -4,6 +4,8 @@ Predict and evaluate with trained model.
 
 import time
 import os
+import sys
+from pathlib import Path
 
 import torch
 import hydra
@@ -16,6 +18,9 @@ import pytorch_lightning as pl
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import TQDMProgressBar
 from modules import SeqRecHuggingface
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from experiment_tools.experiment_tracking import checkpoint_path
 from run_train_predict import prepare_data, create_model, predict, evaluate
 
 
@@ -43,7 +48,15 @@ def main(config):
     test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
 
     model = create_model(config, item_count=item_count)
-    state_dict = torch.load(config.model_checkpoint, map_location='cpu')
+    model_checkpoint = Path(config.model_checkpoint)
+    if not model_checkpoint.exists():
+        model_checkpoint = checkpoint_path(
+            "GPTRec", config.dataset_name, int(config.dataset.max_length), 42
+        )
+    if not model_checkpoint.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {model_checkpoint}")
+    print(f"Loading model from {model_checkpoint}")
+    state_dict = torch.load(model_checkpoint, map_location='cpu')
     model.load_state_dict(state_dict)
 
     seqrec_module = SeqRecHuggingface(model, **config.seqrec_module)

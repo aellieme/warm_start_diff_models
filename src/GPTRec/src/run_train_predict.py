@@ -31,7 +31,9 @@ from plotting import TrainingPlotter
 from pytorch_lightning.callbacks import Callback
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
+from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path,
+                                                  recommendation_popularity, save_dataset_popularity,
+                                                  save_torch_checkpoint)
 
 from datasets import CausalLMDataset, CausalLMPredictionDataset, PaddingCollateFn, MaskedLMDataset, MaskedLMPredictionDataset, LastEvaluationDataset
 # from datasets import CausalLMDataset, CausalLMPredictionDataset, PaddingCollateFn, MaskedLMDataset, MaskedLMPredictionDataset
@@ -81,7 +83,12 @@ def main(config):
 
         seqrec_module, trainer = final_training(model, train_loader, config, tracker=tracker)
 
-        torch.save(seqrec_module.model.state_dict(), "final_model.pt")
+        model_path = checkpoint_path(
+            "GPTRec", config.dataset_name, int(config.dataset.max_length), 42
+        )
+        save_torch_checkpoint(seqrec_module.model.state_dict(), model_path)
+        OmegaConf.save(config, model_path.with_suffix(".yaml"))
+        print(f"Final model saved to {model_path}")
 
         history_before_test = pd.concat([train, validation], ignore_index=True)
         history_before_test = add_time_idx(history_before_test)
@@ -132,6 +139,7 @@ def main(config):
             } for k in top_k_list},
             split="global_temporal_70_10_20", mask_seen=True, seed=42,
             inference_total_sec=inf_time,
+            n_users=int(recs["user_id"].nunique()), maxlen=int(config.dataset.max_length),
             popularity_bias=recommendation_popularity(
                 recs.groupby("user_id")["item_id"].apply(list).tolist(),
                 train_item_popularity, top_k_list,
@@ -221,6 +229,7 @@ def main(config):
                 } for k in config.evaluator.top_k},
                 split="global_temporal_70_10_20", mask_seen=True, seed=42,
                 inference_total_sec=baseline_latency,
+                n_users=int(recs["user_id"].nunique()), maxlen=int(config.dataset.max_length),
                 popularity_bias=recommendation_popularity(
                     recs.groupby("user_id")["item_id"].apply(list).tolist(),
                     train_item_popularity, config.evaluator.top_k,
@@ -228,7 +237,12 @@ def main(config):
             )
         tracker.close()
 
-        torch.save(seqrec_module.model.state_dict(), "best_model.pt")
+        model_path = checkpoint_path(
+            "GPTRec", config.dataset_name, int(config.dataset.max_length), 42
+        )
+        save_torch_checkpoint(seqrec_module.model.state_dict(), model_path)
+        OmegaConf.save(config, model_path.with_suffix(".yaml"))
+        print(f"Best model saved to {model_path}")
 
 
 def load_amazon(dataset_name, data_dir='../data/amazon'):
@@ -573,6 +587,12 @@ def final_training(model, train_loader, config, tracker=None):
                                     loss=loss.item())
                 if self.tracker is not None:
                     self.tracker.log_epoch(trainer.current_epoch, train_loss=loss.item())
+                    if checkpoint_due(trainer.current_epoch, trainer.max_epochs):
+                        path = checkpoint_path(
+                            "GPTRec", config.dataset_name, int(config.dataset.max_length), 42
+                        )
+                        save_torch_checkpoint(pl_module.model.state_dict(), path)
+                        OmegaConf.save(config, path.with_suffix(".yaml"))
 
     loss_callback = FinalLossCallback(plotter, tracker=tracker)
     progress_bar = TQDMProgressBar(refresh_rate=100)

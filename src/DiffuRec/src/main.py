@@ -6,7 +6,8 @@ from pathlib import Path
 from collections import Counter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from experiment_tracking import ExperimentTracker, save_dataset_popularity
+from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path,
+                                                  save_dataset_popularity, save_torch_checkpoint)
 import torch
 import torch.backends.cudnn as cudnn
 import numpy as np
@@ -37,7 +38,7 @@ parser.add_argument('--dataset', type=str, default='ml-1m',
 # parser.add_argument('--dataset', default='ml-1m', help='Dataset name: toys, amazon_beauty, steam, ml-1m')
 parser.add_argument('--log_file', default='log/', help='log dir path')
 parser.add_argument('--final_train', action='store_true', help='Train on train+val without validation')
-parser.add_argument('--random_seed', type=int, default=1997, help='Random seed')  
+parser.add_argument('--random_seed', type=int, default=42, help='Random seed')
 parser.add_argument('--max_len', type=int, default=50, help='The max length of sequence')
 parser.add_argument('--device', type=str, default='cuda', choices=['cpu', 'cuda'])
 parser.add_argument('--num_gpu', type=int, default=1, help='Number of GPU')
@@ -384,14 +385,20 @@ def main(args):
             avg_loss = total_loss / len(tra_loader)
             plotter.update(epoch=epoch, loss=avg_loss)
             args.experiment_tracker.log_epoch(epoch, train_loss=avg_loss)
+            if checkpoint_due(epoch - 1, args.epochs):
+                model_path = checkpoint_path("DiffuRec", args.dataset, args.max_len, args.random_seed)
+                saved_args = {key: value for key, value in vars(args).items() if key != "experiment_tracker"}
+                save_torch_checkpoint({"model_state_dict": model.state_dict(), "args": saved_args}, model_path)
             if epoch % 10 == 0:
                 plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')
             print(f"Epoch {epoch:03d} loss {avg_loss:.4f}")
         plotter.plot(save=True, show=False, suffix='_final')
         
         # Сохраняем модель
-        os.makedirs('best_models', exist_ok=True)
-        torch.save(model.state_dict(), f'best_models/final_model_{args.dataset}.pt')
+        model_path = checkpoint_path("DiffuRec", args.dataset, args.max_len, args.random_seed)
+        saved_args = {key: value for key, value in vars(args).items() if key != "experiment_tracker"}
+        save_torch_checkpoint({"model_state_dict": model.state_dict(), "args": saved_args}, model_path)
+        print(f"Final model saved to {model_path}")
         
         # Оценка на тесте
         evaluate_and_print(model, test_data_loader, args, logger, description="test", save_recs=True)

@@ -5,8 +5,12 @@ import logging
 from argparse import Namespace
 import pandas as pd
 import random   
+import sys
+from pathlib import Path
 
-from main import load_and_split_gts, item_num_create, fix_random_seed_as
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from experiment_tools.experiment_tracking import checkpoint_path
+from main import args as cli_args, load_and_split_gts, item_num_create, fix_random_seed_as
 from model import create_model_diffu, Att_Diffuse_model
 from utils import Data_Test
 from trainer import evaluate_and_print
@@ -49,16 +53,22 @@ def recommend_for_user(model, history_seq, target_item, args, topk=10):
     return topk_indices[0].cpu().tolist()
 
 
-list_of_files = glob.glob('best_models/model_*.pt')
-if not list_of_files:
-    raise FileNotFoundError("No model found in 'best_models' directory. Train a model first.")
-
-latest_model_path = max(list_of_files, key=os.path.getctime)
+latest_model_path = Path(os.environ.get(
+    "MODEL_CHECKPOINT",
+    checkpoint_path("DiffuRec", cli_args.dataset, cli_args.max_len, cli_args.random_seed),
+))
+if not latest_model_path.exists():
+    raise FileNotFoundError(f"Checkpoint not found: {latest_model_path}")
 print(f"Loading model from {latest_model_path}")
 
-checkpoint = torch.load(latest_model_path, map_location='cuda' if torch.cuda.is_available() else 'cpu')
+checkpoint = torch.load(
+    latest_model_path,
+    map_location='cuda' if torch.cuda.is_available() else 'cpu',
+    weights_only=False,
+)
 args_dict = checkpoint['args']
 args = Namespace(**args_dict)
+args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 fix_random_seed_as(args.random_seed)
 # data_raw = load_and_split_gts(quantiles=(0.7, 0.8, 0.9))
@@ -144,7 +154,7 @@ else:
 # else:
 #     print("Нет пользователей для демонстрации")
 
-params_json_path = latest_model_path.replace('.pt', '.json').replace('model_', 'params_')
+params_json_path = latest_model_path.with_suffix('.json')
 if os.path.exists(params_json_path):
     import json
     with open(params_json_path, 'r') as f:

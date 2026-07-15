@@ -10,7 +10,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from experiment_tracking import ExperimentTracker
+from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path,
+                                                  save_torch_checkpoint)
 
 def random_neq(l, r, s, random_state):
     t = random_state.randint(l, r)
@@ -232,7 +233,9 @@ def validate_last_item(model, val_data, train_data, data_description, topn=10):
     mrr = np.mean(reciprocal_ranks) if reciprocal_ranks else 0.0
     return hr, mrr
 
-def build_final_sasrec_model(config, train_val_data, data_description, num_epochs=None, tracker=None):
+def build_final_sasrec_model(
+    config, train_val_data, data_description, num_epochs=None, tracker=None, data_index=None
+):
     if num_epochs is None:
         num_epochs = config['num_epochs']
 
@@ -256,6 +259,18 @@ def build_final_sasrec_model(config, train_val_data, data_description, num_epoch
         plotter.update(epoch=epoch, loss=avg_loss)
         if tracker is not None:
             tracker.log_epoch(epoch, train_loss=avg_loss)
+            if checkpoint_due(epoch, num_epochs):
+                path = checkpoint_path(
+                    "SASRec", tracker.dataset, config["maxlen"], config.get("manual_seed", 42)
+                )
+                save_torch_checkpoint({
+                    "model_state_dict": model.state_dict(),
+                    "config": config,
+                    "data_description": data_description,
+                    "data_index": data_index,
+                    "item_num": model.item_num,
+                    "pad_token": model.pad_token,
+                }, path)
 
         if (epoch % 5 == 0) or (epoch == num_epochs - 1):
             plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')

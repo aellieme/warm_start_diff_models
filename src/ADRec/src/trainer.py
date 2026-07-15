@@ -17,8 +17,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from experiment_tracking import (ExperimentTracker, popularity_from_sequences,
+from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path, popularity_from_sequences,
                                  recommendation_popularity, save_dataset_popularity)
+from experiment_tools.experiment_tracking import save_torch_checkpoint
 
 def downvote_seen_items(scores, hist_pad):
     for i in range(scores.shape[0]):
@@ -194,6 +195,12 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
         avg_loss = sum(ce_losses) / len(ce_losses)
         plotter.update(epoch=epoch_temp, loss=avg_loss)
         tracker.log_epoch(epoch_temp, train_loss=avg_loss, diffusion_loss=sum(dif_losses) / len(dif_losses))
+        if checkpoint_due(epoch_temp, epochs):
+            periodic_path = checkpoint_path(
+                "ADRec", args.dataset, getattr(args, "max_len", None), args.random_seed, ".pth"
+            )
+            saved_args = {key: value for key, value in vars(args).items() if key != "experiment_tracker"}
+            save_torch_checkpoint({"model_state_dict": model_joint.state_dict(), "args": saved_args}, periodic_path)
         lr_scheduler.step()
         # plotter.plot(save=True, show=False, suffix=f'_epoch{epoch_temp}')
 
@@ -256,10 +263,9 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
     if best_model is None:
         best_model = copy.deepcopy(model_joint)
 
-    saved_dir = os.path.join('saved', args.model, args.dataset)
-    if not os.path.exists(saved_dir):
-        os.makedirs(saved_dir)
-    output_path = os.path.join(saved_dir, str(train_time) + args.description + '.pth')
+    output_path = checkpoint_path(
+        "ADRec", args.dataset, getattr(args, "max_len", None), args.random_seed, ".pth"
+    )
     # Специальное сохранение для pretrain модели
     if args.model == 'pretrain':
         pretrain_saved_dir = os.path.join('saved', 'pretrain', args.dataset)
@@ -267,7 +273,9 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
         pretrain_output_path = os.path.join(pretrain_saved_dir, 'pretrain.pth')
         torch.save(best_model.state_dict(), pretrain_output_path)
         print(f"Pretrained embeddings saved to {pretrain_output_path}")
-    torch.save(best_model.state_dict(), str(output_path))
+    saved_args = {key: value for key, value in vars(args).items() if key != "experiment_tracker"}
+    save_torch_checkpoint({"model_state_dict": best_model.state_dict(), "args": saved_args}, output_path)
+    print(f"Final model saved to {output_path}")
     logger.info(best_metrics_dict)
     logger.info(best_epoch)
     # all_actual = []
@@ -322,6 +330,8 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
             mask_seen=bool(getattr(args, "mask_seen", False)),
             seed=getattr(args, "random_seed", 42),
             inference_total_sec=test_elapsed,
+            n_users=len(all_actual),
+            maxlen=args.max_len,
             popularity_bias=recommendation_popularity(all_predicted, args.train_item_popularity, metric_ks),
         )
 

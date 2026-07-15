@@ -108,7 +108,8 @@ def save_sasrec_model(model, config, data_description, data_index, filepath):
         'pad_token': model.pad_token,
         'item_num': model.item_num
     }
-    torch.save(checkpoint, filepath)
+    from experiment_tools.experiment_tracking import save_torch_checkpoint
+    save_torch_checkpoint(checkpoint, filepath)
     print(f"Model saved to {filepath}")
 
 

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
+from experiment_tools.experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
 
 random.seed(42)
 np.random.seed(42)
@@ -161,6 +161,7 @@ if __name__ == "__main__":
          for i, k in enumerate(args.topk_list)},
         split="global_temporal_70_10_20", mask_seen=True, seed=42,
         inference_total_sec=results['latencies'][0],
+        n_users=len(results['predictions']), maxlen=None,
         popularity_bias=recommendation_popularity(results['predictions'], popularity, args.topk_list),
     )
     tracker.close()

@@ -10,6 +10,11 @@ from load_evaluate_pipeline import (
 import random
 import numpy as np
 import argparse 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from experiment_tools.experiment_tracking import checkpoint_path
 
 seed = 42
 random.seed(seed)
@@ -22,6 +27,8 @@ def main():
     parser.add_argument('--dataset', type=str, default='ml-1m',
                         choices=['ml-1m', 'amazon_Baby', 'amazon_Beauty','amazon_Toys_and_Games',
                                  'amazon_Sports_and_Outdoors' ],)
+    parser.add_argument('--maxlen', type=int, default=50)
+    parser.add_argument('--checkpoint', type=Path, default=None)
     args = parser.parse_args()
     (train_data, val_data, test_data, test_examples,
      data_index, data_description, userid_col, itemid_col, time_col,
@@ -29,8 +36,10 @@ def main():
     # (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict, _) = prepare_data_and_description()
     #  Загрузка модели 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model_path = get_latest_model_path()
-    print(f"Loading latest model from {model_path}")
+    model_path = args.checkpoint or checkpoint_path("SASRec", args.dataset, args.maxlen, seed)
+    if not model_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {model_path}")
+    print(f"Loading model from {model_path}")
     model, config, _, _ = load_sasrec_model(model_path, device=device)
     print(f"Loaded config: {config}")
 

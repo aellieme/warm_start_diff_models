@@ -45,7 +45,7 @@ All models are implemented as independent subprojects with their own `main.py` a
 2. **Install dependencies**  
    The recommended way is to use `pip` with the provided requirements (you may need to create a virtual environment first):
    ```bash
-   pip install -r requirements.txt
+   pip install -r src/requirements.txt
    ```
    Key packages: `torch`, `numpy`, `pandas`, `scipy`, `numba`, `optuna`, `polara`, `hydra-core`, `pytorch_lightning`, `clearml`, `wheel`.
 
@@ -66,6 +66,8 @@ All models are implemented as independent subprojects with their own `main.py` a
 
 Each model is launched from its own subdirectory inside `src/`.  
 All commands assume you are currently in the root of the repository and change directory appropriately.
+
+For a complete Google Colab workflow (setup, all models, TensorBoard, plots, result tables, and ZIP download), open the root-level [`demo.ipynb`](demo.ipynb).
 
 ### Common command line arguments (unified across models)
 
@@ -184,23 +186,37 @@ python RandomRecsModel.py --dataset baby
 
 ## Viewing results
 
-After training any model, the final training curves (loss, Recall@K, NDCG@K vs epoch) are saved as PNG images.  
-To display the most recent one automatically, you can use the following Python snippet (works inside a notebook or script):
+
+Before the first launch, install the dependencies for the graphs: `python -m pip install -r src/visualization_requirements.txt`. Then run the training with the usual commands above — no additional flag is needed, the graphs are built automatically.
+
+The results of each local run are stored in `experiment_results/logs/<dataset>/<model>/<run_id>/`. Depending on the training mode, `plots/` contains `loss.png`, `validation_ranking.png`, `metrics_by_k.png`, and `popularity_bias.png`. Reusable model checkpoints are stored in `experiment_results/checkpoints/<model>/`.
+
+To view the loss and ranking metrics of all launches in TensorBoard, run `tensorboard --logdir experiment_results/logs` from the root of the project and open the address shown in the terminal.
+
+### Automatic result tables
+
+Each completed run automatically updates `experiment_results/results_registry.csv`; no metrics need to be copied by hand. To keep logs, tables, and checkpoints between Google Colab sessions, mount Google Drive and set the output directory before training:
 
 ```python
-import os, glob
-from IPython.display import Image, display
+from google.colab import drive
+drive.mount('/content/drive')
 
-log_dir = './log/'
-files = glob.glob(os.path.join(log_dir, '**', '*_training_curves_final.png'), recursive=True)
-if files:
-    latest = max(files, key=os.path.getmtime)
-    display(Image(filename=latest))
-else:
-    print("No final curves found.")
+import os
+os.environ['EXPERIMENT_OUTPUT_DIR'] = '/content/drive/MyDrive/experiment_results/logs'
 ```
 
-Metrics are also printed to the console at the end of training and saved in log files.
+After any number of model runs, generate all 9 tables (3 datasets × K = 10, 20, 100) with `python src/experiment_tools/generate_result_tables.py`. The files `experimental_results.md` and `experimental_results.xlsx` will be saved in `MyDrive/experiment_results/reports/tables/`; missing experiments are shown as `—`.
+
+If Google Drive was not used, download the local Colab results before disconnecting the runtime:
+
+```python
+!python src/experiment_tools/package_experiment_results.py --output /content/experiment_results.zip
+
+from google.colab import files
+files.download("experiment_results.zip")
+```
+
+Extract the downloaded archive into the root of the local project in VS Code. It creates one local `experiment_results/` folder containing logs, tables, and checkpoints.
 
 ---
 

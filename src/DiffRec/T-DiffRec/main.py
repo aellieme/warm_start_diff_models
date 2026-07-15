@@ -28,7 +28,9 @@ from copy import deepcopy
 from plotting import TrainingPlotter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
+from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path,
+                                                  recommendation_popularity, save_dataset_popularity,
+                                                  save_torch_checkpoint)
 
 import random
 # random_seed = 1
@@ -165,6 +167,17 @@ if __name__ == '__main__':
     out_dims = eval(args.dims) + [n_item]
     in_dims = out_dims[::-1]
     model = DNN(in_dims, out_dims, args.emb_size, time_type="cat", norm=args.norm).to(device)
+    checkpoint_payload = lambda: {
+        "model_state_dict": model.state_dict(),
+        "model_kwargs": {
+            "in_dims": in_dims,
+            "out_dims": out_dims,
+            "emb_size": args.emb_size,
+            "time_type": "cat",
+            "norm": args.norm,
+        },
+        "args": vars(args),
+    }
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     print("models ready.")
@@ -305,6 +318,9 @@ if __name__ == '__main__':
         avg_loss = (total_loss / len(train_loader)).item()
         plotter.update(epoch=epoch, loss=avg_loss)
         tracker.log_epoch(epoch, train_loss=avg_loss)
+        if checkpoint_due(epoch - 1, args.epochs):
+            periodic_path = checkpoint_path("T-DiffRec", args.dataset, seed=random_seed, extension=".pth")
+            save_torch_checkpoint(checkpoint_payload(), periodic_path)
         
         # Валидация и сохранение модели только при обычном обучении (не final_train)
         if not args.final_train and epoch % 5 == 0:
@@ -364,14 +380,13 @@ if __name__ == '__main__':
              for i, k in enumerate(eval(args.topN))},
             split="global_temporal_70_10_20", mask_seen=True,
             seed=getattr(args, "random_seed", 42), inference_total_sec=inf_time,
+            n_users=len(test_preds), maxlen=None,
             popularity_bias=recommendation_popularity(test_preds, train_item_popularity, eval(args.topN)),
         )
         
         # Сохраняем финальную модель
-        if not os.path.exists(args.save_path):
-            os.makedirs(args.save_path)
-        final_model_path = f"{args.save_path}/final_model_{args.dataset}.pth"
-        torch.save(model, final_model_path)
+        final_model_path = checkpoint_path("T-DiffRec", args.dataset, seed=random_seed, extension=".pth")
+        save_torch_checkpoint(checkpoint_payload(), final_model_path)
         print(f"Final model saved to {final_model_path}")
         plotter.plot(save=True, show=False, suffix='_final')
         tracker.close()
@@ -386,7 +401,7 @@ if __name__ == '__main__':
                  "mrr": best_test_results[3][i], "coverage": best_test_results[4][i]}
              for i, k in enumerate(eval(args.topN))},
             split="global_temporal_70_10_20", mask_seen=True,
-            seed=getattr(args, "random_seed", 42),
+            seed=getattr(args, "random_seed", 42), maxlen=None,
         )
     tracker.close()
     print_results(None, best_results, best_test_results)   

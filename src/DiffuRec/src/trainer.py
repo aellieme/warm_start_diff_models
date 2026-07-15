@@ -14,7 +14,7 @@ from evaluate_topk_dp import compute_all_metrics
 from plotting import TrainingPlotter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from experiment_tracking import ExperimentTracker, recommendation_popularity
+from experiment_tools.experiment_tracking import ExperimentTracker, recommendation_popularity
 
 def optimizers(model, args):
     if args.optimizer.lower() == 'adam':
@@ -132,6 +132,8 @@ def evaluate_and_print(model, data_loader, args, logger, description="evaluation
                 mask_seen=True,
                 seed=args.random_seed,
                 inference_total_sec=inference_time,
+                n_users=num_users,
+                maxlen=args.max_len,
                 popularity_bias=recommendation_popularity(
                     all_predicted, getattr(args, "train_item_popularity", {}), topN_list
                 ),

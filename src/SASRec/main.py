@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
+from experiment_tools.experiment_tracking import ExperimentTracker, checkpoint_path, recommendation_popularity, save_dataset_popularity
 
 seed = 42
 random.seed(seed)
@@ -92,7 +92,7 @@ def main():
     save_dataset_popularity(args.dataset, train_item_popularity)
     model = build_final_sasrec_model(
         config, train_val_data, data_description,
-        num_epochs=config['num_epochs'], tracker=tracker,
+        num_epochs=config['num_epochs'], tracker=tracker, data_index=data_index,
     )
 
     log_dir = './log/'
@@ -111,8 +111,7 @@ def main():
         print("График не найден. Проверьте папку ./log/")
 
     # Сохранение модели
-    model_filename = generate_model_name(config, suffix='trainval80')
-    model_path = get_model_path(model_filename)
+    model_path = checkpoint_path("SASRec", args.dataset, config["maxlen"], seed)
     save_sasrec_model(model, config, data_description, data_index, model_path)
     print(f"Model saved to {model_path}")
 
@@ -143,6 +142,7 @@ def main():
          for k, r, n, m, c in zip([10, 20, 100], recalls, ndcgs, mrrs, covs)},
         split="global_temporal_70_10_20", mask_seen=True, seed=seed,
         inference_total_sec=inf_time,
+        n_users=len(users), maxlen=config['maxlen'],
         popularity_bias=recommendation_popularity(recs.tolist(), train_item_popularity, [10, 20, 100]),
     )
     tracker.close()

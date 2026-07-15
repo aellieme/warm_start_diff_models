@@ -11,6 +11,8 @@ import copy
 from tqdm import tqdm
 import scipy.sparse as sp
 import traceback
+import sys
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -26,6 +28,9 @@ from models.DNN import DNN
 import evaluate_topk_dp as eval_metrics
 import data_utils
 from copy import deepcopy
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from experiment_tools.experiment_tracking import checkpoint_path
 
 import random
 random_seed = 42
@@ -49,6 +54,7 @@ parser.add_argument('--tst_w_val', action='store_true', help='test with validati
 parser.add_argument('--cuda', action='store_true', help='use CUDA')
 parser.add_argument('--gpu', type=str, default='0', help='gpu card ID')
 parser.add_argument('--log_name', type=str, default='log', help='the log name')
+parser.add_argument('--checkpoint', type=Path, default=None)
 
 parser.add_argument('--w_min', type=float, default=0.1, help='the minimum weight for interactions')
 parser.add_argument('--w_max', type=float, default=1., help='the maximum weight for interactions')
@@ -133,17 +139,17 @@ diffusion = gd.GaussianDiffusion(mean_type, args.noise_schedule, \
 diffusion.to(device)
 
 ### CREATE DNN ###
-model_path = "../checkpoints/T-DiffRec/"
-if args.dataset == "amazon-book_clean":
-    model_name = "amazon-book_clean_lr1e-05_wd0.0_bs400_dims[1000]_emb10_x0_steps10_scale0.0005_min0.001_max0.005_sample0_reweight1_wmin0.1_wmax1.0_log.pth"
-elif args.dataset == "yelp_clean":
-    model_name = "yelp_clean_lr1e-05_wd0.0_bs400_dims[1000]_emb10_x0_steps5_scale0.005_min0.001_max0.01_sample0_reweight1_wmin0.5_wmax1.0_log.pth"
-elif args.dataset =="ml-1m":
-    model_name = "ml-1m_lr0.0002_wd0.0_bs400_dims[1000]_emb10_x0_steps100_scale0.1_min0.0001_max0.02_sample100_reweightTrue_wmin0.1_wmax1.0_log.pth"
-    # model_name = "ml-1m_lr0.0001_wd0.0_bs400_dims[1000]_emb10_x0_steps100_scale0.1_min0.0001_max0.02_sample0_reweightTrue_wmin0.1_wmax1.0_log.pth"
-    model_path = "saved_models/"
-# model = torch.load(model_path + model_name).to(device)
-model = torch.load(model_path + model_name, weights_only=False).to(device)
+model_path = args.checkpoint or checkpoint_path(
+    "T-DiffRec", args.dataset, seed=random_seed, extension=".pth"
+)
+if not model_path.exists():
+    raise FileNotFoundError(f"Checkpoint not found: {model_path}")
+payload = torch.load(model_path, map_location=device, weights_only=False)
+if isinstance(payload, dict) and "model_state_dict" in payload:
+    model = DNN(**payload["model_kwargs"]).to(device)
+    model.load_state_dict(payload["model_state_dict"])
+else:  # Backward compatibility with older whole-model .pth files.
+    model = payload.to(device)
 
 print("models ready.")
 
