@@ -4,6 +4,7 @@ from logger import make_logger
 import torch
 import pprint
 import pickle
+from collections import Counter
 from trainer import model_train, LSHT_inference,load_data,choose_model,item_num_create
 from utils import *
 # import yaml
@@ -38,6 +39,9 @@ def main():
         args.coverage_candidate_items = {
             item for sequence in train_combined for item in sequence
         }
+        args.train_item_popularity = dict(
+            Counter(item for sequence in train_combined for item in sequence)
+        )
         # создаём Data_Train и Data_Test (val не нужен)
         tra_data = Data_Train(train_combined, args)
         test_data = Data_Test(data_raw['test_seq'], [[] for _ in data_raw['test_tgt']], data_raw['test_tgt'], args)
