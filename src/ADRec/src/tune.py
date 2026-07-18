@@ -9,7 +9,8 @@ import argparse
 from argparse import Namespace
 from functools import partial
 
-from utils import load_and_split_gts, fix_random_seed_as, Data_Train, Data_Val, Data_Test
+from utils import (Data_Test, Data_Train, Data_Val, build_final_train_sequences,
+                   fix_random_seed_as, load_and_split_gts)
 from trainer import item_num_create, choose_model, model_train, evaluate_and_print
 
 logging.basicConfig(level=logging.INFO)
@@ -169,14 +170,8 @@ def main():
         final_args.freeze_emb = False
     
 
-    # Объединяем train и val_seq+val_tgt
-    train_combined = []
-    for uid in sorted(data_raw['train_dict'].keys()):
-        if uid in data_raw['val_seq_dict'] and uid in data_raw['val_tgt_dict']:
-            combined_seq = (data_raw['train_dict'][uid] +
-                            data_raw['val_seq_dict'][uid] +
-                            [data_raw['val_tgt_dict'][uid]])
-            train_combined.append(combined_seq)
+    # val_seq_dict уже содержит train-историю; добавляем только val target.
+    train_combined = build_final_train_sequences(data_raw)
 
     tra_data_final = Data_Train(train_combined, final_args)
     test_data_final = Data_Test(data_raw['test_seq'],

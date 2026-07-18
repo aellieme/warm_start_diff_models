@@ -286,7 +286,8 @@ if __name__ == '__main__':
             metrics=['loss', 'recall@10']
         )
     tracker = ExperimentTracker(args.dataset, "T-DiffRec")
-    train_item_counts = np.asarray(train_data_ori.sum(axis=0)).ravel()
+    popularity_data = train_data_ori + valid_y_data if args.final_train else train_data_ori
+    train_item_counts = np.asarray(popularity_data.sum(axis=0)).ravel()
     train_item_popularity = {i: int(v) for i, v in enumerate(train_item_counts) if v > 0}
     save_dataset_popularity(args.dataset, train_item_popularity)
     

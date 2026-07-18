@@ -5,7 +5,8 @@ import torch
 import pprint
 import pickle
 from collections import Counter
-from trainer import model_train, LSHT_inference,load_data,choose_model,item_num_create
+from trainer import (model_train, LSHT_inference, load_data, choose_model,
+                     item_num_create, save_dataset_popularity)
 from utils import *
 # import yaml
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -25,23 +26,16 @@ def main():
     if args.final:
         with open(f'../datasets/data/{args.dataset}/dataset.pkl', 'rb') as f:
             data_raw = pickle.load(f)
-        # объединяем train_dict и val_seq_dict + val_tgt для каждого пользователя
-        train_combined = []
+        # val_seq_dict уже содержит train-историю; добавляем только val target.
+        train_combined = build_final_train_sequences(data_raw)
         args.item_num = data_raw['item_count']
-        # берём всех пользователей, у которых есть train (или все из train_dict)
-        for uid in data_raw['train_dict'].keys():
-            # если есть val_seq и val_tgt для этого пользователя
-            if uid in data_raw['val_seq_dict'] and uid in data_raw['val_tgt_dict']:
-                combined = data_raw['train_dict'][uid] + data_raw['val_seq_dict'][uid] + [data_raw['val_tgt_dict'][uid]]
-            else:
-                combined = data_raw['train_dict'][uid]
-            train_combined.append(combined)
         args.coverage_candidate_items = {
             item for sequence in train_combined for item in sequence
         }
         args.train_item_popularity = dict(
             Counter(item for sequence in train_combined for item in sequence)
         )
+        save_dataset_popularity(args.dataset, args.train_item_popularity)
         # создаём Data_Train и Data_Test (val не нужен)
         tra_data = Data_Train(train_combined, args)
         test_data = Data_Test(data_raw['test_seq'], [[] for _ in data_raw['test_tgt']], data_raw['test_tgt'], args)

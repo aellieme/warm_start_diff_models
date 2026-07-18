@@ -69,6 +69,8 @@ def main(config):
     if config.get('final_train', False):
         train_val = pd.concat([train, validation], ignore_index=True)
         train_val = add_time_idx(train_val)
+        train_item_popularity = train_val.item_id.value_counts().to_dict()
+        save_dataset_popularity(config.dataset_name, train_item_popularity)
 
         train_dataset = CausalLMDataset(train_val, **config['dataset'])
         train_loader = DataLoader(

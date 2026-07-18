@@ -26,7 +26,7 @@ from experiment_tools.experiment_tracking import (  # noqa: E402
 )
 from evaluate_topk_dp import compute_all_metrics  # noqa: E402
 from trainer import choose_model, downvote_seen_items  # noqa: E402
-from utils import Data_Test, fix_random_seed_as  # noqa: E402
+from utils import Data_Test, build_final_train_sequences, fix_random_seed_as  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,14 +41,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def final_train_sequences(data_raw: dict) -> list[list[int]]:
-    sequences = []
-    for uid, train_sequence in data_raw["train_dict"].items():
-        sequence = list(train_sequence)
-        if uid in data_raw["val_seq_dict"] and uid in data_raw["val_tgt_dict"]:
-            sequence += list(data_raw["val_seq_dict"][uid])
-            sequence.append(data_raw["val_tgt_dict"][uid])
-        sequences.append(sequence)
-    return sequences
+    return build_final_train_sequences(data_raw)
 
 
 def main() -> None:

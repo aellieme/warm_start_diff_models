@@ -343,23 +343,19 @@ def main(args):
     # if args.final_train:
         
     if args.final_train:
-        merged_train = {**data_raw['train']}
+        merged_train = {uid: list(sequence) for uid, sequence in data_raw['train'].items()}
         for uid, seq in data_raw['val_seq'].items():
-            if uid in merged_train:
-                merged_train[uid] = merged_train[uid] + seq   # присоединяем последовательность валидации (без таргета)
-            else:
-                merged_train[uid] = seq
+            # val_seq already contains train history plus validation history.
+            merged_train[uid] = list(seq) + list(data_raw['val'].get(uid, []))
         tra_data = Data_Train(merged_train, args)
         tra_loader = tra_data.get_pytorch_dataloaders()
         args.coverage_candidate_items = {
             item for sequence in merged_train.values() for item in sequence
         }
-        args.coverage_candidate_items.update(
-            item for targets in data_raw['val'].values() for item in targets
-        )
         args.train_item_popularity = Counter(
             item for sequence in merged_train.values() for item in sequence
         )
+        save_dataset_popularity(args.dataset, args.train_item_popularity)
         args.experiment_tracker = ExperimentTracker(args.dataset, "DiffuRec")
 
         diffu_rec = create_model_diffu(args)

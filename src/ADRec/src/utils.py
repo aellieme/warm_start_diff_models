@@ -8,6 +8,21 @@ from collections import Counter
 import random
 from scipy.stats import beta
 
+
+def build_final_train_sequences(data_raw):
+    """Build final ADRec training sequences from train and validation only."""
+    sequences = []
+    for uid, train_sequence in data_raw['train_dict'].items():
+        if uid in data_raw['val_seq_dict'] and uid in data_raw['val_tgt_dict']:
+            # val_seq_dict already contains the user's train history.
+            sequence = list(data_raw['val_seq_dict'][uid])
+            sequence.append(data_raw['val_tgt_dict'][uid])
+        else:
+            sequence = list(train_sequence)
+        sequences.append(sequence)
+    return sequences
+
+
 # import polara
 # from polara.datasets.movielens import get_movielens_data
 from sklearn.preprocessing import LabelEncoder
