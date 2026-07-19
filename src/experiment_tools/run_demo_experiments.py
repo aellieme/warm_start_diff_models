@@ -21,7 +21,10 @@ ALIASES = {
 }
 
 
-def build_commands(datasets, maxlens, epochs, models, seed=42):
+def build_commands(
+    datasets, maxlens, epochs, models, seed=42,
+    amp=False, fast_diffurec=False,
+):
     commands = []
     use_cuda = torch.cuda.is_available()
 
@@ -32,11 +35,18 @@ def build_commands(datasets, maxlens, epochs, models, seed=42):
     for dataset in datasets:
         alias = ALIASES[dataset]
         for maxlen in maxlens:
-            add("DiffuRec", REPO / "src/DiffuRec/src", [
+            diffurec_args = [
                 sys.executable, "main.py", "--dataset", dataset, "--final_train",
                 "--max_len", maxlen, "--epochs", epochs, "--metric_ks", 10, 20, 100,
                 "--random_seed", seed, "--device", "cuda" if use_cuda else "cpu",
-            ])
+            ]
+            if fast_diffurec:
+                diffurec_args.extend([
+                    "--batch_size", 1024, "--hidden_size", 64, "--num_blocks", 2,
+                ])
+            if amp:
+                diffurec_args.append("--amp")
+            add("DiffuRec", REPO / "src/DiffuRec/src", diffurec_args)
             add("ADRec", REPO / "src/ADRec/src", [
                 sys.executable, "main.py", "--dataset", alias["adrec"], "--final",
                 "--max_len", maxlen, "--epochs", epochs, "--metric_ks", 10, 20, 100,
@@ -95,11 +105,19 @@ def main():
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--models", nargs="+", choices=ALL_MODELS, default=list(ALL_MODELS))
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--amp", action="store_true", help="Enable AMP for DiffuRec")
+    parser.add_argument(
+        "--fast-diffurec", action="store_true",
+        help="Use DiffuRec batch_size=1024, hidden_size=64, num_blocks=2",
+    )
     parser.add_argument("--prepare-data", action="store_true")
     parser.add_argument("--run", action="store_true", help="Execute commands; otherwise only print them")
     args = parser.parse_args()
 
-    commands = build_commands(args.datasets, args.maxlens, args.epochs, set(args.models), args.seed)
+    commands = build_commands(
+        args.datasets, args.maxlens, args.epochs, set(args.models), args.seed,
+        amp=args.amp, fast_diffurec=args.fast_diffurec,
+    )
     for model, cwd, command in commands:
         print(f"{model:24s} {cwd} {shlex.join(command)}")
     print(f"Total commands: {len(commands)}")

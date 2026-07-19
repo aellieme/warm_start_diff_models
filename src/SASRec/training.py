@@ -5,6 +5,9 @@ from tqdm.auto import tqdm
 
 from plotting import TrainingPlotter
 from data_utils import data_to_sequences
+from warm_start import (filter_history_to_candidates,
+                        is_eligible_warm_start_example,
+                        mask_ranking_scores, topn_from_masked_scores)
 import time
 import sys
 from pathlib import Path
@@ -33,11 +36,12 @@ def sequential_batch_sampler(user_train, usernum, itemnum, batch_size, maxlen, s
         neg = np.full(maxlen, pad_token, dtype=np.int32)
         nxt = user_items[-1]
         idx = maxlen - 1
-        ts = set(user_items)
         for i in reversed(user_items[:-1]):
             seq[idx] = i
             pos[idx] = nxt
-            neg[idx] = random_neq(0, itemnum, ts, random_state)
+            # Negative samples are not consumed by the current cross-entropy loss.
+            # Keep padding here instead of sampling from the full future-aware ID space.
+            neg[idx] = pad_token
             nxt = i
             idx -= 1
             if idx == -1:
@@ -51,8 +55,10 @@ def sequential_batch_sampler(user_train, usernum, itemnum, batch_size, maxlen, s
 def prepare_sasrec_model(config, data, data_description):
     n_users = data_description['n_users']
     n_items = data_description['n_items']
+    item_col = data_description['items']
+    candidate_items = set(data[item_col].unique().tolist())
     from model import SASRec
-    model = SASRec(n_items, config)
+    model = SASRec(n_items, config, candidate_items=candidate_items)
     criterion = torch.nn.CrossEntropyLoss(ignore_index=model.pad_token)
     if torch.cuda.is_available():
         model = model.cuda()
@@ -87,8 +93,8 @@ def train_sasrec_epoch(model, num_batch, l2_emb, sampler, optimizer, criterion, 
         pos_flat = pos.view(-1)
         loss = criterion(logits_flat, pos_flat)
         if l2_emb != 0:
-            for param in model.item_emb.parameters():
-                loss += l2_emb * torch.norm(param)**2
+            candidate_embeddings = model.item_emb.weight[model.training_candidate_mask]
+            loss += l2_emb * torch.norm(candidate_embeddings) ** 2
         loss.backward()
         optimizer.step()
         losses.append(loss.item())
@@ -183,13 +189,13 @@ def sasrec_model_scoring(model, data, data_description):
 def validate_last_item(model, val_data, train_data, data_description, topn=10):
     model.eval()
     device = next(model.parameters()).device
-    tensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
     from data_utils import data_to_sequences   
 
     userid = data_description['users']
     itemid = data_description['items']
 
     train_seq_dict = data_to_sequences(train_data, data_description)
+    candidate_items = set(train_data[itemid].unique().tolist())
 
     hits = 0
     reciprocal_ranks = []
@@ -201,25 +207,24 @@ def validate_last_item(model, val_data, train_data, data_description, topn=10):
             target = row[itemid]
             test_history = row['history']   # из future_data
             # Полная история = train + future (до таргета)
-            full_history = train_seq_dict.get(uid, []) + test_history
-            if len(full_history) == 0:
-                continue
-            # Пользователь должен быть в train 
-            if uid not in train_seq_dict:
+            full_history = filter_history_to_candidates(
+                train_seq_dict.get(uid, []) + test_history,
+                candidate_items,
+            )
+            if not is_eligible_warm_start_example(
+                full_history, target, candidate_items
+            ):
                 continue
 
-            seq_tensor = tensor(full_history)
+            seq_tensor = torch.as_tensor(full_history, dtype=torch.long, device=device)
             scores = model.score(seq_tensor).cpu().numpy()
             if scores.ndim == 2:
                 scores = scores[0]
 
-            seen = set(full_history)
-            for it in seen:
-                if it < len(scores):
-                    scores[it] = -np.inf
-
-            top_idx = np.argpartition(scores, -topn)[-topn:]
-            top_idx = top_idx[np.argsort(-scores[top_idx])]
+            mask_ranking_scores(
+                scores, full_history, candidate_items, model.pad_token
+            )
+            top_idx = topn_from_masked_scores(scores[None, :], topn)[0]
 
             if target in top_idx[:topn]:
                 hits += 1
@@ -270,6 +275,9 @@ def build_final_sasrec_model(
                     "data_index": data_index,
                     "item_num": model.item_num,
                     "pad_token": model.pad_token,
+                    "candidate_items": model.training_candidate_mask.nonzero(
+                        as_tuple=False
+                    ).squeeze(-1).cpu().tolist(),
                 }, path)
 
         if (epoch % 5 == 0) or (epoch == num_epochs - 1):

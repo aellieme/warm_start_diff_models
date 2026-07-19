@@ -14,6 +14,7 @@ from evaluate_topk_dp import compute_all_metrics
 from plotting import TrainingPlotter
 from utils import (build_candidate_mask, eligible_warm_start_rows,
                    filter_history_to_candidates, mask_ranking_scores)
+from utils import prepare_model_history
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from experiment_tools.experiment_tracking import ExperimentTracker, recommendation_popularity
@@ -76,19 +77,22 @@ def LSHT_inference(model_joint, args, data_loader):
         test_metrics_dict_mean = {}
         for test_batch in data_loader:
             test_batch = [x.to(device) for x in test_batch]
-            test_batch[0] = filter_history_to_candidates(
-                test_batch[0], candidate_mask
+            full_history = filter_history_to_candidates(
+                test_batch[2] if len(test_batch) > 2 else test_batch[0], candidate_mask
+            )
+            test_batch[0] = prepare_model_history(
+                full_history, candidate_mask, test_batch[0].shape[1]
             )
             
             scores_rec, rep_diffu, _, _, _, _ = model_joint(test_batch[0], test_batch[1], train_flag=False)
             scores_rec_diffu = model_joint.diffu_rep_pre(rep_diffu)
             valid_rows = eligible_warm_start_rows(
-                test_batch[0], test_batch[1], candidate_mask
+                full_history, test_batch[1], candidate_mask
             )
             if not valid_rows.any():
                 continue
             mask_ranking_scores(
-                scores_rec_diffu, test_batch[0], candidate_mask
+                scores_rec_diffu, full_history, candidate_mask
             )
             metrics = hrs_and_ndcgs_k(
                 scores_rec_diffu[valid_rows], test_batch[1][valid_rows], [5, 10, 20]
@@ -121,13 +125,18 @@ def evaluate_and_print(model, data_loader, args, logger, description="evaluation
         start_time = time.time()
         for batch in data_loader:
             batch = [x.to(device, non_blocking=True) for x in batch]
-            batch[0] = filter_history_to_candidates(batch[0], candidate_mask)
+            full_history = filter_history_to_candidates(
+                batch[2] if len(batch) > 2 else batch[0], candidate_mask
+            )
+            batch[0] = prepare_model_history(
+                full_history, candidate_mask, batch[0].shape[1]
+            )
             _, rep_diffu, _, _, _, _ = model(batch[0], batch[1], train_flag=False)
             scores = model.diffu_rep_pre(rep_diffu)
             seq = batch[0]  # [batch_size, max_len]
-            valid_rows = eligible_warm_start_rows(seq, batch[1], candidate_mask)
+            valid_rows = eligible_warm_start_rows(full_history, batch[1], candidate_mask)
             excluded_examples += (~valid_rows).sum().item()
-            mask_ranking_scores(scores, seq, candidate_mask)
+            mask_ranking_scores(scores, full_history, candidate_mask)
             k_max = max(args.metric_ks)
             _, topk = torch.topk(scores, k=k_max, dim=-1)
             for i in valid_rows.nonzero(as_tuple=False).squeeze(-1).tolist():
@@ -253,16 +262,19 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
             with torch.no_grad():
                 for val_batch in val_data_loader:
                     val_batch = [x.to(device) for x in val_batch]
-                    val_batch[0] = filter_history_to_candidates(
-                        val_batch[0], candidate_mask
+                    full_history = filter_history_to_candidates(
+                        val_batch[2] if len(val_batch) > 2 else val_batch[0], candidate_mask
+                    )
+                    val_batch[0] = prepare_model_history(
+                        full_history, candidate_mask, val_batch[0].shape[1]
                     )
                     _, rep_diffu, _, _, _, _ = model_joint(val_batch[0], val_batch[1], train_flag=False)
                     scores_rec_diffu = model_joint.diffu_rep_pre(rep_diffu)   # [batch_size, num_items]
                     valid_rows = eligible_warm_start_rows(
-                        val_batch[0], val_batch[1], candidate_mask
+                        full_history, val_batch[1], candidate_mask
                     )
                     mask_ranking_scores(
-                        scores_rec_diffu, val_batch[0], candidate_mask
+                        scores_rec_diffu, full_history, candidate_mask
                     )
                     # Получаем top‑k_max индексов для каждого пользователя в батче
                     k_max = max(args.metric_ks)
@@ -464,5 +476,6 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
     #         pickle.dump(category_list_100, f)
             
 
+    tracker.close()
     return best_model, None
     

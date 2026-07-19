@@ -6,12 +6,14 @@ import logging
 import os
 import json
 import argparse
+import pickle
 from argparse import Namespace
+from collections import Counter
 from functools import partial
 
 from utils import (Data_Test, Data_Train, Data_Val, build_final_train_sequences,
-                   fix_random_seed_as, load_and_split_gts)
-from trainer import item_num_create, choose_model, model_train, evaluate_and_print
+                   fix_random_seed_as)
+from trainer import choose_model, model_train, evaluate_and_print
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -133,13 +135,18 @@ def main():
         beta_a=0.3,
         beta_b=10.0,
         cfg_scale=1.0,
-        mask_seen=False,                # во время тюнинга маскирование выключено
+        mask_seen=True,
+        ranking_protocol='warm_start_known_catalog_v2',
     )
 
     fix_random_seed_as(base_args.random_seed)
     
-    data_raw = load_and_split_gts(quantiles=(0.7, 0.8))
-    base_args = item_num_create(base_args) 
+    with open(f'../datasets/data/{base_args.dataset}/dataset.pkl', 'rb') as handle:
+        data_raw = pickle.load(handle)
+    base_args.item_num = data_raw['item_count']
+    base_args.coverage_candidate_items = {
+        item for sequence in data_raw['train'] for item in sequence
+    }
 
     study = optuna.create_study(
         direction='maximize',
@@ -172,6 +179,12 @@ def main():
 
     # val_seq_dict уже содержит train-историю; добавляем только val target.
     train_combined = build_final_train_sequences(data_raw)
+    final_args.coverage_candidate_items = {
+        item for sequence in train_combined for item in sequence
+    }
+    final_args.train_item_popularity = dict(
+        Counter(item for sequence in train_combined for item in sequence)
+    )
 
     tra_data_final = Data_Train(train_combined, final_args)
     test_data_final = Data_Test(data_raw['test_seq'],
@@ -192,7 +205,8 @@ def main():
         test_loader_final,
         final_args,
         logger,
-        train_time="final_trainval"
+        train_time="final_trainval",
+        final=True,
     )
 
     # Сохраняем модель и конфиг

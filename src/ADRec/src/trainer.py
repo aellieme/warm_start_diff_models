@@ -22,14 +22,18 @@ from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_
 from experiment_tools.experiment_tracking import save_torch_checkpoint
 
 def downvote_seen_items(scores, hist_pad):
+    """Backward-compatible seen-item mask used by external callers."""
     for i in range(scores.shape[0]):
         seen = torch.unique(hist_pad[i][hist_pad[i] > 0])
         scores[i, seen] = -float('inf')
     return scores
 
-def evaluate_and_print(model, data_loader, args, logger, description="Validation", mask_seen=False):
+def evaluate_and_print(model, data_loader, args, logger, description="Validation", mask_seen=True):
     device = args.device
     metric_ks = args.metric_ks
+    candidate_mask = build_candidate_mask(
+        args.coverage_candidate_items, args.item_num + 1, device
+    )
     model.eval()
     all_actual = []
     all_predicted = []
@@ -38,15 +42,23 @@ def evaluate_and_print(model, data_loader, args, logger, description="Validation
         # for batch in tqdm.tqdm(data_loader, leave=False, desc=f'{description}'):
         for batch in tqdm(data_loader, leave=False, desc=f'{description}'):
             batch = [x.to(device) for x in batch]
+            full_history = filter_history_to_candidates(
+                batch[2] if len(batch) > 2 else batch[0], candidate_mask
+            )
+            batch[0] = prepare_model_history(
+                full_history, candidate_mask, batch[0].shape[1]
+            )
             out_seq, last_item, *_ = model(batch[0], batch[1], train_flag=False)
             scores = model.calculate_score(last_item)
-            if mask_seen:
-                scores = downvote_seen_items(scores, batch[0])
+            valid_rows = eligible_warm_start_rows(full_history, batch[1], candidate_mask)
+            mask_ranking_scores(scores, full_history, candidate_mask)
             _, topk_idx = torch.topk(scores, k=max(metric_ks), dim=-1)
-            for i in range(len(batch[1])):
+            for i in valid_rows.nonzero(as_tuple=False).squeeze(-1).tolist():
                 all_actual.append([batch[1][i, -1].item()])
                 all_predicted.append(topk_idx[i].cpu().tolist())
     elapsed = time.time() - start_time
+    if not all_actual:
+        raise ValueError(f"No eligible warm-start examples remain for {description}")
     precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
         all_actual,
         all_predicted,
@@ -127,25 +139,29 @@ def load_data(args):
     args.coverage_candidate_items = {
         item for sequence in data_raw['train'] for item in sequence
     }
+    args.mask_seen = True
+    args.ranking_protocol = 'warm_start_known_catalog_v2'
     args.train_item_popularity = popularity_from_sequences(data_raw['train'])
     save_dataset_popularity(args.dataset, args.train_item_popularity)
     tra_data = Data_Train(data_raw['train'], args)
     # val_data = Data_Val(data_raw['train'], data_raw['val'], args)
     val_data = Data_Val(data_raw['val_seq'], data_raw['val_tgt'], args)
-    # test_data = Data_Test(data_raw['train'], data_raw['val'], data_raw['test'], args)
-    test_data = Data_Test(data_raw['test_seq'], [[] for _ in data_raw['test_tgt']], data_raw['test_tgt'], args) 
     tra_data_loader = tra_data.get_pytorch_dataloaders()
     val_data_loader = val_data.get_pytorch_dataloaders()
-    test_data_loader = test_data.get_pytorch_dataloaders()
     # args.item_num = data_raw['item_count']
 
-    return tra_data_loader, val_data_loader, test_data_loader
+    return tra_data_loader, val_data_loader, None
 
 
 def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader, args, logger, train_time, final=False):
     epochs = args.epochs
     device = args.device
     metric_ks = args.metric_ks
+    candidate_mask = build_candidate_mask(
+        args.coverage_candidate_items, args.item_num + 1, device
+    )
+    if int(candidate_mask.sum().item()) < max(metric_ks):
+        raise ValueError("Candidate catalogue is smaller than the largest metric K")
     torch.set_float32_matmul_precision('high')
     plotter = TrainingPlotter(
         save_dir=os.path.join(args.log_file, args.model, args.dataset),
@@ -212,13 +228,21 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
                 with torch.no_grad():
                     for val_batch in tqdm(val_data_loader, leave=False, desc='Denoising..., Epoch: {}'.format(epoch_temp)):
                         val_batch = [x.to(device) for x in val_batch]
+                        full_history = filter_history_to_candidates(
+                            val_batch[2] if len(val_batch) > 2 else val_batch[0], candidate_mask
+                        )
+                        val_batch[0] = prepare_model_history(
+                            full_history, candidate_mask, val_batch[0].shape[1]
+                        )
                         out_seq, last_item, *_ = model_joint(val_batch[0], val_batch[1], train_flag=False)
                         scores = model_joint.calculate_score(last_item)
-                        if getattr(args, 'mask_seen', False):
-                            scores = downvote_seen_items(scores, val_batch[0])  
+                        valid_rows = eligible_warm_start_rows(
+                            full_history, val_batch[1], candidate_mask
+                        )
+                        mask_ranking_scores(scores, full_history, candidate_mask)
                     
                         _, topk_idx = torch.topk(scores, k=max(metric_ks), dim=-1)
-                        for i in range(len(val_batch[1])):
+                        for i in valid_rows.nonzero(as_tuple=False).squeeze(-1).tolist():
                             all_actual.append([val_batch[1][i, -1].item()])
                             all_predicted.append(topk_idx[i].cpu().tolist())
                     if final:
@@ -226,6 +250,8 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
                         recs_df.to_csv('recommendations.csv', index=False)
                         print("Recommendations saved to recommendations.csv")
 
+                if not all_actual:
+                    raise ValueError("No eligible warm-start validation examples remain")
                 precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
                     all_actual,
                     all_predicted,
@@ -292,12 +318,20 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
         with torch.no_grad():
             for test_batch in tqdm(test_data_loader, leave=False):
                 test_batch = [x.to(device) for x in test_batch]
+                full_history = filter_history_to_candidates(
+                    test_batch[2] if len(test_batch) > 2 else test_batch[0], candidate_mask
+                )
+                test_batch[0] = prepare_model_history(
+                    full_history, candidate_mask, test_batch[0].shape[1]
+                )
                 out_seq, last_item, *_ = best_model(test_batch[0], test_batch[1], train_flag=False)
                 scores = best_model.calculate_score(last_item)
-                if getattr(args, 'mask_seen', False):
-                    scores = downvote_seen_items(scores, test_batch[0])
+                valid_rows = eligible_warm_start_rows(
+                    full_history, test_batch[1], candidate_mask
+                )
+                mask_ranking_scores(scores, full_history, candidate_mask)
                 _, topk_idx = torch.topk(scores, k=max(metric_ks), dim=-1)
-                for i in range(len(test_batch[1])):
+                for i in valid_rows.nonzero(as_tuple=False).squeeze(-1).tolist():
                     all_actual.append([test_batch[1][i, -1].item()])
                     all_predicted.append(topk_idx[i].cpu().tolist())
                 if args.diversity_measure:
@@ -310,6 +344,8 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
         test_elapsed = time.time() - start_test_time
         logger.info(f"Test inference time: {test_elapsed:.2f}s")
         print(f"Test inference time: {test_elapsed:.2f}s")
+        if not all_actual:
+            raise ValueError("No eligible warm-start test examples remain")
         precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
             all_actual,
             all_predicted,
@@ -327,11 +363,12 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
             {k: {"recall": r, "ndcg": n, "mrr": m, "coverage": c}
              for k, r, n, m, c in zip(metric_ks, recalls, ndcgs, mrrs, covs)},
             split="global_temporal_70_10_20",
-            mask_seen=bool(getattr(args, "mask_seen", False)),
+            mask_seen=True,
             seed=getattr(args, "random_seed", 42),
             inference_total_sec=test_elapsed,
             n_users=len(all_actual),
             maxlen=args.max_len,
+            ranking_protocol="warm_start_known_catalog_v2",
             popularity_bias=recommendation_popularity(all_predicted, args.train_item_popularity, metric_ks),
         )
 

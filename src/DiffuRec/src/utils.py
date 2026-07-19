@@ -57,6 +57,19 @@ def filter_history_to_candidates(sequences, candidate_mask):
     return sequences.masked_fill(~known, 0)
 
 
+def prepare_model_history(full_history, candidate_mask, max_len):
+    """Filter the full history, then compact its last known items for the model."""
+    filtered = filter_history_to_candidates(full_history, candidate_mask)
+    compact = torch.zeros(
+        (filtered.shape[0], max_len), dtype=filtered.dtype, device=filtered.device
+    )
+    for row_index, row in enumerate(filtered):
+        known = row[row > 0][-max_len:]
+        if known.numel():
+            compact[row_index, -known.numel():] = known
+    return compact
+
+
 class TrainDataset(data_utils.Dataset):
     def __init__(self, sequences, max_len):
         # Keep one reference per user sequence instead of materializing every
@@ -117,18 +130,20 @@ class ValDataset(data_utils.Dataset):
         self.users = sorted(self.u2seq.keys())
         self.u2answer = u2answer
         self.max_len = max_len
+        self.full_history_len = max(1, max(len(self.u2seq[user]) for user in self.users))
 
     def __len__(self):
         return len(self.users)
 
     def __getitem__(self, index):
         user = self.users[index]
-        seq = self.u2seq[user]
+        full_seq = self.u2seq[user]
         answer = self.u2answer[user]
-        seq = seq[-self.max_len:]
+        seq = full_seq[-self.max_len:]
         padding_len = self.max_len - len(seq)
         seq = [0] * padding_len + seq
-        return torch.LongTensor(seq),  torch.LongTensor(answer)
+        full_seq = [0] * (self.full_history_len - len(full_seq)) + full_seq
+        return torch.LongTensor(seq), torch.LongTensor(answer), torch.LongTensor(full_seq)
 
 
 class Data_Val():
@@ -152,19 +167,24 @@ class TestDataset(data_utils.Dataset):
         self.users = sorted(self.u2seq.keys())
         self.u2answer = u2answer
         self.max_len = max_len
+        self.full_history_len = max(
+            1,
+            max(len(self.u2seq[user]) + len(self.u2seq_add[user]) for user in self.users),
+        )
 
     def __len__(self):
         return len(self.users)
 
     def __getitem__(self, index):
         user = self.users[index]
-        seq = self.u2seq[user] + self.u2seq_add[user]
+        full_seq = self.u2seq[user] + self.u2seq_add[user]
         # seq = self.u2seq[user]
         answer = self.u2answer[user]
-        seq = seq[-self.max_len:]
+        seq = full_seq[-self.max_len:]
         padding_len = self.max_len - len(seq)
         seq = [0] * padding_len + seq
-        return torch.LongTensor(seq), torch.LongTensor(answer)
+        full_seq = [0] * (self.full_history_len - len(full_seq)) + full_seq
+        return torch.LongTensor(seq), torch.LongTensor(answer), torch.LongTensor(full_seq)
 
 
 class Data_Test():

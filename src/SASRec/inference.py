@@ -32,7 +32,7 @@ def main():
     args = parser.parse_args()
     (train_data, val_data, test_data, test_examples,
      data_index, data_description, userid_col, itemid_col, time_col,
-     val_seq_dict, _) = prepare_data_and_description(args.dataset)
+     val_seq_dict, train_val_data) = prepare_data_and_description(args.dataset)
     # (train_data, val_data, test_data, test_examples, data_index, data_description, userid_col, itemid_col, time_col, val_seq_dict, _) = prepare_data_and_description()
     #  Загрузка модели 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -46,8 +46,8 @@ def main():
     # Baseline 
     # print("\nbaseline")
     recs, users, metrics, inf_time = run_inference_pipeline(
-    model, train_data, train_data, test_examples,
-        data_description, userid_col, itemid_col, time_col, val_seq_dict, topn=10
+        model, train_val_data, train_val_data, test_examples,
+        data_description, userid_col, itemid_col, time_col, {}, topn=10
     )
     precisions, recalls, ndcgs, mrrs, covs = metrics
 
@@ -60,7 +60,7 @@ def main():
     example_user = users[1]
     print_example_user(
         example_user, users, recs,
-        train_data, test_examples,
+        train_val_data, test_examples,
         data_index, data_description,
         userid_col, itemid_col, time_col, args.dataset
     )

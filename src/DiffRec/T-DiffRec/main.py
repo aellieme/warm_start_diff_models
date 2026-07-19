@@ -2,7 +2,7 @@ import pandas as pd
 import argparse
 import sys
 from pathlib import Path
-from ast import parse
+from ast import literal_eval
 import os
 import time
 import numpy as np
@@ -87,6 +87,11 @@ if __name__ == '__main__':
     parser.add_argument('--reweight', type=bool, default=True, help='assign different weight to different timestep or not')
 
     args = parser.parse_args()
+    topn_values = literal_eval(args.topN)
+    if not isinstance(topn_values, list) or not topn_values or not all(
+        isinstance(k, int) and k > 0 for k in topn_values
+    ):
+        raise ValueError("--topN must be a non-empty list of positive integers")
 
     # Автоматическая подстановка пути для Amazon (должно быть ДО загрузки данных)
     if args.dataset != 'ml-1m' and args.dataset != 'ml-1m_noisy':
@@ -121,35 +126,60 @@ if __name__ == '__main__':
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     device = torch.device("cuda:0" if args.cuda else "cpu")
+    args.ranking_protocol = "warm_start_known_catalog_v2"
 
     print("Starting time: ", time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
 
     ### DATA LOAD ###
-    train_path = args.data_path + 'train_list.npy'
-    valid_path = args.data_path + 'valid_list.npy'
-    test_path = args.data_path + 'test_list.npy'
+    protocol_data = data_utils.load_warm_start_data(
+        args.data_path, args.w_min, args.w_max, include_test=args.final_train
+    )
+    n_user = protocol_data['n_user']
+    n_item = protocol_data['n_item']
+    training_matrix = (
+        protocol_data['train_val_weighted']
+        if args.final_train else protocol_data['train_weighted']
+    )
+    training_candidate_mask = (
+        protocol_data['train_val_candidates']
+        if args.final_train else protocol_data['train_candidates']
+    )
+    active_train_users = np.flatnonzero(training_matrix.getnnz(axis=1) > 0)
+    train_dataset = data_utils.DataDiffusion(
+        torch.FloatTensor(training_matrix[active_train_users].toarray())
+    )
+    train_loader = DataLoader(
+        train_dataset, batch_size=args.batch_size, pin_memory=True, shuffle=True,
+        num_workers=2, worker_init_fn=worker_init_fn,
+    )
 
-    train_data, train_data_ori, valid_y_data, test_y_data, n_user, n_item = data_utils.data_load(train_path, valid_path, test_path, args.w_min, args.w_max)
-    train_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data.toarray()))
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, pin_memory=True, shuffle=True, num_workers=2, worker_init_fn=worker_init_fn)
-    test_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False)
-
-    if args.tst_w_val:
-        tv_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_data.toarray()) + torch.FloatTensor(valid_y_data.toarray()))
-        test_twv_loader = DataLoader(tv_dataset, batch_size=args.batch_size, shuffle=False)
-    mask_tv = train_data_ori + valid_y_data
+    valid_input, valid_mask, valid_targets, valid_users = data_utils.select_eligible_rows(
+        protocol_data['valid_input'], protocol_data['valid_mask'],
+        protocol_data['valid_targets'], protocol_data['train_candidates'],
+    )
+    valid_loader = DataLoader(
+        data_utils.DataDiffusion(torch.FloatTensor(valid_input.toarray())),
+        batch_size=args.batch_size, shuffle=False,
+    )
+    test_loader = test_mask = test_targets = test_users = None
+    if args.final_train:
+        test_input, test_mask, test_targets, test_users = data_utils.select_eligible_rows(
+            protocol_data['test_input'], protocol_data['test_mask'],
+            protocol_data['test_targets'], protocol_data['train_val_candidates'],
+        )
+        test_loader = DataLoader(
+            data_utils.DataDiffusion(torch.FloatTensor(test_input.toarray())),
+            batch_size=args.batch_size, shuffle=False,
+        )
 
     # Режим финального обучения на train+val
     if args.final_train:
         print("FINAL TRAINING MODE: train+val (no validation)")
-        train_val_weighted = train_data + valid_y_data
-        train_val_dataset = data_utils.DataDiffusion(torch.FloatTensor(train_val_weighted.toarray()))
-        train_loader = DataLoader(train_val_dataset, batch_size=args.batch_size, pin_memory=True, shuffle=True, num_workers=2)
         # Маска для теста остаётся mask_tv (train+val)
 
-    train_set = set(zip(*train_data_ori.nonzero()))
-    test_set = set(zip(*test_y_data.nonzero()))
-    print(f"Пересечение train и test: {len(train_set & test_set)}")
+    print(f"Eligible validation users: {len(valid_users)}")
+    if args.final_train:
+        print(f"Eligible test users: {len(test_users)}")
     print('data ready.')
 
     ### Build Gaussian Diffusion ###
@@ -180,6 +210,9 @@ if __name__ == '__main__':
     }
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    training_candidate_mask_tensor = torch.as_tensor(
+        training_candidate_mask, dtype=torch.bool, device=device
+    )
     print("models ready.")
 
     param_num = 0
@@ -276,9 +309,45 @@ if __name__ == '__main__':
         )
         return (precisions, recalls, ndcgs, mrrs, covs), predict_items
 
+    def evaluate_last_item(data_loader, targets, history_mask, candidate_mask, topN):
+        """Evaluate one eligible last-item target per row."""
+        model.eval()
+        candidate_mask = torch.as_tensor(
+            candidate_mask, dtype=torch.bool, device=device
+        )
+        if int(candidate_mask.sum().item()) < max(topN):
+            raise ValueError("Candidate catalogue is smaller than the largest metric K")
+        predicted = []
+        offset = 0
+        with torch.no_grad():
+            for batch in data_loader:
+                batch_size = len(batch)
+                batch_history = history_mask[offset:offset + batch_size]
+                batch = batch.to(device)
+                scores = diffusion.p_sample(
+                    model, batch, args.sampling_steps, args.sampling_noise
+                )
+                scores.masked_fill_(~candidate_mask.unsqueeze(0), -torch.inf)
+                seen = torch.as_tensor(
+                    batch_history.toarray() > 0,
+                    dtype=torch.bool,
+                    device=device,
+                )
+                scores.masked_fill_(seen, -torch.inf)
+                indices = torch.topk(scores, max(topN), dim=-1).indices
+                predicted.extend(indices.cpu().tolist())
+                offset += batch_size
+
+        actual = [[int(target)] for target in targets]
+        candidate_items = set(candidate_mask.nonzero(as_tuple=False).squeeze(-1).cpu().tolist())
+        metrics = eval_metrics.compute_all_metrics(
+            actual, predicted, topN, len(candidate_items),
+            candidate_items=candidate_items,
+        )
+        return metrics, predicted
+
     best_recall, best_epoch = -100, 0
     best_results = None
-    best_test_results = None
     
     plotter = TrainingPlotter(
             save_dir='./log/' + args.dataset,
@@ -286,7 +355,10 @@ if __name__ == '__main__':
             metrics=['loss', 'recall@10']
         )
     tracker = ExperimentTracker(args.dataset, "T-DiffRec")
-    popularity_data = train_data_ori + valid_y_data if args.final_train else train_data_ori
+    popularity_data = (
+        protocol_data['train_binary'] + protocol_data['valid_binary']
+        if args.final_train else protocol_data['train_binary']
+    )
     train_item_counts = np.asarray(popularity_data.sum(axis=0)).ravel()
     train_item_popularity = {i: int(v) for i, v in enumerate(train_item_counts) if v > 0}
     save_dataset_popularity(args.dataset, train_item_popularity)
@@ -309,7 +381,10 @@ if __name__ == '__main__':
             batch = batch.to(device)
             batch_count += 1
             optimizer.zero_grad()
-            losses = diffusion.training_losses(model, batch, args.reweight)
+            losses = diffusion.training_losses(
+                model, batch, args.reweight,
+                candidate_mask=training_candidate_mask_tensor,
+            )
             loss = losses["loss"].mean()
             total_loss += loss
             loss.backward()
@@ -325,26 +400,24 @@ if __name__ == '__main__':
         
         # Валидация и сохранение модели только при обычном обучении (не final_train)
         if not args.final_train and epoch % 5 == 0:
-            valid_results, _ = evaluate(test_loader, valid_y_data, train_data_ori, eval(args.topN))
-            recall10 = valid_results[1][0]  # recall@10
+            valid_results, _ = evaluate_last_item(
+                valid_loader, valid_targets, valid_mask,
+                protocol_data['train_candidates'], topn_values,
+            )
+            idx10 = topn_values.index(10) if 10 in topn_values else 0
+            recall10 = valid_results[1][idx10]
             plotter.update(epoch=epoch, val_recall=recall10)
-            idx10 = eval(args.topN).index(10) if 10 in eval(args.topN) else 0
             tracker.log_epoch(epoch, **{
                 "val_recall@10": valid_results[1][idx10],
                 "val_ndcg@10": valid_results[2][idx10],
                 "val_mrr@10": valid_results[3][idx10],
             })
             plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')
-            if args.tst_w_val:
-                test_results, _ = evaluate(test_twv_loader, test_y_data, mask_tv, eval(args.topN))
-            else:
-                test_results, _ = evaluate(test_loader, test_y_data, mask_tv, eval(args.topN))
-            print_results(None, valid_results, test_results)
+            print_results(None, valid_results, None)
 
-            if valid_results[1][1] > best_recall: # recall@20 as selection
-                best_recall, best_epoch = valid_results[1][1], epoch
+            if recall10 > best_recall:
+                best_recall, best_epoch = recall10, epoch
                 best_results = valid_results
-                best_test_results = test_results
 
                 if not os.path.exists(args.save_path):
                     os.makedirs(args.save_path)
@@ -360,29 +433,32 @@ if __name__ == '__main__':
         # print("\n" + "="*50)
         print("Evaluating final model on test set...")
         start_time_inf = time.perf_counter()
-        test_loader_final = DataLoader(train_val_dataset, batch_size=args.batch_size, shuffle=False)
-        test_results, test_preds = evaluate(test_loader_final, test_y_data, mask_tv, eval(args.topN))
+        test_results, test_preds = evaluate_last_item(
+            test_loader, test_targets, test_mask,
+            protocol_data['train_val_candidates'], topn_values,
+        )
         inf_time = time.perf_counter() - start_time_inf  # <-- добавить
         print(f"Inference time: {inf_time:.4f} seconds")
         
         # Сохраняем рекомендации 
         recs_df = pd.DataFrame({
-            'user_id': list(range(len(test_preds))),
+            'user_id': test_users,
             'recommendations': [list(map(int, rec)) for rec in test_preds]
         })
         recs_df.to_csv('recommendations.csv', index=False)
         print("Recommendations saved to recommendations.csv")
         
         # Выводим таблицу метрик с точностью .6f
-        print_table_metrics(test_results, eval(args.topN))
+        print_table_metrics(test_results, topn_values)
         tracker.log_final_metrics(
             {k: {"recall": test_results[1][i], "ndcg": test_results[2][i],
                  "mrr": test_results[3][i], "coverage": test_results[4][i]}
-             for i, k in enumerate(eval(args.topN))},
+             for i, k in enumerate(topn_values)},
             split="global_temporal_70_10_20", mask_seen=True,
             seed=getattr(args, "random_seed", 42), inference_total_sec=inf_time,
             n_users=len(test_preds), maxlen=None,
-            popularity_bias=recommendation_popularity(test_preds, train_item_popularity, eval(args.topN)),
+            ranking_protocol="warm_start_known_catalog_v2",
+            popularity_bias=recommendation_popularity(test_preds, train_item_popularity, topn_values),
         )
         
         # Сохраняем финальную модель
@@ -396,16 +472,8 @@ if __name__ == '__main__':
 
     print("End. Best Epoch {:03d} ".format(best_epoch))
     plotter.plot(save=True, show=False, suffix='_final')
-    if best_test_results is not None:
-        tracker.log_final_metrics(
-            {k: {"recall": best_test_results[1][i], "ndcg": best_test_results[2][i],
-                 "mrr": best_test_results[3][i], "coverage": best_test_results[4][i]}
-             for i, k in enumerate(eval(args.topN))},
-            split="global_temporal_70_10_20", mask_seen=True,
-            seed=getattr(args, "random_seed", 42), maxlen=None,
-        )
     tracker.close()
-    print_results(None, best_results, best_test_results)   
+    print_results(None, best_results, None)
     print("End time: ", time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
 # import argparse
 # from ast import parse
@@ -716,10 +784,7 @@ if __name__ == '__main__':
 #                 test_results = evaluate(test_loader, test_y_data, mask_tv, eval(args.topN))
 #             print_results(None, valid_results, test_results)
 
-#             if valid_results[1][1] > best_recall: # recall@20 as selection
-#                 best_recall, best_epoch = valid_results[1][1], epoch
 #                 best_results = valid_results
-#                 best_test_results = test_results
 
 #                 if not os.path.exists(args.save_path):
 #                     os.makedirs(args.save_path)
@@ -734,7 +799,6 @@ if __name__ == '__main__':
 #     print('==='*18)
 #     print("End. Best Epoch {:03d} ".format(best_epoch))
 #     plotter.plot(save=True, show=False, suffix='_final')
-#     print_results(None, best_results, best_test_results)   
 #     print("End time: ", time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
 
 

@@ -120,7 +120,7 @@ class GaussianDiffusion(nn.Module):
                 x_t = out["mean"]
         return x_t
     
-    def training_losses(self, model, x_start, reweight=False):
+    def training_losses(self, model, x_start, reweight=False, candidate_mask=None):
         batch_size, device = x_start.size(0), x_start.device
         ts, pt = self.sample_timesteps(batch_size, device, 'importance')
         noise = th.randn_like(x_start)
@@ -138,7 +138,15 @@ class GaussianDiffusion(nn.Module):
 
         assert model_output.shape == target.shape == x_start.shape
 
-        mse = mean_flat((target - model_output) ** 2)
+        squared_error = (target - model_output) ** 2
+        if candidate_mask is not None:
+            candidate_mask = candidate_mask.to(device=device, dtype=th.bool)
+            if candidate_mask.ndim != 1 or candidate_mask.numel() != x_start.shape[-1]:
+                raise ValueError("Candidate mask and diffusion vocabulary sizes differ")
+            if not candidate_mask.any():
+                raise ValueError("Training candidate catalogue is empty")
+            squared_error = squared_error[:, candidate_mask]
+        mse = mean_flat(squared_error)
 
         if reweight == True:
             if self.mean_type == ModelMeanType.START_X:
@@ -148,7 +156,12 @@ class GaussianDiffusion(nn.Module):
             elif self.mean_type == ModelMeanType.EPSILON:
                 weight = (1 - self.alphas_cumprod[ts]) / ((1-self.alphas_cumprod_prev[ts])**2 * (1-self.betas[ts]))
                 weight = th.where((ts == 0), 1.0, weight)
-                likelihood = mean_flat((x_start - self._predict_xstart_from_eps(x_t, ts, model_output))**2 / 2.0)
+                likelihood_error = (
+                    x_start - self._predict_xstart_from_eps(x_t, ts, model_output)
+                ) ** 2 / 2.0
+                if candidate_mask is not None:
+                    likelihood_error = likelihood_error[:, candidate_mask]
+                likelihood = mean_flat(likelihood_error)
                 loss = th.where((ts == 0), likelihood, mse)
         else:
             weight = th.tensor([1.0] * len(target)).to(device)

@@ -6,9 +6,11 @@ import torch
 from polara import get_movielens_data
 
 from data_utils import transform_indices, data_to_sequences
-from evaluate_metrics import downvote_seen_items, topn_recommendations
 from evaluate_topk_dp import compute_all_metrics
 from training import sasrec_model_scoring
+from warm_start import (filter_history_to_candidates,
+                        is_eligible_warm_start_example,
+                        mask_ranking_scores, topn_from_masked_scores)
 
 def load_amazon(dataset_name, data_dir='../data/amazon'):
     file_map = {
@@ -129,43 +131,44 @@ def run_inference_pipeline(
     topn=10
 ):
     start_time = time.perf_counter()   
-    train_users = set(train_data[userid_col].unique())
     history_sorted = history_data.sort_values([userid_col, time_col])
     # Получаем последовательности из history_data (train+adapt) в виде словаря {user: list}
     train_seq_dict = data_to_sequences(history_sorted, data_description)
 
     model.eval()
     device = next(model.parameters()).device
-    tensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
 
     scores_list = []
     user_order = []
     targets_list = []
+    candidate_items = set(history_data[itemid_col].unique().tolist())
 
     with torch.no_grad():
         for _, row in test_examples.iterrows():
             uid = row[userid_col]
-            if uid not in train_users:   # исключаем новых пользователей
-                continue
             target = row[itemid_col]
             test_history = row['history']   
             # полная история = train/adapt  + тест до таргета
             # Полная история = train/adapt (из history_data) + валидационные + тестовые (до цели)
             train_history = train_seq_dict.get(uid, [])
             val_history = val_seq_dict.get(uid, [])
-            full_history = train_history + val_history + test_history
+            full_history = filter_history_to_candidates(
+                train_history + val_history + test_history,
+                candidate_items,
+            )
             # full_history = train_seq_dict.get(uid, []) + test_history
-            if len(full_history) == 0:
+            if not is_eligible_warm_start_example(
+                full_history, target, candidate_items
+            ):
                 continue
-            seq_tensor = tensor(full_history)
+            seq_tensor = torch.as_tensor(full_history, dtype=torch.long, device=device)
             scores = model.score(seq_tensor).cpu().numpy()
             if scores.ndim == 2:
                 scores = scores[0]
             # маскирую все просмотренные 
-            seen = set(full_history)
-            for it in seen:
-                if it < len(scores):
-                    scores[it] = -np.inf
+            mask_ranking_scores(
+                scores, full_history, candidate_items, model.pad_token
+            )
             scores_list.append(scores)
             user_order.append(uid)
             targets_list.append(target)
@@ -174,11 +177,10 @@ def run_inference_pipeline(
         return np.array([]), [], ([], [], [], [], []), 0.0
 
     scores = np.stack(scores_list)
-    recs = topn_recommendations(scores, topn=topn)
+    recs = topn_from_masked_scores(scores, topn=topn)
 
     actual = [[t] for t in targets_list]
     predicted = recs.tolist()
-    candidate_items = set(history_data[itemid_col].unique().tolist())
     # topN_list = [topn]
     topN_list = [10, 20, topn] if topn >= 20 else [topn]
     precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(

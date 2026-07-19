@@ -9,16 +9,81 @@ import random
 from scipy.stats import beta
 
 
+def build_candidate_mask(candidate_items, num_items, device):
+    """Return a boolean mask for real recommendable items; 0 is padding."""
+    mask = torch.zeros(num_items, dtype=torch.bool, device=device)
+    valid_items = sorted({
+        int(item) for item in candidate_items
+        if 0 < int(item) < num_items
+    })
+    if valid_items:
+        indices = torch.as_tensor(valid_items, dtype=torch.long, device=device)
+        mask[indices] = True
+    return mask
+
+
+def filter_history_to_candidates(sequences, candidate_mask):
+    """Remove items unavailable at the evaluation boundary from histories."""
+    valid_ids = (sequences > 0) & (sequences < candidate_mask.numel())
+    safe_ids = sequences.clamp(min=0, max=candidate_mask.numel() - 1)
+    known_items = valid_ids & candidate_mask[safe_ids]
+    return sequences.masked_fill(~known_items, 0)
+
+
+def prepare_model_history(full_history, candidate_mask, max_len):
+    """Filter the full history, then compact its last known items for the model."""
+    filtered = filter_history_to_candidates(full_history, candidate_mask)
+    compact = torch.zeros(
+        (filtered.shape[0], max_len), dtype=filtered.dtype, device=filtered.device
+    )
+    for row_index, row in enumerate(filtered):
+        known = row[row > 0][-max_len:]
+        if known.numel():
+            compact[row_index, -known.numel():] = known
+    return compact
+
+
+def eligible_warm_start_rows(sequences, targets, candidate_mask):
+    """Select examples with a known target and a non-empty known-item history."""
+    targets = targets[..., -1]
+    valid_ids = (targets > 0) & (targets < candidate_mask.numel())
+    safe_targets = targets.clamp(min=0, max=candidate_mask.numel() - 1)
+    return valid_ids & candidate_mask[safe_targets] & (sequences > 0).any(dim=1)
+
+
+def mask_ranking_scores(scores, sequences, candidate_mask):
+    """Mask padding, out-of-catalogue items and all observed items in-place."""
+    if scores.shape[-1] != candidate_mask.numel():
+        raise ValueError("Candidate mask and score vocabulary sizes differ")
+    scores.masked_fill_(~candidate_mask.unsqueeze(0), -torch.inf)
+    valid_seen = (sequences > 0) & (sequences < scores.shape[-1])
+    rows = torch.arange(scores.shape[0], device=scores.device).unsqueeze(1)
+    rows = rows.expand_as(sequences)
+    scores[rows[valid_seen], sequences[valid_seen]] = -torch.inf
+    return scores
+
+
+def mask_training_scores(scores, candidate_mask):
+    """Exclude unavailable items from classification losses."""
+    if scores.shape[-1] != candidate_mask.numel():
+        raise ValueError("Candidate mask and score vocabulary sizes differ")
+    return scores.masked_fill(
+        ~candidate_mask.view(*([1] * (scores.ndim - 1)), -1),
+        torch.finfo(scores.dtype).min,
+    )
+
+
 def build_final_train_sequences(data_raw):
-    """Build final ADRec training sequences from train and validation only."""
+    """Build complete train+validation sequences, including validation-only users."""
     sequences = []
-    for uid, train_sequence in data_raw['train_dict'].items():
+    user_ids = set(data_raw['train_dict']) | set(data_raw['val_seq_dict'])
+    for uid in sorted(user_ids):
         if uid in data_raw['val_seq_dict'] and uid in data_raw['val_tgt_dict']:
             # val_seq_dict already contains the user's train history.
             sequence = list(data_raw['val_seq_dict'][uid])
             sequence.append(data_raw['val_tgt_dict'][uid])
         else:
-            sequence = list(train_sequence)
+            sequence = list(data_raw['train_dict'][uid])
         sequences.append(sequence)
     return sequences
 
@@ -154,7 +219,8 @@ class Data_Train():
         self.u2seq = data_train
         self.max_len = args.max_len
         self.batch_size = args.batch_size
-        self.id_seq = data_train
+        # A sequential training example needs at least one history item and a target.
+        self.id_seq = [sequence for sequence in data_train if len(sequence) >= 2]
         self.split = args.split_onebyone
         self.parallel_ag = args.parallel_ag
         if self.split:
@@ -199,13 +265,14 @@ class ValDataset(data_utils.Dataset):
         # self.users = sorted(self.u2seq.keys())
         self.u2answer = u2answer
         self.max_len = max_len
+        self.full_history_len = max(1, max(len(seq) for seq in self.u2seq))
     def __len__(self):
         return len(self.u2seq)
 
     def __getitem__(self, index):
         # user = self.users[index]
-        seq = self.u2seq[index]
-        hist = seq[-self.max_len:]
+        full_seq = self.u2seq[index]
+        hist = full_seq[-self.max_len:]
         padding_len = self.max_len - len(hist)
         hist_pad = [0] * padding_len + hist
         # answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + self.u2answer[index]
@@ -213,7 +280,12 @@ class ValDataset(data_utils.Dataset):
         # assert sum([i>0 for i in hist_pad]) == sum([i>0 for i in answer_pad])
         hist_pad = hist_pad[-self.max_len:]
         answer_pad = answer_pad[-self.max_len:]
-        return torch.LongTensor(hist_pad), torch.LongTensor(answer_pad)
+        full_seq = [0] * (self.full_history_len - len(full_seq)) + full_seq
+        return (
+            torch.LongTensor(hist_pad),
+            torch.LongTensor(answer_pad),
+            torch.LongTensor(full_seq),
+        )
 
 
 class Data_Val():
@@ -237,23 +309,32 @@ class TestDataset(data_utils.Dataset):
         # self.users = sorted(self.u2seq.keys())
         self.u2answer = u2answer
         self.max_len = max_len
+        self.full_history_len = max(
+            1,
+            max(len(seq) + len(extra) for seq, extra in zip(self.u2seq, self.u2seq_add)),
+        )
 
     def __len__(self):
         return len(self.u2seq)
 
     def __getitem__(self, index):
         # user = self.users[index]
-        seq = self.u2seq[index] + self.u2seq_add[index]
+        full_seq = self.u2seq[index] + self.u2seq_add[index]
         # seq = self.u2seq[user]
-        hist = seq[-self.max_len:]
+        hist = full_seq[-self.max_len:]
         padding_len = self.max_len - len(hist)
         hist_pad = [0] * padding_len + hist
         # answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + self.u2answer[index]
-        answer_pad = [0] * padding_len + seq[-(len(hist)-1):] + [self.u2answer[index]]
+        answer_pad = [0] * padding_len + full_seq[-(len(hist)-1):] + [self.u2answer[index]]
         # assert sum([i>0 for i in hist_pad]) == sum([i>0 for i in answer_pad])
         hist_pad = hist_pad[-self.max_len:]
         answer_pad = answer_pad[-self.max_len:]
-        return torch.LongTensor(hist_pad), torch.LongTensor(answer_pad)
+        full_seq = [0] * (self.full_history_len - len(full_seq)) + full_seq
+        return (
+            torch.LongTensor(hist_pad),
+            torch.LongTensor(answer_pad),
+            torch.LongTensor(full_seq),
+        )
 
 
 class Data_Test():

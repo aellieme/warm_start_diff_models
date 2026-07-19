@@ -13,7 +13,7 @@ from main import load_and_split_gts, item_num_create, fix_random_seed_as
 from model import create_model_diffu, Att_Diffuse_model
 from utils import (Data_Train, Data_Val, Data_Test, build_candidate_mask,
                    eligible_warm_start_rows, filter_history_to_candidates,
-                   mask_ranking_scores)
+                   mask_ranking_scores, prepare_model_history)
 from trainer import model_train, evaluate_and_print
 from evaluate_topk_dp import compute_all_metrics
 
@@ -32,13 +32,18 @@ def compute_recall10_on_validation(model, val_loader, args):
     with torch.no_grad():
         for batch in val_loader:
             batch = [x.to(device) for x in batch]
-            batch[0] = filter_history_to_candidates(batch[0], candidate_mask)
+            full_history = filter_history_to_candidates(
+                batch[2] if len(batch) > 2 else batch[0], candidate_mask
+            )
+            batch[0] = prepare_model_history(
+                full_history, candidate_mask, batch[0].shape[1]
+            )
             _, rep_diffu, _, _, _, _ = model(batch[0], batch[1], train_flag=False)
             scores = model.diffu_rep_pre(rep_diffu)
             valid_rows = eligible_warm_start_rows(
-                batch[0], batch[1], candidate_mask
+                full_history, batch[1], candidate_mask
             )
-            mask_ranking_scores(scores, batch[0], candidate_mask)
+            mask_ranking_scores(scores, full_history, candidate_mask)
             _, topk = torch.topk(scores, k=10, dim=-1)
             for i in valid_rows.nonzero(as_tuple=False).squeeze(-1).tolist():
                 all_actual.append([batch[1][i].item()])
@@ -77,10 +82,8 @@ def objective(trial, base_args, data_raw):
 
     tra_data = Data_Train(data_raw['train'], args)
     val_data = Data_Val(data_raw['val_seq'], data_raw['val'], args)
-    test_data = Data_Test(data_raw['test_seq'], {uid: [] for uid in data_raw['test_seq']}, data_raw['test'], args)
     tra_loader = tra_data.get_pytorch_dataloaders()
     val_loader = val_data.get_pytorch_dataloaders()
-    test_loader = test_data.get_pytorch_dataloaders()
     try:
         diffu_rec = create_model_diffu(args)
     except AssertionError:
@@ -90,7 +93,7 @@ def objective(trial, base_args, data_raw):
     model = Att_Diffuse_model(diffu_rec, args)
     model = model.to(args.device)
 
-    best_model, _ = model_train(tra_loader, val_loader, test_loader, model, args, logger)
+    best_model, _ = model_train(tra_loader, val_loader, None, model, args, logger)
 
     recall10 = compute_recall10_on_validation(best_model, val_loader, args)
     return recall10

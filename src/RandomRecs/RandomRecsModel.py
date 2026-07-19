@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from experiment_tools.experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
+from experiment_tools.warm_start import build_last_item_examples
 
 random.seed(42)
 np.random.seed(42)
@@ -95,7 +96,7 @@ def get_random_recommendations(user_histories, item_catalog, k=20, rng=None):
         recommendations.append(recs)
     return recommendations
 
-def run_experiment(histories, catalog, k_list, rng):
+def run_experiment(histories, ground_truth, catalog, k_list, rng):
     max_k = max(k_list)
     start_time = time.perf_counter()
     preds_full = get_random_recommendations(histories, catalog, k=max_k, rng=rng)
@@ -141,15 +142,14 @@ if __name__ == "__main__":
     train_val_df = pd.concat([train_df, val_df], ignore_index=True)
     item_catalog = train_val_df['movieid'].unique().tolist()
 
-    history_baseline = pd.concat([train_df, val_df]).groupby('userid')['movieid'].apply(list).to_dict()
-
-    test_users = test_df['userid'].unique()
-    ground_truth = [test_df[test_df['userid'] == u]['movieid'].tolist() for u in test_users]
-
-    user_histories = [history_baseline.get(u, []) for u in test_users]
+    test_users, user_histories, ground_truth = build_last_item_examples(
+        train_val_df, test_df, 'userid', 'movieid', 'timestamp', item_catalog
+    )
 
     rng = np.random.default_rng(42)
-    results = run_experiment(user_histories, item_catalog, args.topk_list, rng)
+    results = run_experiment(
+        user_histories, ground_truth, item_catalog, args.topk_list, rng
+    )
     print_results(f"Random ({args.dataset})", args.topk_list, results)
     dataset_name = {"baby": "amazon_Baby", "toys": "amazon_Toys_and_Games"}.get(args.dataset, args.dataset)
     popularity = train_val_df['movieid'].value_counts().to_dict()
@@ -161,7 +161,8 @@ if __name__ == "__main__":
          for i, k in enumerate(args.topk_list)},
         split="global_temporal_70_10_20", mask_seen=True, seed=42,
         inference_total_sec=results['latencies'][0],
-        n_users=len(results['predictions']), maxlen=None,
+        n_users=len(test_users), maxlen=None,
+        ranking_protocol="warm_start_known_catalog_v2",
         popularity_bias=recommendation_popularity(results['predictions'], popularity, args.topk_list),
     )
     tracker.close()

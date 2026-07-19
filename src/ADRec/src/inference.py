@@ -25,8 +25,17 @@ from experiment_tools.experiment_tracking import (  # noqa: E402
     save_dataset_popularity,
 )
 from evaluate_topk_dp import compute_all_metrics  # noqa: E402
-from trainer import choose_model, downvote_seen_items  # noqa: E402
-from utils import Data_Test, build_final_train_sequences, fix_random_seed_as  # noqa: E402
+from trainer import choose_model  # noqa: E402
+from utils import (  # noqa: E402
+    Data_Test,
+    build_candidate_mask,
+    build_final_train_sequences,
+    eligible_warm_start_rows,
+    filter_history_to_candidates,
+    fix_random_seed_as,
+    mask_ranking_scores,
+    prepare_model_history,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -64,6 +73,7 @@ def main() -> None:
     args.metric_ks = cli.metric_ks
     args.device = device
     args.mask_seen = True
+    args.ranking_protocol = "warm_start_known_catalog_v2"
     args.pretrained = False
     args.freeze_emb = False
     fix_random_seed_as(args.random_seed)
@@ -92,6 +102,11 @@ def main() -> None:
         args,
     )
     test_loader = test_data.get_pytorch_dataloaders()
+    candidate_mask = build_candidate_mask(
+        args.coverage_candidate_items, args.item_num + 1, device
+    )
+    if int(candidate_mask.sum().item()) < max(args.metric_ks):
+        raise ValueError("Candidate catalogue is smaller than the largest metric K")
 
     tracker = ExperimentTracker(args.dataset, "ADRec")
     all_actual, all_predicted = [], []
@@ -99,15 +114,25 @@ def main() -> None:
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="ADRec inference"):
             batch = [tensor.to(device) for tensor in batch]
+            full_history = filter_history_to_candidates(
+                batch[2] if len(batch) > 2 else batch[0], candidate_mask
+            )
+            batch[0] = prepare_model_history(
+                full_history, candidate_mask, batch[0].shape[1]
+            )
             _, last_item, *_ = model(batch[0], batch[1], train_flag=False)
             scores = model.calculate_score(last_item)
-            if args.mask_seen:
-                scores = downvote_seen_items(scores, batch[0])
+            valid_rows = eligible_warm_start_rows(
+                full_history, batch[1], candidate_mask
+            )
+            mask_ranking_scores(scores, full_history, candidate_mask)
             topk = torch.topk(scores, k=max(args.metric_ks), dim=-1).indices
-            for index in range(len(batch[1])):
+            for index in valid_rows.nonzero(as_tuple=False).squeeze(-1).tolist():
                 all_actual.append([batch[1][index, -1].item()])
                 all_predicted.append(topk[index].cpu().tolist())
     inference_seconds = time.perf_counter() - started
+    if not all_actual:
+        raise ValueError("No eligible warm-start test examples remain")
 
     _, recalls, ndcgs, mrrs, coverages = compute_all_metrics(
         all_actual,
@@ -135,6 +160,7 @@ def main() -> None:
         n_users=len(all_actual),
         maxlen=args.max_len,
         checkpoint=str(model_path),
+        ranking_protocol=args.ranking_protocol,
         popularity_bias=recommendation_popularity(
             all_predicted, args.train_item_popularity, args.metric_ks
         ),

@@ -59,7 +59,13 @@ def main(config):
     state_dict = torch.load(model_checkpoint, map_location='cpu')
     model.load_state_dict(state_dict)
 
-    seqrec_module = SeqRecHuggingface(model, **config.seqrec_module)
+    history_before_test = pd.concat([train, validation], ignore_index=True)
+    history_before_test = add_time_idx(history_before_test)
+    seqrec_module = SeqRecHuggingface(
+        model,
+        **config.seqrec_module,
+        candidate_items=history_before_test.item_id.unique().tolist(),
+    )
 
     if config.model == 'GPT-2':
         if config.generation:
@@ -80,8 +86,6 @@ def main(config):
 
     print("\nBaseline inference")
     # recs = predict(trainer, seqrec_module, train, config)
-    history_before_test = pd.concat([train, validation], ignore_index=True)
-    history_before_test = add_time_idx(history_before_test)
     start_time_inf = time.perf_counter()
     recs = predict(trainer, seqrec_module, history_before_test, config, test_data=test, last_evaluation=True)
     # recs = predict(trainer, seqrec_module, train, config, test_data=test, last_evaluation=True)
@@ -92,7 +96,9 @@ def main(config):
     if config.get('test_metrics', True):
         # metrics_baseline = evaluate(recs, test, train, config, prefix='test')
         test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
-        metrics_baseline = evaluate(recs, test_last, train, config, prefix='test_last')
+        metrics_baseline = evaluate(
+            recs, test_last, history_before_test, config, prefix='test_last'
+        )
     else:
         # metrics_baseline = evaluate(recs, validation, train, config, prefix='val')
         val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()

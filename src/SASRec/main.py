@@ -143,6 +143,7 @@ def main():
         split="global_temporal_70_10_20", mask_seen=True, seed=seed,
         inference_total_sec=inf_time,
         n_users=len(users), maxlen=config['maxlen'],
+        ranking_protocol="warm_start_known_catalog_v2",
         popularity_bias=recommendation_popularity(recs.tolist(), train_item_popularity, [10, 20, 100]),
     )
     tracker.close()

@@ -7,13 +7,14 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from torch import nn
+import torch.nn.functional as F
 from transformers.generation.logits_process import LogitsProcessor
 
 
 class SeqRecBase(pl.LightningModule):
 
     def __init__(self, model, lr=1e-3, padding_idx=0,
-                 predict_top_k=10, filter_seen=True):
+                 predict_top_k=10, filter_seen=True, candidate_items=None):
 
         super().__init__()
 
@@ -22,6 +23,29 @@ class SeqRecBase(pl.LightningModule):
         self.padding_idx = padding_idx
         self.predict_top_k = predict_top_k
         self.filter_seen = filter_seen
+        candidate_items = [] if candidate_items is None else candidate_items
+        self.register_buffer(
+            'candidate_item_ids',
+            torch.as_tensor(sorted({int(item) for item in candidate_items}), dtype=torch.long),
+            persistent=False,
+        )
+
+    def candidate_mask(self, vocabulary_size, device):
+        mask = torch.zeros(vocabulary_size, dtype=torch.bool, device=device)
+        valid = self.candidate_item_ids.to(device)
+        valid = valid[(valid > 0) & (valid < vocabulary_size)]
+        if valid.numel():
+            mask[valid] = True
+        return mask
+
+    def mask_candidate_logits(self, logits):
+        mask = self.candidate_mask(logits.shape[-1], logits.device)
+        if not mask.any():
+            raise ValueError("GPTRec candidate catalogue is empty")
+        return logits.masked_fill(
+            ~mask.view(*([1] * (logits.ndim - 1)), -1),
+            torch.finfo(logits.dtype).min,
+        )
 
     def configure_optimizers(self):
 
@@ -56,6 +80,7 @@ class SeqRecBase(pl.LightningModule):
         last_item_idx = (input_ids != self.padding_idx).sum(axis=1) - 1
 
         preds = outputs[rows_ids, last_item_idx, :]
+        preds = self.mask_candidate_logits(preds)
 
         scores, preds = torch.sort(preds, descending=True)
 
@@ -110,8 +135,16 @@ class SeqRecHuggingface(SeqRecBase):
     generate_params: dict
 
     def training_step(self, batch, batch_idx):
-        outputs = self.model(**batch)
-        loss = outputs.loss
+        outputs = self.model(
+            input_ids=batch['input_ids'],
+            attention_mask=batch['attention_mask'],
+        )
+        logits = self.mask_candidate_logits(outputs.logits)
+        loss = F.cross_entropy(
+            logits.view(-1, logits.size(-1)),
+            batch['labels'].view(-1),
+            ignore_index=-100,
+        )
         self.log('train_loss', loss, on_step=False, on_epoch=True, prog_bar=False)
         return loss
 
@@ -201,7 +234,10 @@ class SeqRecHuggingface(SeqRecBase):
                 batch['input_ids'][:, - self.model.config.n_positions + self.predict_top_k:].to(self.model.device),
                 pad_token_id=self.padding_idx,
                 max_new_tokens=self.predict_top_k,
-                logits_processor=[FilterSeenProcessor()],
+                logits_processor=[
+                    CandidateItemsProcessor(self.candidate_item_ids),
+                    FilterSeenProcessor(),
+                ],
                 **self.generate_params
             )
             preds = seq[:, -self.predict_top_k:]
@@ -220,6 +256,7 @@ class SeqRecHuggingface(SeqRecBase):
                 batch['input_ids'][:, -self.model.config.n_positions + self.predict_top_k:].to(self.model.device),
                 pad_token_id=self.padding_idx,
                 max_new_tokens=self.predict_top_k,
+                logits_processor=[CandidateItemsProcessor(self.candidate_item_ids)],
                 **self.generate_params
             )
 
@@ -243,6 +280,20 @@ class FilterSeenProcessor(LogitsProcessor):
         return scores.scatter_(1, input_ids, -float('inf'))
 
 
+class CandidateItemsProcessor(LogitsProcessor):
+    def __init__(self, candidate_item_ids):
+        self.candidate_item_ids = candidate_item_ids
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        mask = torch.zeros(scores.shape[-1], dtype=torch.bool, device=scores.device)
+        valid = self.candidate_item_ids.to(scores.device)
+        valid = valid[(valid > 0) & (valid < scores.shape[-1])]
+        if not valid.numel():
+            raise ValueError("GPTRec candidate catalogue is empty")
+        mask[valid] = True
+        return scores.masked_fill(~mask.unsqueeze(0), -float('inf'))
+
+
 class SeqRec(SeqRecBase):
 
     def training_step(self, batch, batch_idx):
@@ -256,6 +307,7 @@ class SeqRec(SeqRecBase):
     def compute_loss(self, outputs, batch):
 
         loss_fct = nn.CrossEntropyLoss()
+        outputs = self.mask_candidate_logits(outputs)
         loss = loss_fct(outputs.view(-1, outputs.size(-1)), batch['labels'].view(-1))
 
         return loss

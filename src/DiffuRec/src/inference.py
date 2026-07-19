@@ -13,7 +13,7 @@ from experiment_tools.experiment_tracking import checkpoint_path
 from main import args as cli_args, load_and_split_gts, item_num_create, fix_random_seed_as
 from model import create_model_diffu, Att_Diffuse_model
 from utils import (Data_Test, build_candidate_mask, filter_history_to_candidates,
-                   mask_ranking_scores)
+                   mask_ranking_scores, prepare_model_history)
 from trainer import evaluate_and_print
 
 logging.basicConfig(level=logging.INFO)
@@ -42,19 +42,17 @@ def recommend_for_user(model, history_seq, target_item, args, topk=10):
     model.eval()
     device = args.device
     max_len = args.max_len
-    seq = history_seq[-max_len:]
-    pad_len = max_len - len(seq)
-    seq = [0] * pad_len + seq
-    seq_tensor = torch.LongTensor(seq).unsqueeze(0).to(device)
     candidate_mask = build_candidate_mask(
         args.coverage_candidate_items, args.item_num + 1, device
     )
-    seq_tensor = filter_history_to_candidates(seq_tensor, candidate_mask)
+    full_history = torch.LongTensor(history_seq).unsqueeze(0).to(device)
+    full_history = filter_history_to_candidates(full_history, candidate_mask)
+    seq_tensor = prepare_model_history(full_history, candidate_mask, max_len)
     tag_tensor = torch.LongTensor([[0]]).to(device)   # фиктивный tag
     with torch.no_grad():
         _, rep_diffu, _, _, _, _ = model(seq_tensor, tag_tensor, train_flag=False)
         scores = model.diffu_rep_pre(rep_diffu)
-        mask_ranking_scores(scores, seq_tensor, candidate_mask)
+        mask_ranking_scores(scores, full_history, candidate_mask)
         _, topk_indices = torch.topk(scores, k=topk, dim=-1)
     return topk_indices[0].cpu().tolist()
 

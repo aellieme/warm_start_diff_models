@@ -326,11 +326,9 @@ def main(args):
     
     tra_data = Data_Train(data_raw['train'], args)
     val_data = Data_Val(data_raw_for_val['train'], data_raw_for_val['val'], args)
-    test_data = Data_Test(data_raw_for_test['train'], data_raw_for_test['val'], data_raw_for_test['test'], args)
-    
     tra_data_loader = tra_data.get_pytorch_dataloaders()
     val_data_loader = val_data.get_pytorch_dataloaders()
-    test_data_loader = test_data.get_pytorch_dataloaders()
+    test_data_loader = None
     args.coverage_candidate_items = {
         item for sequence in data_raw['train'].values() for item in sequence
     }
@@ -344,6 +342,11 @@ def main(args):
     # if args.final_train:
         
     if args.final_train:
+        test_data = Data_Test(
+            data_raw_for_test['train'], data_raw_for_test['val'],
+            data_raw_for_test['test'], args,
+        )
+        test_data_loader = test_data.get_pytorch_dataloaders()
         merged_train = {uid: list(sequence) for uid, sequence in data_raw['train'].items()}
         for uid, seq in data_raw['val_seq'].items():
             # val_seq already contains train history plus validation history.
@@ -404,9 +407,10 @@ def main(args):
         # Оценка на тесте
         evaluate_and_print(model, test_data_loader, args, logger, description="test", save_recs=True)
         return
-    best_model, test_results = model_train(tra_data_loader, val_data_loader, test_data_loader, rec_diffu_joint_model, args, logger)
-    
-    evaluate_and_print(best_model, test_data_loader, args, logger, description="test")
+    model_train(
+        tra_data_loader, val_data_loader, None,
+        rec_diffu_joint_model, args, logger,
+    )
 
 # def main(args):    
 #     fix_random_seed_as(args.random_seed)

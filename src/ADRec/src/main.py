@@ -32,6 +32,8 @@ def main():
         args.coverage_candidate_items = {
             item for sequence in train_combined for item in sequence
         }
+        args.mask_seen = True
+        args.ranking_protocol = 'warm_start_known_catalog_v2'
         args.train_item_popularity = dict(
             Counter(item for sequence in train_combined for item in sequence)
         )
@@ -56,9 +58,6 @@ def main():
         # test_data_loader = test_data.get_pytorch_dataloaders()
 
     # cold_hot_long_short(data_raw, args.dataset)
-    if args.dataset == 'toys':
-        args.item_num = 11924
-        print("Forced item_num to", args.item_num, "for toys dataset")
     model = choose_model(args)
     print(args.description)
     logger.info(args.description)
@@ -68,7 +67,10 @@ def main():
     # print(args)
     
 
-    best_model, test_results = model_train(model,tra_data_loader, val_data_loader, test_data_loader, args, logger,train_time, final=True)
+    best_model, test_results = model_train(
+        model, tra_data_loader, val_data_loader, test_data_loader,
+        args, logger, train_time, final=args.final,
+    )
     training_duration_seconds = time.time()-start_time
     minutes = training_duration_seconds // 60
     seconds = training_duration_seconds % 60

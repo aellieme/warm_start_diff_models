@@ -23,11 +23,20 @@ class PointWiseFeedForward(nn.Module):
         return outputs
 
 class SASRec(nn.Module):
-    def __init__(self, item_num, config):
+    def __init__(self, item_num, config, candidate_items=None):
         super(SASRec, self).__init__()
         print(f"[DEBUG] SASRec initialized with maxlen={config['maxlen']}")
         self.item_num = item_num
         self.pad_token = item_num
+        if candidate_items is None:
+            candidate_items = range(item_num)
+        candidate_mask = torch.zeros(item_num + 1, dtype=torch.bool)
+        valid_candidates = sorted({
+            int(item) for item in candidate_items if 0 <= int(item) < item_num
+        })
+        if valid_candidates:
+            candidate_mask[valid_candidates] = True
+        self.register_buffer('training_candidate_mask', candidate_mask, persistent=False)
 
         self.item_emb = nn.Embedding(self.item_num+1, config['hidden_units'], padding_idx=self.pad_token)
         self.pos_emb = nn.Embedding(config['maxlen'], config['hidden_units'])
@@ -85,7 +94,10 @@ class SASRec(nn.Module):
     def forward(self, log_seqs):
         log_feats = self.log2feats(log_seqs)
         logits = torch.matmul(log_feats, self.item_emb.weight.t())
-        return logits
+        return logits.masked_fill(
+            ~self.training_candidate_mask.view(1, 1, -1),
+            torch.finfo(logits.dtype).min,
+        )
 
     def score(self, seq):
         maxlen = self.pos_emb.num_embeddings
@@ -106,7 +118,10 @@ def save_sasrec_model(model, config, data_description, data_index, filepath):
         'data_description': data_description,
         'data_index': data_index,          # для декодирования при инференсе
         'pad_token': model.pad_token,
-        'item_num': model.item_num
+        'item_num': model.item_num,
+        'candidate_items': model.training_candidate_mask.nonzero(
+            as_tuple=False
+        ).squeeze(-1).cpu().tolist(),
     }
     from experiment_tools.experiment_tracking import save_torch_checkpoint
     save_torch_checkpoint(checkpoint, filepath)
@@ -117,7 +132,11 @@ def load_sasrec_model(filepath, device=None):
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     checkpoint = torch.load(filepath, map_location=device, weights_only=False)
-    model = SASRec(checkpoint['item_num'], checkpoint['config'])
+    model = SASRec(
+        checkpoint['item_num'],
+        checkpoint['config'],
+        candidate_items=checkpoint.get('candidate_items'),
+    )
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     model.eval()

@@ -80,7 +80,7 @@ class GlobalTemporalSplitter:
         train_cutoff = time_values.quantile(train_p)
         val_cutoff   = time_values.quantile(train_p + val_p)
 
-        print(f"[Cutoffs] Train ≤ {train_cutoff}, Val ≤ {val_cutoff}")
+        print(f"[Cutoffs] Train <= {train_cutoff}, Val <= {val_cutoff}")
 
         train_df = self.df[self.df[self.time_col] <= train_cutoff].copy()
         val_df   = self.df[(self.df[self.time_col] > train_cutoff) & (self.df[self.time_col] <= val_cutoff)].copy()
@@ -90,20 +90,28 @@ class GlobalTemporalSplitter:
         print(f"[Split] Valid: {len(val_df)} ({len(val_df)/n:.2%})")
         print(f"[Split] Test: {len(test_df)} ({len(test_df)/n:.2%})")
 
-        # Маппинг только по тренировочным пользователям и айтемам
-        unique_users = train_df[self.u_col].unique()
-        unique_items = train_df[self.i_col].unique()
+        # Users are not model parameters in T-DiffRec, so all user rows can be
+        # represented safely. Items are mapped strictly from train+validation.
+        train_val_df = pd.concat([train_df, val_df], ignore_index=True)
+        unique_users = self.df[self.u_col].unique()
+        unique_items = train_val_df[self.i_col].unique()
 
         u_map = {uid: i for i, uid in enumerate(unique_users)}
         i_map = {iid: i for i, iid in enumerate(unique_items)}
 
-        print(f"[Mapping] Unique Users (Train): {len(u_map)}")
-        print(f"[Mapping] Unique Items (Train): {len(i_map)}")
+        print(f"[Mapping] Unique Users (all rows): {len(u_map)}")
+        print(f"[Mapping] Unique Items (Train+Valid): {len(i_map)}")
 
         # Преобразование всех сплитов в индексы
         train_data = self._map(train_df, u_map, i_map)
         val_data   = self._map(val_df,   u_map, i_map)
         test_data  = self._map(test_df,  u_map, i_map)
+        valid_history, valid_targets = self._last_item_protocol(
+            val_df, u_map, i_map
+        )
+        test_history, test_targets = self._last_item_protocol(
+            test_df, u_map, i_map
+        )
 
         print(f"[Filter] Train interactions kept: {len(train_data)}")
         print(f"[Filter] Valid interactions kept: {len(val_data)} (dropped {len(val_df) - len(val_data)})")
@@ -113,6 +121,11 @@ class GlobalTemporalSplitter:
             'train': train_data,
             'val': val_data,
             'test': test_data,
+            'valid_history': valid_history,
+            'valid_targets': valid_targets,
+            'test_history': test_history,
+            'test_targets': test_targets,
+            'shape': (len(u_map), len(i_map)),
             'maps': (u_map, i_map)
         }
 
@@ -124,6 +137,24 @@ class GlobalTemporalSplitter:
         cleaned = mapped.dropna(subset=['uid', 'iid'])
         return cleaned[['uid', 'iid']].values.astype(int)
 
+    def _last_item_protocol(self, df, u_map, i_map):
+        """Map histories before each user's raw last event and its target."""
+        targets = np.full(len(u_map), -1, dtype=np.int64)
+        history_pairs = []
+        for raw_uid, group in df.groupby(self.u_col, sort=False):
+            group = group.sort_values(self.time_col)
+            mapped_uid = u_map[raw_uid]
+            raw_items = group[self.i_col].tolist()
+            mapped_target = i_map.get(raw_items[-1])
+            if mapped_target is not None:
+                targets[mapped_uid] = mapped_target
+            for raw_item in raw_items[:-1]:
+                mapped_item = i_map.get(raw_item)
+                if mapped_item is not None:
+                    history_pairs.append((mapped_uid, mapped_item))
+        history = np.asarray(history_pairs, dtype=np.int64).reshape(-1, 2)
+        return history, targets
+
     def save_splits(self, data_dict, output_path):
         # сохраняю сплиты в .нпу файлы
         if not os.path.exists(output_path):
@@ -133,13 +164,26 @@ class GlobalTemporalSplitter:
         files = {
             'train_list.npy': data_dict['train'],
             'valid_list.npy': data_dict['val'],
-            'test_list.npy': data_dict['test']
+            'test_list.npy': data_dict['test'],
+            'valid_history.npy': data_dict['valid_history'],
+            'valid_targets.npy': data_dict['valid_targets'],
+            'test_history.npy': data_dict['test_history'],
+            'test_targets.npy': data_dict['test_targets'],
         }
 
         for filename, array in files.items():
             filepath = os.path.join(output_path, filename)
             np.save(filepath, array)
             print(f"[IO] Saved {filename}: shape {array.shape} -> {filepath}")
+
+        with open(os.path.join(output_path, 'protocol_meta.json'), 'w', encoding='utf-8') as handle:
+            json.dump({
+                'protocol': 'warm_start_known_catalog_v2',
+                'n_user': data_dict['shape'][0],
+                'n_item': data_dict['shape'][1],
+                'item_catalog': 'train+validation',
+                'target': 'last_raw_event',
+            }, handle, indent=2)
 
         self._verify_no_leakage(data_dict)
 

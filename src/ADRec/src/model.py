@@ -12,6 +12,7 @@ import einops
 import os
 from common import *
 from dreamrec import DreamRec
+from utils import build_candidate_mask, mask_training_scores
 class Att_Diffuse_model(nn.Module):
     def __init__(self, args):
         super(Att_Diffuse_model, self).__init__()
@@ -19,6 +20,14 @@ class Att_Diffuse_model(nn.Module):
         self.args=args
         self.item_num = args.item_num
         self.item_embedding = self.embed_item(pretrained=args.pretrained)
+        candidate_items = getattr(
+            args, 'coverage_candidate_items', range(1, self.item_num + 1)
+        )
+        self.register_buffer(
+            'training_candidate_mask',
+            build_candidate_mask(candidate_items, self.item_num + 1, device='cpu'),
+            persistent=False,
+        )
         self.embed_dropout = nn.Dropout(args.emb_dropout)
         # self.position_embeddings = nn.Embedding(args.max_len, args.hidden_size)
         # self.position_embeddings = RotaryPositionalEmbeddings(args.hidden_size)
@@ -70,8 +79,17 @@ class Att_Diffuse_model(nn.Module):
 
     def loss_diffu(self, rep_diffu, labels):
         scores = torch.matmul(rep_diffu, self.item_embedding.weight.t())
+        scores = mask_training_scores(scores, self.training_candidate_mask)
         scores_pos = scores.gather(1 , labels)  ## labels: b x 1
-        scores_neg_mean = (torch.sum(scores, dim=-1).unsqueeze(-1)-scores_pos)/(scores.shape[1]-1)
+        candidate_count = int(self.training_candidate_mask.sum().item())
+        if candidate_count <= 1:
+            raise ValueError("ADRec needs at least two training candidate items")
+        finite_scores = scores.masked_fill(
+            ~self.training_candidate_mask.unsqueeze(0), 0.0
+        )
+        scores_neg_mean = (
+            finite_scores.sum(dim=-1, keepdim=True) - scores_pos
+        ) / (candidate_count - 1)
 
         loss = torch.min(-torch.log(torch.mean(torch.sigmoid((scores_pos - scores_neg_mean).squeeze(-1)))), torch.tensor(1e8))
        
@@ -106,6 +124,7 @@ class Att_Diffuse_model(nn.Module):
 
             # 计算当前批次的分数（B' x L x K）与物品嵌入的矩阵乘积
             scores = torch.matmul(batch_out_seq, item_embeddings)  # 形状 (B', L, num_items)
+            scores = mask_training_scores(scores, self.training_candidate_mask)
 
             # 计算损失：需要将 `scores` 和 `batch_labels` 展平以计算交叉熵损失
             loss = self.loss_ce(scores.reshape(-1, scores.shape[-1]), batch_labels.reshape(-1))
@@ -123,6 +142,7 @@ class Att_Diffuse_model(nn.Module):
         #     loss = self.calculate_loss_minibatch(out_seq, labels)
         # else:
         scores = torch.matmul(out_seq, self.item_embedding.weight.t()) #B,L,K
+        scores = mask_training_scores(scores, self.training_candidate_mask)
         loss = self.loss_ce(scores.reshape(-1, scores.shape[-1]), labels.reshape(-1))
 
         #

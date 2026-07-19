@@ -56,7 +56,7 @@ def objective(trial):
     val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
     recs = predict(
         trainer, seqrec_module,
-        train[train.user_id.isin(validation.user_id.unique())],
+        train,
         cfg,
         test_data=validation,
         last_evaluation=True,
@@ -130,7 +130,7 @@ recs = predict(
 )
 
 test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
-metrics = evaluate(recs, test_last, train, final_cfg, prefix='test_last')
+metrics = evaluate(recs, test_last, train_val, final_cfg, prefix='test_last')
 print("Final test metrics:", metrics)
 
 summary = {

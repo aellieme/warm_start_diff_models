@@ -142,6 +142,7 @@ def main(config):
             split="global_temporal_70_10_20", mask_seen=True, seed=42,
             inference_total_sec=inf_time,
             n_users=int(recs["user_id"].nunique()), maxlen=int(config.dataset.max_length),
+            ranking_protocol="warm_start_known_catalog_v2",
             popularity_bias=recommendation_popularity(
                 recs.groupby("user_id")["item_id"].apply(list).tolist(),
                 train_item_popularity, top_k_list,
@@ -170,73 +171,29 @@ def main(config):
         training_time = time.time() - start_time
         print('training_time', training_time)
 
-        if config.test_metrics:
-            history_before_test = pd.concat([train, validation], ignore_index=True)
-            history_before_test = add_time_idx(history_before_test)
-            start_time_inf = time.perf_counter()
-            recs = predict(trainer, seqrec_module, history_before_test, config, test_data=test, last_evaluation=True)
+        # Non-final runs are validation-only.  ``test_metrics`` is retained in
+        # old configs for CLI compatibility but cannot expose the test split.
+        start_time_inf = time.perf_counter()
+        recs = predict(
+            trainer, seqrec_module, train, config,
+            test_data=validation, last_evaluation=True,
+        )
+        baseline_latency = time.perf_counter() - start_time_inf
+        val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
+        val_metrics = evaluate(recs, val_last, train, config, prefix='val_last')
 
-            # recs = predict(trainer, seqrec_module, train, config, test_data=test, last_evaluation=True)
-            # recs = predict(trainer, seqrec_module, train, config)
-            baseline_latency = time.perf_counter() - start_time_inf
-        else:
-            start_time_inf = time.perf_counter()
-            # recs = predict(trainer, seqrec_module, train[train.user_id.isin(validation.user_id.unique())], config,last_evaluation=True )
-            recs = predict(trainer, seqrec_module, train[train.user_id.isin(validation.user_id.unique())], config, test_data=validation, last_evaluation=True)
-            val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
-            evaluate(recs, val_last, train, config, prefix='val_last')
-            baseline_latency = time.perf_counter() - start_time_inf
-        
         if hasattr(config, 'optuna_metrics'):
-            # val_metrics = evaluate(recs, validation[validation.time_idx == 0], train,  config, prefix='val')
-            val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
-            val_metrics = evaluate(recs, val_last, train, config, prefix='val_last')
             return val_metrics[val_metrics['metric_name'] == config.optuna_metrics]['metric_value'].values
-        else:
-            evaluate(recs, validation, train,  config, prefix='val')
-        
-        
-        if config.test_metrics:
-            # metrics_baseline = evaluate(recs, test, train, config, prefix='test')
-            test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
-            train_val_items_df = pd.concat([train, validation], ignore_index=True)
-            metrics_baseline = evaluate(
-                recs,
-                test_last,
-                train_val_items_df,
-                config,
-                prefix='test_last',
-            )
-        else:
-            val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
-            metrics_baseline = evaluate(recs, val_last, train, config, prefix='val_last')
 
-        baseline_prefix = 'test_last_' if config.get('test_metrics', True) else 'val_last_'
         summary = {
-            f'Recall@10 ': metrics_baseline.get(f'{baseline_prefix}recall@10', 0),
-            f'NDCG@10 ': metrics_baseline.get(f'{baseline_prefix}ndcg@10', 0),
-            f'Coverage': metrics_baseline.get(f'{baseline_prefix}coverage@10', 0),
-            f'MRR ': metrics_baseline.get(f'{baseline_prefix}mrr@10', 0),
+            'Recall@10': val_metrics.get('val_last_recall@10', 0),
+            'NDCG@10': val_metrics.get('val_last_ndcg@10', 0),
+            'Coverage': val_metrics.get('val_last_coverage@10', 0),
+            'MRR': val_metrics.get('val_last_mrr@10', 0),
             'Latency (s)': baseline_latency,
         }
         summary_df = pd.DataFrame([summary])
         print(summary_df.to_string(index=False))
-        if config.test_metrics:
-            tracker.log_final_metrics(
-                {int(k): {
-                    "recall": metrics_baseline.get(f"test_last_recall@{k}", 0.0),
-                    "ndcg": metrics_baseline.get(f"test_last_ndcg@{k}", 0.0),
-                    "mrr": metrics_baseline.get(f"test_last_mrr@{k}", 0.0),
-                    "coverage": metrics_baseline.get(f"test_last_coverage@{k}", 0.0),
-                } for k in config.evaluator.top_k},
-                split="global_temporal_70_10_20", mask_seen=True, seed=42,
-                inference_total_sec=baseline_latency,
-                n_users=int(recs["user_id"].nunique()), maxlen=int(config.dataset.max_length),
-                popularity_bias=recommendation_popularity(
-                    recs.groupby("user_id")["item_id"].apply(list).tolist(),
-                    train_item_popularity, config.evaluator.top_k,
-                ),
-            )
         tracker.close()
 
         model_path = checkpoint_path(
@@ -342,16 +299,12 @@ def create_dataloaders(train, validation, config):
         validation_users = np.random.choice(validation_users, size=validation_size, replace=False)
         validation = validation[validation.user_id.isin(validation_users)]
     
-    user_seq_len = validation.groupby('user_id').size()
-    users_with_enough = user_seq_len[user_seq_len >= 2].index
-    validation = validation[validation.user_id.isin(users_with_enough)]
-    
     train_dataset = MaskedLMDataset(train, **config['dataset']) if config.model == 'BERT4Rec' else CausalLMDataset(train, **config['dataset'])
     max_len = config.dataset.max_length
     if config.generation:
         max_len = max_len - max(config.evaluator.top_k)
     eval_dataset = LastEvaluationDataset(
-        train_data=train[train.user_id.isin(validation.user_id.unique())],
+        train_data=train,
         test_data=validation,
         max_length=max_len,
         user_col='user_id', item_col='item_id', time_col='time_idx'
@@ -426,13 +379,14 @@ class PlottingCallback(Callback):
 
 
 def training(model, train_loader, eval_loader, config, tracker=None):
-
+    module_kwargs = dict(config['seqrec_module'])
+    module_kwargs['candidate_items'] = train_loader.dataset.candidate_items
     if config.model == 'GPT-2':
-        seqrec_module = SeqRecHuggingface(model, **config['seqrec_module'])
+        seqrec_module = SeqRecHuggingface(model, **module_kwargs)
     elif config.model == 'SASRec':
-        seqrec_module = SeqRec(model, **config['seqrec_module'])
+        seqrec_module = SeqRec(model, **module_kwargs)
     elif config.model == 'BERT4Rec':
-        seqrec_module = SeqRec(model, **config['seqrec_module'])
+        seqrec_module = SeqRec(model, **module_kwargs)
 
     early_stopping = EarlyStopping(monitor="val_ndcg", mode="max",
                                    patience=config.patience, verbose=False)
@@ -563,12 +517,14 @@ def evaluate(recs, test, train,  config, prefix='test'):
     return metrics
 
 def final_training(model, train_loader, config, tracker=None):
+    module_kwargs = dict(config['seqrec_module'])
+    module_kwargs['candidate_items'] = train_loader.dataset.candidate_items
     if config.model == 'GPT-2':
-        seqrec_module = SeqRecHuggingface(model, **config['seqrec_module'])
+        seqrec_module = SeqRecHuggingface(model, **module_kwargs)
     elif config.model == 'SASRec':
-        seqrec_module = SeqRec(model, **config['seqrec_module'])
+        seqrec_module = SeqRec(model, **module_kwargs)
     elif config.model == 'BERT4Rec':
-        seqrec_module = SeqRec(model, **config['seqrec_module'])
+        seqrec_module = SeqRec(model, **module_kwargs)
     else:
         raise ValueError(f"Unknown model: {config.model}")
 

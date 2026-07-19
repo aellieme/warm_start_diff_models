@@ -54,14 +54,21 @@ class Evaluator:
 
     def compute_metrics(self, test, recs, train=None):
         # Подготовка данных
-        actual_list, predicted_list = self._prepare_lists(test, recs)
-
         # Общее количество предметов (для coverage)
         candidate_items = (
             set(train[self.col_item].unique().tolist())
             if train is not None
             else set()
         )
+        if train is not None:
+            invalid_recommendations = set(recs[self.col_item]) - candidate_items
+            if invalid_recommendations:
+                raise ValueError(
+                    "Recommendations contain items outside the warm-start catalogue"
+                )
+            test = test[test[self.col_item].isin(candidate_items)]
+
+        actual_list, predicted_list = self._prepare_lists(test, recs)
 
         # Вычисляем все метрики сразу для всех top_k
         precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(

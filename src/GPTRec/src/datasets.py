@@ -19,6 +19,7 @@ class LMDataset(Dataset):
         self.user_col = user_col
         self.item_col = item_col
         self.time_col = time_col
+        self.candidate_items = sorted({int(item) for item in df[item_col].unique()})
 
         self.data = df.sort_values(time_col).groupby(user_col)[item_col].agg(list).to_dict()
         self.user_ids = list(self.data.keys())
@@ -243,21 +244,27 @@ class LastEvaluationDataset(Dataset):
         # группируем train и test последовательности по пользователям
         train_seqs = train_data.sort_values(time_col).groupby(user_col)[item_col].agg(list).to_dict()
         test_seqs = test_data.sort_values(time_col).groupby(user_col)[item_col].agg(list).to_dict()
+        candidate_items = set(train_data[item_col].unique().tolist())
         
         self.samples = []
-        for user in set(train_seqs.keys()) & set(test_seqs.keys()):
-            train_seq = train_seqs[user]
+        for user in sorted(test_seqs.keys()):
+            train_seq = train_seqs.get(user, [])
             test_seq = test_seqs[user]
             if len(test_seq) < 1:
                 continue
-            context = train_seq + test_seq[:-1]
+            full_history = [
+                item for item in train_seq + test_seq[:-1]
+                if item in candidate_items
+            ]
             target = test_seq[-1]
+            if not full_history or target not in candidate_items:
+                continue
+            context = full_history
             # обрезаем контекст до max_length
-            if len(context) > max_length:
-                context = context[-max_length:]
+            model_context = context[-max_length:]
             self.samples.append({
                 'user_id': user,
-                'input_ids': np.array(context),
+                'input_ids': np.array(model_context),
                 'target': target,
                 'full_history': context  # для фильтрации уже виденных айтемов
             })

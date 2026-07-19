@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from experiment_tools.experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
+from experiment_tools.warm_start import build_last_item_examples
 
 random.seed(42)
 np.random.seed(42)
@@ -97,7 +98,7 @@ def get_top_k_recommendations(user_histories, popular_items, k=20):
         recommendations.append(recs)
     return recommendations
 
-def run_experiment(histories, popular_items, k_list):
+def run_experiment(histories, ground_truth, popular_items, k_list):
     max_k = max(k_list)
     start_time = time.perf_counter()
     preds_full = get_top_k_recommendations(histories, popular_items, k=max_k)
@@ -141,17 +142,15 @@ if __name__ == "__main__":
 
     train_df, val_df, test_df, item_catalog = global_temporal_split(data)
 
-    history_baseline = pd.concat([train_df, val_df]).groupby('userid')['movieid'].apply(list).to_dict()
-
-    test_users = test_df['userid'].unique()
-    ground_truth = [test_df[test_df['userid'] == u]['movieid'].tolist() for u in test_users]
-
-    user_histories = [history_baseline.get(u, []) for u in test_users]
-
-    train_val_df = pd.concat([train_df, val_df])
+    train_val_df = pd.concat([train_df, val_df], ignore_index=True)
     popular_items = train_val_df['movieid'].value_counts().index.tolist()
+    test_users, user_histories, ground_truth = build_last_item_examples(
+        train_val_df, test_df, 'userid', 'movieid', 'timestamp', popular_items
+    )
 
-    results = run_experiment(user_histories, popular_items, args.topk_list)
+    results = run_experiment(
+        user_histories, ground_truth, popular_items, args.topk_list
+    )
     print_results(f"TopPopular ({args.dataset})", args.topk_list, results)
     dataset_name = {"baby": "amazon_Baby", "toys": "amazon_Toys_and_Games"}.get(args.dataset, args.dataset)
     popularity = train_val_df['movieid'].value_counts().to_dict()
@@ -163,7 +162,8 @@ if __name__ == "__main__":
          for i, k in enumerate(args.topk_list)},
         split="global_temporal_70_10_20", mask_seen=True, seed=42,
         inference_total_sec=results['latencies'][0],
-        n_users=len(results['predictions']), maxlen=None,
+        n_users=len(test_users), maxlen=None,
+        ranking_protocol="warm_start_known_catalog_v2",
         popularity_bias=recommendation_popularity(results['predictions'], popularity, args.topk_list),
     )
     tracker.close()
