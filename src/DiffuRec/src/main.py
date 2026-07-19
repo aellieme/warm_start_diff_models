@@ -14,7 +14,8 @@ import numpy as np
 import logging
 import time
 import pickle
-from utils import Data_Train, Data_Val, Data_Test, Data_CHLS
+from utils import (Data_Train, Data_Val, Data_Test, Data_CHLS,
+                   encode_item_ids_with_padding)
 from model import create_model_diffu, Att_Diffuse_model
 from trainer import model_train, LSHT_inference
 from collections import Counter
@@ -43,6 +44,8 @@ parser.add_argument('--max_len', type=int, default=50, help='The max length of s
 parser.add_argument('--device', type=str, default='cuda', choices=['cpu', 'cuda'])
 parser.add_argument('--num_gpu', type=int, default=1, help='Number of GPU')
 parser.add_argument('--batch_size', type=int, default=1024, help='Batch Size')  
+parser.add_argument('--num_workers', type=int, default=2, help='DataLoader worker processes')
+parser.add_argument('--amp', action='store_true', help='Use CUDA mixed precision during training')
 parser.add_argument("--hidden_size", default=128, type=int, help="hidden size of model")
 parser.add_argument('--dropout', type=float, default=0.1, help='Dropout of representation')
 parser.add_argument('--emb_dropout', type=float, default=0.3, help='Dropout of item embedding')
@@ -120,10 +123,8 @@ def load_amazon(dataset_name, data_dir='../../data/amazon'):
     # кодирование
     from sklearn.preprocessing import LabelEncoder
     user_enc = LabelEncoder()
-    item_enc = LabelEncoder()
     df['userid'] = user_enc.fit_transform(df['userid'])
-    df['itemid'] = item_enc.fit_transform(df['itemid'])
-    smap = {idx: original for idx, original in enumerate(item_enc.classes_)}
+    df['itemid'], smap = encode_item_ids_with_padding(df['itemid'])
     return df, smap
 def item_num_create(args, item_num):
     args.item_num = item_num
@@ -138,10 +139,8 @@ def load_movielens_local(data_dir='../../data/info/'):
                      names=['userid', 'movieid', 'rating', 'timestamp'])
     df = df[['userid', 'movieid', 'timestamp']]
     user_enc = LabelEncoder()
-    item_enc = LabelEncoder()
     df['userid'] = user_enc.fit_transform(df['userid'])
-    df['movieid'] = item_enc.fit_transform(df['movieid'])
-    smap = {idx: original for idx, original in enumerate(item_enc.classes_)}
+    df['movieid'], smap = encode_item_ids_with_padding(df['movieid'])
     df = df.rename(columns={'movieid': 'itemid'})
     return df, smap
 
@@ -306,6 +305,8 @@ def main(args):
     print("Item vocab size:", len(data_raw['smap']))
     
     args = item_num_create(args, len(data_raw['smap']))
+    args.item_id_offset = 1
+    args.ranking_protocol = 'warm_start_known_catalog_v2'
     
     # Подготовка данных для валидации
     data_raw_for_val = {
@@ -361,6 +362,8 @@ def main(args):
         diffu_rec = create_model_diffu(args)
         model = Att_Diffuse_model(diffu_rec, args).to(args.device)
         optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        use_amp = args.amp and args.device == 'cuda'
+        scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
         
         from plotting import TrainingPlotter
         plotter = TrainingPlotter(save_dir=args.log_file + args.dataset,
@@ -371,12 +374,14 @@ def main(args):
             model.train()
             total_loss = 0
             for batch in tqdm(tra_loader, desc=f"Epoch {epoch:03d}/{args.epochs}", unit="batch"):
-                batch = [x.to(args.device) for x in batch]
-                optimizer.zero_grad()
-                _, rep_diffu, _, _, _, _ = model(batch[0], batch[1], train_flag=True)
-                loss = model.loss_diffu_ce(rep_diffu, batch[1])
-                loss.backward()
-                optimizer.step()
+                batch = [x.to(args.device, non_blocking=True) for x in batch]
+                optimizer.zero_grad(set_to_none=True)
+                with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+                    _, rep_diffu, _, _, _, _ = model(batch[0], batch[1], train_flag=True)
+                    loss = model.loss_diffu_ce(rep_diffu, batch[1])
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
                 total_loss += loss.item()
             avg_loss = total_loss / len(tra_loader)
             plotter.update(epoch=epoch, loss=avg_loss)

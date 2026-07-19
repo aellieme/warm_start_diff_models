@@ -18,7 +18,10 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
     :return: a tensor of shape [batch_size, 1, ...] where the shape has K dims.
     """
     
-    res = th.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
+    if th.is_tensor(arr):
+        res = arr[timesteps].float()
+    else:
+        res = th.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
     while len(res.shape) < len(broadcast_shape):
         res = res[..., None]
     return res.expand(broadcast_shape)
@@ -227,15 +230,28 @@ class MultiHeadedAttention(nn.Module):
     def forward(self, q, k, v, mask=None):
         batch_size = q.shape[0]
         q, k, v = [l(x).view(batch_size, -1, self.num_heads, self.size_head).transpose(1, 2) for l, x in zip(self.linear_layers, (q, k, v))]
-        corr = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(q.size(-1))
-        
+
+        attention_bias = None
         if mask is not None:
-            mask = mask.unsqueeze(1).repeat([1, corr.shape[1], 1]).unsqueeze(-1).repeat([1,1,1,corr.shape[-1]])
-            corr = corr.masked_fill(mask == 0, -1e9)
-        prob_attn = F.softmax(corr, dim=-1)
-        if self.dropout is not None:
-            prob_attn = self.dropout(prob_attn)
-        hidden = torch.matmul(prob_attn, v)
+            # Shape [B, 1, 1, L] broadcasts over heads and query positions.
+            # Padding is excluded from keys/values without materializing the
+            # old [B, H, L, L] mask in every block.
+            attention_bias = torch.zeros(
+                (batch_size, 1, 1, mask.shape[1]),
+                dtype=q.dtype,
+                device=q.device,
+            )
+            attention_bias.masked_fill_(
+                mask[:, None, None, :] == 0,
+                torch.finfo(q.dtype).min,
+            )
+        hidden = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=attention_bias,
+            dropout_p=self.dropout.p if self.training else 0.0,
+        )
         hidden = self.w_layer(hidden.transpose(1, 2).contiguous().view(batch_size, -1, self.num_heads * self.size_head))
         return hidden
 
@@ -288,6 +304,11 @@ class Diffu_xstart(nn.Module):
         self.lambda_uncertainty = args.lambda_uncertainty
         self.dropout = nn.Dropout(args.dropout)
         self.norm_diffu_rep = LayerNorm(self.hidden_size)
+        half = self.hidden_size // 2
+        frequencies = th.exp(
+            -math.log(10000) * th.arange(half, dtype=th.float32) / half
+        )
+        self.register_buffer('time_frequencies', frequencies, persistent=False)
 
     def timestep_embedding(self, timesteps, dim, max_period=10000):
         """
@@ -300,7 +321,14 @@ class Diffu_xstart(nn.Module):
         :return: an [N x dim] Tensor of positional embeddings.
         """
         half = dim // 2
-        freqs = th.exp(-math.log(max_period) * th.arange(start=0, end=half, dtype=th.float32) / half).to(device=timesteps.device)
+        if dim == self.hidden_size and max_period == 10000:
+            freqs = self.time_frequencies
+        else:
+            freqs = th.exp(
+                -math.log(max_period)
+                * th.arange(half, dtype=th.float32, device=timesteps.device)
+                / half
+            )
         args = timesteps[:, None].float() * freqs[None]
         embedding = th.cat([th.cos(args), th.sin(args)], dim=-1)
         if dim % 2:
@@ -313,7 +341,10 @@ class Diffu_xstart(nn.Module):
         
         # lambda_uncertainty = th.normal(mean=th.full(rep_item.shape, 1.0), std=th.full(rep_item.shape, 1.0)).to(x_t.device)
         
-        lambda_uncertainty = th.normal(mean=th.full(rep_item.shape, self.lambda_uncertainty), std=th.full(rep_item.shape, self.lambda_uncertainty)).to(x_t.device)  ## distribution
+        lambda_uncertainty = th.empty_like(rep_item).normal_(
+            mean=self.lambda_uncertainty,
+            std=self.lambda_uncertainty,
+        )
         # lambda_uncertainty = self.lambda_uncertainty  ### fixed
         
         ####  Attention
@@ -383,6 +414,27 @@ class DiffuRec(nn.Module):
         # calculations for posterior q(x_{t-1} | x_t, x_0)
         self.posterior_variance = (betas * (1.0 - self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod))
 
+        # These coefficients are read in every train step and in every reverse
+        # diffusion step. Buffers move with the model and avoid repeated
+        # NumPy -> CPU tensor -> GPU copies.
+        coefficient_buffers = {
+            '_sqrt_alphas_cumprod': self.sqrt_alphas_cumprod,
+            '_sqrt_one_minus_alphas_cumprod': self.sqrt_one_minus_alphas_cumprod,
+            '_sqrt_recip_alphas_cumprod': self.sqrt_recip_alphas_cumprod,
+            '_sqrt_recipm1_alphas_cumprod': self.sqrt_recipm1_alphas_cumprod,
+            '_posterior_mean_coef1': self.posterior_mean_coef1,
+            '_posterior_mean_coef2': self.posterior_mean_coef2,
+            '_model_log_variance': np.log(
+                np.append(self.posterior_variance[1], self.betas[1:])
+            ),
+        }
+        for name, values in coefficient_buffers.items():
+            self.register_buffer(
+                name,
+                th.from_numpy(np.asarray(values)).float(),
+                persistent=False,
+            )
+
         self.num_timesteps = int(self.betas.shape[0])
        
         self.schedule_sampler = create_named_schedule_sampler(self.schedule_sampler_name, self.num_timesteps)  ## lossaware (schedule_sample)
@@ -414,8 +466,8 @@ class DiffuRec(nn.Module):
 
         assert noise.shape == x_start.shape
         x_t = (
-            _extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
-            + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)
+            _extract_into_tensor(self._sqrt_alphas_cumprod, t, x_start.shape) * x_start
+            + _extract_into_tensor(self._sqrt_one_minus_alphas_cumprod, t, x_start.shape)
             * noise  ## reparameter trick
         )  ## genetrate x_t based on x_0 (x_start) with reparameter trick
 
@@ -449,8 +501,8 @@ class DiffuRec(nn.Module):
         
         assert x_t.shape == eps.shape
         return (
-            _extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
-            - _extract_into_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * eps
+            _extract_into_tensor(self._sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
+            - _extract_into_tensor(self._sqrt_recipm1_alphas_cumprod, t, x_t.shape) * eps
         )
 
     def q_posterior_mean_variance(self, x_start, x_t, t):
@@ -461,8 +513,8 @@ class DiffuRec(nn.Module):
         """
         assert x_start.shape == x_t.shape
         posterior_mean = (
-            _extract_into_tensor(self.posterior_mean_coef1, t, x_t.shape) * x_start
-            + _extract_into_tensor(self.posterior_mean_coef2, t, x_t.shape) * x_t
+            _extract_into_tensor(self._posterior_mean_coef1, t, x_t.shape) * x_start
+            + _extract_into_tensor(self._posterior_mean_coef2, t, x_t.shape) * x_t
         )  ## \mu_t
         assert (posterior_mean.shape[0] == x_start.shape[0])
         return posterior_mean
@@ -473,8 +525,7 @@ class DiffuRec(nn.Module):
         x_0 = model_output  ##output predict
         # x_0 = self._predict_xstart_from_eps(x_t, t, model_output)  ## eps predict
         
-        model_log_variance = np.log(np.append(self.posterior_variance[1], self.betas[1:]))
-        model_log_variance = _extract_into_tensor(model_log_variance, t, x_t.shape)
+        model_log_variance = _extract_into_tensor(self._model_log_variance, t, x_t.shape)
         
         model_mean = self.q_posterior_mean_variance(x_start=x_0, x_t=x_t, t=t)  ## x_start: candidante item embedding, x_t: inputseq_embedding + outseq_noise, output x_(t-1) distribution
         return model_mean, model_log_variance

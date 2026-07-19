@@ -12,6 +12,8 @@ from tqdm import tqdm
 
 from evaluate_topk_dp import compute_all_metrics
 from plotting import TrainingPlotter
+from utils import (build_candidate_mask, eligible_warm_start_rows,
+                   filter_history_to_candidates, mask_ranking_scores)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from experiment_tools.experiment_tracking import ExperimentTracker, recommendation_popularity
@@ -64,15 +66,33 @@ def hrs_and_ndcgs_k(scores, labels, ks):
 def LSHT_inference(model_joint, args, data_loader):
     device = args.device
     model_joint = model_joint.to(device)
+    candidate_mask = build_candidate_mask(
+        args.coverage_candidate_items,
+        args.item_num + 1,
+        device,
+    )
     with torch.no_grad():
         test_metrics_dict = {'HR@5': [], 'NDCG@5': [], 'HR@10': [], 'NDCG@10': [], 'HR@20': [], 'NDCG@20': []}
         test_metrics_dict_mean = {}
         for test_batch in data_loader:
             test_batch = [x.to(device) for x in test_batch]
+            test_batch[0] = filter_history_to_candidates(
+                test_batch[0], candidate_mask
+            )
             
             scores_rec, rep_diffu, _, _, _, _ = model_joint(test_batch[0], test_batch[1], train_flag=False)
             scores_rec_diffu = model_joint.diffu_rep_pre(rep_diffu)
-            metrics = hrs_and_ndcgs_k(scores_rec_diffu, test_batch[1], [5, 10, 20])
+            valid_rows = eligible_warm_start_rows(
+                test_batch[0], test_batch[1], candidate_mask
+            )
+            if not valid_rows.any():
+                continue
+            mask_ranking_scores(
+                scores_rec_diffu, test_batch[0], candidate_mask
+            )
+            metrics = hrs_and_ndcgs_k(
+                scores_rec_diffu[valid_rows], test_batch[1][valid_rows], [5, 10, 20]
+            )
             for k, v in metrics.items():
                 test_metrics_dict[k].append(v)
     for key_temp, values_temp in test_metrics_dict.items():
@@ -83,35 +103,51 @@ def LSHT_inference(model_joint, args, data_loader):
 def evaluate_and_print(model, data_loader, args, logger, description="evaluation", save_recs=False):
     """ инференс на data_loader, выводит время и метрики @10"""
     device = args.device
+    use_amp = getattr(args, 'amp', False) and device == 'cuda'
+    candidate_items = set(args.coverage_candidate_items)
+    candidate_items.discard(0)
+    candidate_mask = build_candidate_mask(
+        candidate_items,
+        args.item_num + 1,
+        device,
+    )
     model.eval()
-    with torch.no_grad():
+    with torch.inference_mode(), torch.autocast(
+        device_type='cuda', dtype=torch.float16, enabled=use_amp
+    ):
         all_actual = []
         all_predicted = []
+        excluded_examples = 0
         start_time = time.time()
         for batch in data_loader:
-            batch = [x.to(device) for x in batch]
+            batch = [x.to(device, non_blocking=True) for x in batch]
+            batch[0] = filter_history_to_candidates(batch[0], candidate_mask)
             _, rep_diffu, _, _, _, _ = model(batch[0], batch[1], train_flag=False)
             scores = model.diffu_rep_pre(rep_diffu)
             seq = batch[0]  # [batch_size, max_len]
-            # Создаём маску: для каждого пользователя все item_id из seq (кроме 0)
-            for i in range(scores.shape[0]):
-                seen = seq[i][seq[i] != 0]  # убираем padding
-                if len(seen) > 0:
-                    scores[i, seen] = -float('inf')
+            valid_rows = eligible_warm_start_rows(seq, batch[1], candidate_mask)
+            excluded_examples += (~valid_rows).sum().item()
+            mask_ranking_scores(scores, seq, candidate_mask)
             k_max = max(args.metric_ks)
             _, topk = torch.topk(scores, k=k_max, dim=-1)
-            # k_max = max(args.metric_ks)
-            # _, topk = torch.topk(scores, k=k_max, dim=-1)
-            for i in range(len(batch[1])):
+            for i in valid_rows.nonzero(as_tuple=False).squeeze(-1).tolist():
                 all_actual.append([batch[1][i].item()])
                 all_predicted.append(topk[i].cpu().tolist())
         inference_time = time.time() - start_time
         num_users = len(all_actual)
+        if num_users == 0:
+            raise ValueError("No eligible warm-start examples remain for evaluation")
+        if excluded_examples:
+            message = (
+                f"{description}: excluded {excluded_examples} examples with an "
+                "empty history or a target outside the training catalogue"
+            )
+            print(message)
+            logger.info(message)
         print(f"{description} inference time: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
         logger.info(f"{description} inference time: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
         
         topN_list = args.metric_ks
-        candidate_items = args.coverage_candidate_items
         prec, rec, ndcg, mrr, cov = compute_all_metrics(
             all_actual,
             all_predicted,
@@ -161,10 +197,17 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
     device = args.device
     metric_ks = args.metric_ks
     model_joint = model_joint.to(device)
+    candidate_mask = build_candidate_mask(
+        args.coverage_candidate_items,
+        args.item_num + 1,
+        device,
+    )
     is_parallel = args.num_gpu > 1
     if is_parallel:
         model_joint = nn.DataParallel(model_joint)
     optimizer = optimizers(model_joint, args)
+    use_amp = getattr(args, 'amp', False) and device == 'cuda'
+    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
     lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.decay_step, gamma=args.gamma)
     
     best_metrics_dict = {}      # логирование, будет заполняться динамически для всех метрик
@@ -181,15 +224,15 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
         flag_update = 0
         # for index_temp, train_batch in enumerate(tra_data_loader):
         for index_temp, train_batch in enumerate(tqdm(tra_data_loader, desc=f"Epoch {epoch_temp:03d}/{epochs}", unit="batch")):
-            train_batch = [x.to(device) for x in train_batch]
-            optimizer.zero_grad()
-            scores, diffu_rep, weights, t, item_rep_dis, seq_rep_dis = model_joint(train_batch[0], train_batch[1], train_flag=True)  
-            loss_diffu_value = model_joint.loss_diffu_ce(diffu_rep, train_batch[1])  ## use this not above
-          
-            loss_all = loss_diffu_value
-            loss_all.backward()
-        
-            optimizer.step()
+            train_batch = [x.to(device, non_blocking=True) for x in train_batch]
+            optimizer.zero_grad(set_to_none=True)
+            with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+                scores, diffu_rep, weights, t, item_rep_dis, seq_rep_dis = model_joint(train_batch[0], train_batch[1], train_flag=True)
+                loss_diffu_value = model_joint.loss_diffu_ce(diffu_rep, train_batch[1])  ## use this not above
+                loss_all = loss_diffu_value
+            scaler.scale(loss_all).backward()
+            scaler.step(optimizer)
+            scaler.update()
             if index_temp % int(len(tra_data_loader) / 5 + 1) == 0:
                 print('[%d/%d] Loss: %.4f' % (index_temp, len(tra_data_loader), loss_all.item()))
                 logger.info('[%d/%d] Loss: %.4f' % (index_temp, len(tra_data_loader), loss_all.item()))
@@ -210,19 +253,30 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
             with torch.no_grad():
                 for val_batch in val_data_loader:
                     val_batch = [x.to(device) for x in val_batch]
+                    val_batch[0] = filter_history_to_candidates(
+                        val_batch[0], candidate_mask
+                    )
                     _, rep_diffu, _, _, _, _ = model_joint(val_batch[0], val_batch[1], train_flag=False)
                     scores_rec_diffu = model_joint.diffu_rep_pre(rep_diffu)   # [batch_size, num_items]
+                    valid_rows = eligible_warm_start_rows(
+                        val_batch[0], val_batch[1], candidate_mask
+                    )
+                    mask_ranking_scores(
+                        scores_rec_diffu, val_batch[0], candidate_mask
+                    )
                     # Получаем top‑k_max индексов для каждого пользователя в батче
                     k_max = max(args.metric_ks)
                     _, topk_indices = torch.topk(scores_rec_diffu, k=k_max, dim=-1)  # [batch_size, k_max]
                     
                     # Сохраняем
-                    for i in range(len(val_batch[1])):
+                    for i in valid_rows.nonzero(as_tuple=False).squeeze(-1).tolist():
                         all_actual.append([val_batch[1][i].item()])
                         all_predicted.append(topk_indices[i].cpu().tolist())
             
             # Вычисляем метрики
             topN_list = args.metric_ks
+            if not all_actual:
+                raise ValueError("No eligible warm-start validation examples remain")
             precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
                 all_actual,
                 all_predicted,

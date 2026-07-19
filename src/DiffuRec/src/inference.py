@@ -12,7 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from experiment_tools.experiment_tracking import checkpoint_path
 from main import args as cli_args, load_and_split_gts, item_num_create, fix_random_seed_as
 from model import create_model_diffu, Att_Diffuse_model
-from utils import Data_Test
+from utils import (Data_Test, build_candidate_mask, filter_history_to_candidates,
+                   mask_ranking_scores)
 from trainer import evaluate_and_print
 
 logging.basicConfig(level=logging.INFO)
@@ -45,10 +46,15 @@ def recommend_for_user(model, history_seq, target_item, args, topk=10):
     pad_len = max_len - len(seq)
     seq = [0] * pad_len + seq
     seq_tensor = torch.LongTensor(seq).unsqueeze(0).to(device)
+    candidate_mask = build_candidate_mask(
+        args.coverage_candidate_items, args.item_num + 1, device
+    )
+    seq_tensor = filter_history_to_candidates(seq_tensor, candidate_mask)
     tag_tensor = torch.LongTensor([[0]]).to(device)   # фиктивный tag
     with torch.no_grad():
         _, rep_diffu, _, _, _, _ = model(seq_tensor, tag_tensor, train_flag=False)
         scores = model.diffu_rep_pre(rep_diffu)
+        mask_ranking_scores(scores, seq_tensor, candidate_mask)
         _, topk_indices = torch.topk(scores, k=topk, dim=-1)
     return topk_indices[0].cpu().tolist()
 
@@ -67,6 +73,11 @@ checkpoint = torch.load(
     weights_only=False,
 )
 args_dict = checkpoint['args']
+if args_dict.get('item_id_offset') != 1:
+    raise ValueError(
+        "Legacy DiffuRec checkpoint uses item 0 as both data and padding. "
+        "Retrain it with warm_start_known_catalog_v2 before inference."
+    )
 args = Namespace(**args_dict)
 args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 

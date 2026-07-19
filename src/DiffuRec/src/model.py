@@ -7,6 +7,7 @@ import copy
 import numpy as np
 from step_sample import LossAwareSampler
 import torch as th
+from utils import build_candidate_mask
 
 
 class LayerNorm(nn.Module):
@@ -30,7 +31,11 @@ class Att_Diffuse_model(nn.Module):
         super(Att_Diffuse_model, self).__init__()
         self.emb_dim = args.hidden_size
         self.item_num = args.item_num+1
-        self.item_embeddings = nn.Embedding(self.item_num, self.emb_dim)
+        self.item_embeddings = nn.Embedding(
+            self.item_num,
+            self.emb_dim,
+            padding_idx=0,
+        )
         self.embed_dropout = nn.Dropout(args.emb_dropout)
         self.position_embeddings = nn.Embedding(args.max_len, args.hidden_size)
         self.LayerNorm = LayerNorm(args.hidden_size, eps=1e-12)
@@ -39,6 +44,16 @@ class Att_Diffuse_model(nn.Module):
         self.loss_ce = nn.CrossEntropyLoss()
         self.loss_ce_rec = nn.CrossEntropyLoss(reduction='none')
         self.loss_mse = nn.MSELoss()
+        candidate_items = getattr(
+            args,
+            'coverage_candidate_items',
+            range(1, self.item_num),
+        )
+        self.register_buffer(
+            'training_candidate_mask',
+            build_candidate_mask(candidate_items, self.item_num, device='cpu'),
+            persistent=False,
+        )
 
     def diffu_pre(self, item_rep, tag_emb, mask_seq):
         seq_rep_diffu, item_rep_out, weights, t  = self.diffu(item_rep, tag_emb, mask_seq)
@@ -65,6 +80,10 @@ class Att_Diffuse_model(nn.Module):
 
     def loss_diffu_ce(self, rep_diffu, labels):
         scores = torch.matmul(rep_diffu, self.item_embeddings.weight.t())
+        scores = scores.masked_fill(
+            ~self.training_candidate_mask.unsqueeze(0),
+            torch.finfo(scores.dtype).min,
+        )
         """
         ### norm scores
         item_emb_norm = F.normalize(self.item_embeddings.weight, dim=-1)

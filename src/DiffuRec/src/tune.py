@@ -11,7 +11,9 @@ import os
 
 from main import load_and_split_gts, item_num_create, fix_random_seed_as
 from model import create_model_diffu, Att_Diffuse_model
-from utils import Data_Train, Data_Val, Data_Test
+from utils import (Data_Train, Data_Val, Data_Test, build_candidate_mask,
+                   eligible_warm_start_rows, filter_history_to_candidates,
+                   mask_ranking_scores)
 from trainer import model_train, evaluate_and_print
 from evaluate_topk_dp import compute_all_metrics
 
@@ -24,13 +26,21 @@ def compute_recall10_on_validation(model, val_loader, args):
     model.eval()
     all_actual = []
     all_predicted = []
+    candidate_mask = build_candidate_mask(
+        args.coverage_candidate_items, args.item_num + 1, device
+    )
     with torch.no_grad():
         for batch in val_loader:
             batch = [x.to(device) for x in batch]
+            batch[0] = filter_history_to_candidates(batch[0], candidate_mask)
             _, rep_diffu, _, _, _, _ = model(batch[0], batch[1], train_flag=False)
             scores = model.diffu_rep_pre(rep_diffu)
+            valid_rows = eligible_warm_start_rows(
+                batch[0], batch[1], candidate_mask
+            )
+            mask_ranking_scores(scores, batch[0], candidate_mask)
             _, topk = torch.topk(scores, k=10, dim=-1)
-            for i in range(len(batch[1])):
+            for i in valid_rows.nonzero(as_tuple=False).squeeze(-1).tolist():
                 all_actual.append([batch[1][i].item()])
                 all_predicted.append(topk[i].cpu().tolist())
     _, recalls, _, _, _ = compute_all_metrics(all_actual, all_predicted, [10], args.item_num)
@@ -125,6 +135,9 @@ def main():
     fix_random_seed_as(base_args.random_seed)
     data_raw = load_and_split_gts(quantiles=(0.7, 0.8))   # только 2 квантиля: 70% train, 80% test, val между ними
     base_args = item_num_create(base_args, len(data_raw['smap']))
+    base_args.coverage_candidate_items = {
+        item for sequence in data_raw['train'].values() for item in sequence
+    }
 
     study = optuna.create_study(direction='maximize', study_name='diffurec_tuning')
     objective_partial = partial(objective, base_args=base_args, data_raw=data_raw)
@@ -140,8 +153,12 @@ def main():
     final_args.epochs = 80         
     
     val_full_seq = {
-        uid: data_raw['val_seq'][uid] + data_raw['val'][uid]
-        for uid in data_raw['val_seq']
+        uid: list(sequence) for uid, sequence in data_raw['train'].items()
+    }
+    for uid, sequence in data_raw['val_seq'].items():
+        val_full_seq[uid] = list(sequence) + list(data_raw['val'][uid])
+    final_args.coverage_candidate_items = {
+        item for sequence in val_full_seq.values() for item in sequence
     }
 
     test_data_final = Data_Test(data_raw['test_seq'], {uid: [] for uid in data_raw['test_seq']}, data_raw['test'], final_args)
