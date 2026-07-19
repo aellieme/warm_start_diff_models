@@ -326,7 +326,7 @@ def prepare_data(config):
     validation_full = pd.concat([train2, validation2])
     validation_full = add_time_idx(validation_full)
 
-    item_count = data.item_id.max()
+    item_count = int(data.item_id.max())
     print(f'item count {item_count}')
 
     return train, validation, test, item_count

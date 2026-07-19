@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+from types import SimpleNamespace
 import unittest
 
+import numpy as np
+import pandas as pd
 import torch
 from transformers import GPT2Config, GPT2LMHeadModel
 
@@ -14,6 +19,52 @@ except ModuleNotFoundError:
 
 
 class GPTRecCpuSmokeTest(unittest.TestCase):
+    def test_prepare_data_returns_python_int_item_count(self):
+        source_path = (
+            Path(__file__).resolve().parents[1]
+            / "src" / "GPTRec" / "src" / "run_train_predict.py"
+        )
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        prepare_data_node = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "prepare_data"
+        )
+        isolated_module = ast.Module(body=[prepare_data_node], type_ignores=[])
+        ast.fix_missing_locations(isolated_module)
+
+        frame = pd.DataFrame({
+            "user_id": [0] * 10,
+            "item_id": np.asarray(range(1, 11), dtype=np.int16),
+            "timestamp": range(1, 11),
+        })
+
+        def add_time_idx(dataframe):
+            result = dataframe.copy()
+            result["time_idx"] = result.groupby("user_id").cumcount()
+            return result
+
+        namespace = {
+            "pd": pd,
+            "load_amazon": lambda *_: frame.copy(),
+            "add_time_idx": add_time_idx,
+        }
+        exec(compile(isolated_module, source_path, "exec"), namespace)
+
+        class Config(SimpleNamespace):
+            def get(self, name, default=None):
+                return getattr(self, name, default)
+
+        config = Config(
+            dataset_name="amazon_synthetic",
+            amazon_data_dir="unused",
+            global_time_col="timestamp",
+            split_ratios=[0.7, 0.1, 0.2],
+        )
+        *_, item_count = namespace["prepare_data"](config)
+
+        self.assertIs(type(item_count), int)
+        self.assertEqual(item_count, 10)
+
     def test_one_training_batch_prediction_and_coverage(self):
         torch.manual_seed(42)
         torch.set_num_threads(1)
