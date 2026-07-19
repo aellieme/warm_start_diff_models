@@ -13,7 +13,7 @@ def transform_indices(data, users, items):
     for entity, field in zip(['users', 'items'], [users, items]):
         idx, idx_map = to_numeric_id(data, field)
         data_index[entity] = idx_map
-        data.loc[:, field] = idx
+        data[field] = idx.astype(np.int64)
     return data, data_index
 
 def matrix_from_data(data, data_description, dtype=None):

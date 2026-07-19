@@ -6,6 +6,7 @@ import importlib.util
 from pathlib import Path
 import unittest
 
+import pandas as pd
 import torch
 
 try:
@@ -30,7 +31,40 @@ def load_sasrec_class():
 SASRec = load_sasrec_class()
 
 
+def load_sasrec_data_utils():
+    path = ROOT / "src" / "SASRec" / "data_utils.py"
+    spec = importlib.util.spec_from_file_location("sasrec_test_data_utils", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load SASRec data utilities from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+DATA_UTILS = load_sasrec_data_utils()
+
+
 class SASRecCpuSmokeTest(unittest.TestCase):
+    def test_arrow_string_ids_are_replaced_with_integer_codes(self):
+        data = pd.DataFrame({
+            "userid": pd.Series(["user-b", "user-a", "user-b"], dtype="string[pyarrow]"),
+            "itemid": pd.Series(["item-b", "item-a", "item-c"], dtype="string[pyarrow]"),
+            "timestamp": [1, 2, 3],
+        })
+
+        transformed, data_index = DATA_UTILS.transform_indices(
+            data.copy(), "userid", "itemid"
+        )
+
+        self.assertTrue(pd.api.types.is_integer_dtype(transformed["userid"]))
+        self.assertTrue(pd.api.types.is_integer_dtype(transformed["itemid"]))
+        self.assertEqual(transformed["userid"].tolist(), [1, 0, 1])
+        self.assertEqual(transformed["itemid"].tolist(), [1, 0, 2])
+        self.assertEqual(data_index["users"].tolist(), ["user-a", "user-b"])
+        self.assertEqual(
+            data_index["items"].tolist(), ["item-a", "item-b", "item-c"]
+        )
+
     def test_one_training_epoch_and_coverage_on_tiny_dataset(self):
         torch.manual_seed(42)
         torch.set_num_threads(1)
