@@ -43,6 +43,7 @@ def build_commands(
             if fast_diffurec:
                 diffurec_args.extend([
                     "--batch_size", 1024, "--hidden_size", 64, "--num_blocks", 2,
+                    "--lr", 0.003, "--noise_schedule", "cosine",
                 ])
             if amp:
                 diffurec_args.append("--amp")
@@ -108,7 +109,10 @@ def main():
     parser.add_argument("--amp", action="store_true", help="Enable AMP for DiffuRec")
     parser.add_argument(
         "--fast-diffurec", action="store_true",
-        help="Use DiffuRec batch_size=1024, hidden_size=64, num_blocks=2",
+        help=(
+            "Use the tuned fast DiffuRec preset: batch_size=1024, hidden_size=64, "
+            "num_blocks=2, lr=0.003, noise_schedule=cosine"
+        ),
     )
     parser.add_argument("--prepare-data", action="store_true")
     parser.add_argument("--run", action="store_true", help="Execute commands; otherwise only print them")

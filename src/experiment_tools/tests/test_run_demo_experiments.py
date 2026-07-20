@@ -23,6 +23,8 @@ class DemoRunnerTest(unittest.TestCase):
         self.assertEqual(command[command.index("--batch_size") + 1], "1024")
         self.assertEqual(command[command.index("--hidden_size") + 1], "64")
         self.assertEqual(command[command.index("--num_blocks") + 1], "2")
+        self.assertEqual(command[command.index("--lr") + 1], "0.003")
+        self.assertEqual(command[command.index("--noise_schedule") + 1], "cosine")
         self.assertEqual(command[command.index("--device") + 1], "cuda")
 
 

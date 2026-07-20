@@ -77,6 +77,7 @@ For a complete Google Colab workflow (setup, all models, TensorBoard, plots, res
 | `--final_train` | Use train+validation for final training and evaluate on test | `--final_train` |
 | `--max_len` | Max sequence length (history truncation) | `--max_len 50` |
 | `--batch_size` | Training batch size | `--batch_size 512` |
+| `--amp` | CUDA mixed precision for faster DiffuRec training | `--amp` |
 | `--epochs` / `--num_epochs` | Number of training epochs | `--epochs 250` |
 | `--metric_ks` | List of K values for evaluation | `--metric_ks 10 20 100` |
 | `--hidden_size` | Embedding / hidden dimension | `--hidden_size 64` |
@@ -90,8 +91,15 @@ For a complete Google Colab workflow (setup, all models, TensorBoard, plots, res
 ```bash
 cd src/DiffuRec/src
 
-# Train on ml-1m, 100 epochs
-python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 100 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --random_seed 42
+# Tuned fast configuration selected on ML-1M validation (26 final epochs)
+python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 26 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42
+
+# Same DiffuRec configuration with CUDA mixed precision
+python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 26 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42 --device cuda --amp
+
+# Apply the fixed ML-1M-selected preset to all datasets through the demo runner
+# (run from the repository root; every completed run is added to the results registry)
+python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets ml-1m amazon_Baby amazon_Toys_and_Games --maxlens 50 --epochs 26 --fast-diffurec --amp --prepare-data --run
 
 # Amazon Baby, max_len=50, 150 epochs
 python main.py --dataset amazon_Baby --final_train --max_len 50 --batch_size 512 --epochs 150 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --random_seed 42
@@ -223,6 +231,13 @@ Extract the downloaded archive into the root of the local project in VS Code. It
 ## Reproducibility notes
 
 - **Global temporal split**: All experiments use the split recommended by [Gusak et al. (RecSys 2025)](https://dl.acm.org/doi/10.1145/3705328.3748164): 70% train, 10% validation, 20% test, sorted by global timestamp.
+- **Shared warm-start catalogue**: For every model, validation ranks only items observed in train and final test ranks only items observed in train+validation. Classification/reconstruction losses exclude unavailable item dimensions. Padding, out-of-catalogue items, and every item in the full available history are masked before top-k; `max_len` limits only the model input, not the seen-item mask.
+- **Shared sequential target**: Accuracy metrics use exactly one target per user: the raw last event in the validation/test window. The input contains train+validation events and chronologically earlier test events, filtered to the eligible catalogue. A row is excluded when its filtered history is empty or its raw target is outside the catalogue; user identity itself is not an eligibility condition.
+- **Expected ML-1M final cohort**: The train+validation catalogue contains 3,662 items and final last-item evaluation contains 1,775 eligible users. DiffuRec, ADRec, SASRec, GPTRec, T-DiffRec, TopPopular, and RandomRecs must report this same cohort.
+- **Item IDs and padding**: DiffuRec, ADRec, GPTRec, TopPopular, and RandomRecs reserve `0` for padding. SASRec and T-DiffRec retain their native indexing but mask their padding/out-of-catalogue dimensions explicitly.
+- **T-DiffRec preprocessing**: Protocol v2 adds `valid_history.npy`, `valid_targets.npy`, `test_history.npy`, `test_targets.npy`, and `protocol_meta.json`, and maps items from train+validation. Re-run `split_load_data_dp.py` after updating; legacy split files and checkpoints are intentionally rejected by the new inference path.
+- **Checkpoint compatibility**: Models must be retrained after this protocol change. Scores from legacy checkpoints are not comparable to protocol-v2 results.
+- **Validation-only selection**: Non-final runs, including GPTRec configs that still contain the legacy `test_metrics` field, cannot evaluate the test split. Test metrics are produced only by the final train+validation run.
 - **Fixed random seed**: 42 is used wherever possible
 - **Hyperparameter search**: For each model we performed a grid search on the validation set using Recall@10 as the target metric. The best configuration was then used for the final training (train+validation) and test evaluation.
 - **Compute budget**: Training was limited to 4 hours per model on an NVIDIA Tesla T4 GPU.
