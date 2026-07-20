@@ -23,7 +23,8 @@ ALIASES = {
 
 def build_commands(
     datasets, maxlens, epochs, models, seed=42,
-    amp=False, fast_diffurec=False,
+    amp=False, fast_diffurec=False, diffurec_eval_repeats=5,
+    diffurec_lr=0.003,
 ):
     commands = []
     use_cuda = torch.cuda.is_available()
@@ -39,11 +40,12 @@ def build_commands(
                 sys.executable, "main.py", "--dataset", dataset, "--final_train",
                 "--max_len", maxlen, "--epochs", epochs, "--metric_ks", 10, 20, 100,
                 "--random_seed", seed, "--device", "cuda" if use_cuda else "cpu",
+                "--eval_repeats", diffurec_eval_repeats,
             ]
             if fast_diffurec:
                 diffurec_args.extend([
                     "--batch_size", 1024, "--hidden_size", 64, "--num_blocks", 2,
-                    "--lr", 0.003, "--noise_schedule", "cosine",
+                    "--lr", diffurec_lr, "--noise_schedule", "cosine",
                 ])
             if amp:
                 diffurec_args.append("--amp")
@@ -108,6 +110,14 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", help="Enable AMP for DiffuRec")
     parser.add_argument(
+        "--diffurec-eval-repeats", type=int, default=5,
+        help="Fixed reverse-diffusion inference runs averaged for DiffuRec validation",
+    )
+    parser.add_argument(
+        "--diffurec-lr", type=float, default=0.003,
+        help="Learning rate used by --fast-diffurec (for example 0.0015 for Baby)",
+    )
+    parser.add_argument(
         "--fast-diffurec", action="store_true",
         help=(
             "Use the tuned fast DiffuRec preset: batch_size=1024, hidden_size=64, "
@@ -121,6 +131,8 @@ def main():
     commands = build_commands(
         args.datasets, args.maxlens, args.epochs, set(args.models), args.seed,
         amp=args.amp, fast_diffurec=args.fast_diffurec,
+        diffurec_eval_repeats=args.diffurec_eval_repeats,
+        diffurec_lr=args.diffurec_lr,
     )
     for model, cwd, command in commands:
         print(f"{model:24s} {cwd} {shlex.join(command)}")

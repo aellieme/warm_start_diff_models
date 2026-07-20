@@ -78,6 +78,7 @@ For a complete Google Colab workflow (setup, all models, TensorBoard, plots, res
 | `--max_len` | Max sequence length (history truncation) | `--max_len 50` |
 | `--batch_size` | Training batch size | `--batch_size 512` |
 | `--amp` | CUDA mixed precision for faster DiffuRec training | `--amp` |
+| `--eval_repeats` | Fixed stochastic DiffuRec inference runs averaged during validation | `--eval_repeats 5` |
 | `--epochs` / `--num_epochs` | Number of training epochs | `--epochs 250` |
 | `--metric_ks` | List of K values for evaluation | `--metric_ks 10 20 100` |
 | `--hidden_size` | Embedding / hidden dimension | `--hidden_size 64` |
@@ -92,14 +93,14 @@ For a complete Google Colab workflow (setup, all models, TensorBoard, plots, res
 cd src/DiffuRec/src
 
 # Tuned fast configuration selected on ML-1M validation (26 final epochs)
-python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 26 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42
+python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 26 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42 --eval_repeats 5
 
 # Same DiffuRec configuration with CUDA mixed precision
-python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 26 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42 --device cuda --amp
+python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 26 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42 --device cuda --amp --eval_repeats 5
 
 # Apply the fixed ML-1M-selected preset to all datasets through the demo runner
 # (run from the repository root; every completed run is added to the results registry)
-python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets ml-1m amazon_Baby amazon_Toys_and_Games --maxlens 50 --epochs 26 --fast-diffurec --amp --prepare-data --run
+python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets ml-1m amazon_Baby amazon_Toys_and_Games --maxlens 50 --epochs 26 --fast-diffurec --diffurec-lr 0.003 --amp --diffurec-eval-repeats 5 --prepare-data --run
 
 # Amazon Baby, max_len=50, 150 epochs
 python main.py --dataset amazon_Baby --final_train --max_len 50 --batch_size 512 --epochs 150 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --random_seed 42
@@ -238,8 +239,9 @@ Extract the downloaded archive into the root of the local project in VS Code. It
 - **T-DiffRec preprocessing**: Protocol v2 adds `valid_history.npy`, `valid_targets.npy`, `test_history.npy`, `test_targets.npy`, and `protocol_meta.json`, and maps items from train+validation. Re-run `split_load_data_dp.py` after updating; legacy split files and checkpoints are intentionally rejected by the new inference path.
 - **Checkpoint compatibility**: Models must be retrained after this protocol change. Scores from legacy checkpoints are not comparable to protocol-v2 results.
 - **Validation-only selection**: Non-final runs, including GPTRec configs that still contain the legacy `test_metrics` field, cannot evaluate the test split. Test metrics are produced only by the final train+validation run.
-- **Fixed random seed**: 42 is used wherever possible
-- **Hyperparameter search**: For each model we performed a grid search on the validation set using Recall@10 as the target metric. The best configuration was then used for the final training (train+validation) and test evaluation.
+- **DiffuRec stochastic evaluation**: Validation metrics are averaged over five predeclared reverse-diffusion seeds (`random_seed ... random_seed + 4`) to stabilize checkpoint selection. The final test is evaluated exactly once with `random_seed`; test seeds are never searched or selected. Recommendation lists are never unioned across seeds. Evaluation runs in an isolated PyTorch RNG context, so changing `eval_interval` cannot change subsequent training updates.
+- **Fixed random seed**: 42 is used wherever possible.
+- **Hyperparameter and checkpoint search**: Selection uses validation only. DiffuRec chooses one checkpoint lexicographically by Recall@10, then NDCG@10, MRR@10, and Coverage@10; it never combines per-metric maxima from different epochs. The selected number of completed epochs is then used for fresh final training on train+validation.
 - **Compute budget**: Training was limited to 4 hours per model on an NVIDIA Tesla T4 GPU.
 
 ---

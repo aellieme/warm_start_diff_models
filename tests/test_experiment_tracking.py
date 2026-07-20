@@ -52,7 +52,14 @@ class ExperimentTrackingTests(unittest.TestCase):
                 "val_recall@10": 0.4,
                 "val_ndcg@10": 0.3,
                 "val_mrr@10": 0.2,
+                "val_coverage@10": 0.5,
             })
+            tracker.log_validation_selection(
+                1,
+                {"Recall@10": 0.4, "NDCG@10": 0.3, "Coverage@10": 0.5},
+                rule="recall_then_coverage",
+                inference_seeds=(42, 43),
+            )
             tracker.log_final_metrics({
                 10: {"recall": 0.4, "ndcg": 0.3, "mrr": 0.2, "coverage": 0.5}
             }, split="synthetic", mask_seen=True, seed=42, maxlen=50,
@@ -62,6 +69,7 @@ class ExperimentTrackingTests(unittest.TestCase):
             run = Path(directory) / "logs" / "tiny" / "model" / "run"
             self.assertTrue((run / "history.csv").exists())
             self.assertTrue((run / "summary.json").exists())
+            self.assertTrue((run / "validation_selection.json").exists())
             if plt is not None:
                 self.assertTrue((run / "plots" / "loss.png").exists())
                 self.assertTrue((run / "plots" / "validation_ranking.png").exists())
@@ -69,6 +77,11 @@ class ExperimentTrackingTests(unittest.TestCase):
             payload = json.loads((run / "summary.json").read_text(encoding="utf-8"))
             self.assertTrue(payload["mask_seen"])
             self.assertEqual(payload["latency_ms_per_user"], 500.0)
+            selection = json.loads(
+                (run / "validation_selection.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(selection["selected_epoch"], 1)
+            self.assertEqual(selection["inference_seeds"], [42, 43])
             with (run / "history.csv").open(encoding="utf-8") as handle:
                 self.assertEqual(len(list(csv.DictReader(handle))), 2)
             with (Path(directory) / "results_registry.csv").open(encoding="utf-8") as handle:

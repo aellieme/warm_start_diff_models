@@ -60,6 +60,27 @@ def load_train_dataset():
     )
 
 
+def load_evaluation_helpers():
+    source_dir = ROOT / "src" / "DiffuRec" / "src"
+    path = source_dir / "trainer.py"
+    sys.path.insert(0, str(source_dir))
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "diffurec_smoke_trainer", path
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot load DiffuRec trainer from {path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return (
+            module.evaluation_seeds,
+            module.isolated_torch_rng,
+            module.evaluate_stochastic_ranking,
+        )
+    finally:
+        sys.path.remove(str(source_dir))
+
+
 (
     TrainDataset,
     build_candidate_mask,
@@ -68,9 +89,76 @@ def load_train_dataset():
     filter_history_to_candidates,
     mask_ranking_scores,
 ) = load_train_dataset()
+(
+    evaluation_seeds,
+    isolated_torch_rng,
+    evaluate_stochastic_ranking,
+) = load_evaluation_helpers()
 
 
 class DiffuRecCpuSmokeTest(unittest.TestCase):
+    def test_evaluation_seeds_are_fixed_and_predeclared(self):
+        args = SimpleNamespace(random_seed=42, eval_repeats=5)
+        self.assertEqual(
+            evaluation_seeds(args),
+            (42, 43, 44, 45, 46),
+        )
+        self.assertEqual(evaluation_seeds(args, repeats=1), (42,))
+
+    def test_evaluation_rng_is_repeatable_and_does_not_advance_training_rng(self):
+        torch.manual_seed(123)
+        expected_before = torch.randn(4)
+        expected_after = torch.randn(4)
+
+        torch.manual_seed(123)
+        actual_before = torch.randn(4)
+        with isolated_torch_rng(999, "cpu"):
+            evaluation_sample_one = torch.randn(4)
+        actual_after = torch.randn(4)
+        with isolated_torch_rng(999, "cpu"):
+            evaluation_sample_two = torch.randn(4)
+
+        self.assertTrue(torch.equal(actual_before, expected_before))
+        self.assertTrue(torch.equal(actual_after, expected_after))
+        self.assertTrue(torch.equal(evaluation_sample_one, evaluation_sample_two))
+
+    def test_stochastic_ranking_repeats_are_reproducible(self):
+        class StochasticRanker(torch.nn.Module):
+            def forward(self, sequence, target, train_flag=False):
+                representation = torch.randn(sequence.shape[0], 6)
+                return None, representation, None, None, None, None
+
+            def diffu_rep_pre(self, representation):
+                return representation
+
+        args = SimpleNamespace(
+            device="cpu",
+            random_seed=42,
+            eval_repeats=3,
+            metric_ks=[1, 2],
+        )
+        sequences = torch.tensor([[0, 1, 2], [0, 1, 3]])
+        targets = torch.tensor([[3], [4]])
+        data_loader = [(sequences, targets, sequences.clone())]
+        candidate_items = {1, 2, 3, 4, 5}
+        candidate_mask = build_candidate_mask(candidate_items, 6, "cpu")
+        model = StochasticRanker().train()
+
+        first = evaluate_stochastic_ranking(
+            model, data_loader, args, candidate_items, candidate_mask
+        )
+        second = evaluate_stochastic_ranking(
+            model, data_loader, args, candidate_items, candidate_mask
+        )
+
+        self.assertEqual(first["seeds"], [42, 43, 44])
+        self.assertEqual(first["means"], second["means"])
+        self.assertEqual(first["stds"], second["stds"])
+        self.assertEqual(
+            first["canonical_predicted"], second["canonical_predicted"]
+        )
+        self.assertTrue(model.training)
+
     def test_item_encoding_reserves_zero_for_padding(self):
         encoded, mapping = encode_item_ids_with_padding([20, 10, 20, 30])
 

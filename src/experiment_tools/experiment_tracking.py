@@ -185,12 +185,34 @@ class ExperimentTracker:
             self.plot_popularity_bias(metadata["popularity_bias"])
         self._update_registry(metrics_by_k, payload)
 
+    def log_validation_selection(
+        self, epoch: int, metrics: Mapping[str, float] | None, **metadata,
+    ) -> None:
+        """Persist the one validation checkpoint selected for final retraining."""
+        payload = {
+            "dataset": self.dataset,
+            "model": self.model,
+            "run_id": self.run_id,
+            "selected_epoch": int(epoch),
+            "selected_metrics": dict(metrics) if metrics is not None else None,
+            **metadata,
+        }
+        path = self.run_dir / "validation_selection.json"
+        path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
     def plot_training(self) -> None:
         if plt is None or not self.rows:
             return
         series = self._series()
         losses = [name for name in series if "loss" in name.lower()]
-        ranking = [name for name in ("val_recall@10", "val_ndcg@10", "val_mrr@10") if name in series]
+        ranking = [
+            name for name in (
+                "val_recall@10", "val_ndcg@10", "val_mrr@10", "val_coverage@10"
+            )
+            if name in series
+        ]
         if losses:
             self._line_plot(losses, "Training loss", "Loss", self.plot_dir / "loss.png")
         if ranking:

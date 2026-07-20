@@ -7,6 +7,7 @@ import copy
 import time
 import pickle
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from tqdm import tqdm
 
@@ -26,6 +27,122 @@ def optimizers(model, args):
         return optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=args.momentum)
     else:
         raise ValueError
+
+
+def evaluation_seeds(args, repeats=None):
+    """Return predeclared reverse-diffusion seeds without inspecting any metrics."""
+    if repeats is None:
+        repeats = getattr(args, 'eval_repeats', 1)
+    repeats = max(1, int(repeats))
+    first_seed = int(args.random_seed)
+    return tuple(first_seed + repeat for repeat in range(repeats))
+
+
+@contextmanager
+def isolated_torch_rng(seed, device):
+    """Run stochastic inference without advancing the training RNG streams."""
+    device = torch.device(device)
+    cuda_devices = []
+    if device.type == 'cuda' and torch.cuda.is_available():
+        cuda_devices = list(range(torch.cuda.device_count()))
+    with torch.random.fork_rng(devices=cuda_devices, enabled=True):
+        torch.manual_seed(int(seed))
+        if cuda_devices:
+            torch.cuda.manual_seed_all(int(seed))
+        yield
+
+
+def _collect_ranked_predictions(
+    model, data_loader, args, candidate_mask, seed, use_amp=False,
+):
+    """Collect one reproducible stochastic ranking pass for a fixed seed."""
+    device = torch.device(args.device)
+    all_actual = []
+    all_predicted = []
+    excluded_examples = 0
+    started = time.perf_counter()
+
+    with isolated_torch_rng(seed, device), torch.inference_mode(), torch.autocast(
+        device_type=device.type,
+        dtype=torch.float16 if device.type == 'cuda' else torch.bfloat16,
+        enabled=use_amp,
+    ):
+        for batch in data_loader:
+            batch = [x.to(device, non_blocking=True) for x in batch]
+            full_history = filter_history_to_candidates(
+                batch[2] if len(batch) > 2 else batch[0], candidate_mask
+            )
+            batch[0] = prepare_model_history(
+                full_history, candidate_mask, batch[0].shape[1]
+            )
+            _, rep_diffu, _, _, _, _ = model(
+                batch[0], batch[1], train_flag=False
+            )
+            scoring_model = model.module if isinstance(model, nn.DataParallel) else model
+            scores = scoring_model.diffu_rep_pre(rep_diffu)
+            valid_rows = eligible_warm_start_rows(
+                full_history, batch[1], candidate_mask
+            )
+            excluded_examples += (~valid_rows).sum().item()
+            mask_ranking_scores(scores, full_history, candidate_mask)
+            _, topk = torch.topk(scores, k=max(args.metric_ks), dim=-1)
+            for row in valid_rows.nonzero(as_tuple=False).squeeze(-1).tolist():
+                all_actual.append([batch[1][row].item()])
+                all_predicted.append(topk[row].cpu().tolist())
+
+    return {
+        'actual': all_actual,
+        'predicted': all_predicted,
+        'excluded_examples': excluded_examples,
+        'elapsed_sec': time.perf_counter() - started,
+        'seed': int(seed),
+    }
+
+
+def evaluate_stochastic_ranking(
+    model, data_loader, args, candidate_items, candidate_mask, use_amp=False,
+    repeats=None,
+):
+    """Average metrics over fixed inference seeds without unioning recommendations."""
+    was_training = model.training
+    model.eval()
+    runs = []
+    try:
+        for seed in evaluation_seeds(args, repeats=repeats):
+            prediction_run = _collect_ranked_predictions(
+                model, data_loader, args, candidate_mask, seed, use_amp=use_amp
+            )
+            if not prediction_run['actual']:
+                raise ValueError("No eligible warm-start examples remain for evaluation")
+            metrics = compute_all_metrics(
+                prediction_run['actual'],
+                prediction_run['predicted'],
+                args.metric_ks,
+                len(candidate_items),
+                candidate_items=candidate_items,
+            )
+            prediction_run['metrics'] = metrics
+            runs.append(prediction_run)
+    finally:
+        model.train(was_training)
+
+    metric_arrays = [
+        np.asarray([run['metrics'][index] for run in runs], dtype=float)
+        for index in range(5)
+    ]
+    means = tuple(values.mean(axis=0).tolist() for values in metric_arrays)
+    stds = tuple(values.std(axis=0).tolist() for values in metric_arrays)
+    canonical = runs[0]
+    return {
+        'means': means,
+        'stds': stds,
+        'canonical_actual': canonical['actual'],
+        'canonical_predicted': canonical['predicted'],
+        'excluded_examples': canonical['excluded_examples'],
+        'mean_elapsed_sec': float(np.mean([run['elapsed_sec'] for run in runs])),
+        'wall_elapsed_sec': float(np.sum([run['elapsed_sec'] for run in runs])),
+        'seeds': [run['seed'] for run in runs],
+    }
 
 
 def cal_hr(label, predict, ks):
@@ -105,7 +222,7 @@ def LSHT_inference(model_joint, args, data_loader):
     print(test_metrics_dict_mean)
 
 def evaluate_and_print(model, data_loader, args, logger, description="evaluation", save_recs=False):
-    """ инференс на data_loader, выводит время и метрики @10"""
+    """Evaluate stochastic DiffuRec ranking on fixed, isolated inference seeds."""
     device = args.device
     use_amp = getattr(args, 'amp', False) and device == 'cuda'
     candidate_items = set(args.coverage_candidate_items)
@@ -115,84 +232,97 @@ def evaluate_and_print(model, data_loader, args, logger, description="evaluation
         args.item_num + 1,
         device,
     )
-    model.eval()
-    with torch.inference_mode(), torch.autocast(
-        device_type='cuda', dtype=torch.float16, enabled=use_amp
-    ):
-        all_actual = []
-        all_predicted = []
-        excluded_examples = 0
-        start_time = time.time()
-        for batch in data_loader:
-            batch = [x.to(device, non_blocking=True) for x in batch]
-            full_history = filter_history_to_candidates(
-                batch[2] if len(batch) > 2 else batch[0], candidate_mask
-            )
-            batch[0] = prepare_model_history(
-                full_history, candidate_mask, batch[0].shape[1]
-            )
-            _, rep_diffu, _, _, _, _ = model(batch[0], batch[1], train_flag=False)
-            scores = model.diffu_rep_pre(rep_diffu)
-            seq = batch[0]  # [batch_size, max_len]
-            valid_rows = eligible_warm_start_rows(full_history, batch[1], candidate_mask)
-            excluded_examples += (~valid_rows).sum().item()
-            mask_ranking_scores(scores, full_history, candidate_mask)
-            k_max = max(args.metric_ks)
-            _, topk = torch.topk(scores, k=k_max, dim=-1)
-            for i in valid_rows.nonzero(as_tuple=False).squeeze(-1).tolist():
-                all_actual.append([batch[1][i].item()])
-                all_predicted.append(topk[i].cpu().tolist())
-        inference_time = time.time() - start_time
-        num_users = len(all_actual)
-        if num_users == 0:
-            raise ValueError("No eligible warm-start examples remain for evaluation")
-        if excluded_examples:
-            message = (
-                f"{description}: excluded {excluded_examples} examples with an "
-                "empty history or a target outside the training catalogue"
-            )
-            print(message)
-            logger.info(message)
-        print(f"{description} inference time: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
-        logger.info(f"{description} inference time: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms per user")
-        
-        topN_list = args.metric_ks
-        prec, rec, ndcg, mrr, cov = compute_all_metrics(
-            all_actual,
-            all_predicted,
-            topN_list,
-            len(candidate_items),
-            candidate_items=candidate_items,
-        )
-        print("\nTest results:")
-        print(f"{'k':<5} {'recall':<12} {'ndcg':<12} {'mrr':<12} {'coverage':<12}")
-        for i, k in enumerate(topN_list):
-            print(f"{k:<5} {rec[i]:<12.6f} {ndcg[i]:<12.6f} {mrr[i]:<12.6f} {cov[i]:<12.6f}")
-        tracker = getattr(args, "experiment_tracker", None)
-        if tracker is not None and description.lower() == "test":
-            tracker.log_final_metrics(
-                {k: {"recall": rec[i], "ndcg": ndcg[i], "mrr": mrr[i], "coverage": cov[i]}
-                 for i, k in enumerate(topN_list)},
-                split="global_temporal_70_10_20",
-                mask_seen=True,
-                seed=args.random_seed,
-                inference_total_sec=inference_time,
-                n_users=num_users,
-                maxlen=args.max_len,
-                popularity_bias=recommendation_popularity(
-                    all_predicted, getattr(args, "train_item_popularity", {}), topN_list
-                ),
-            )
-            tracker.close()
+    result = evaluate_stochastic_ranking(
+        model,
+        data_loader,
+        args,
+        candidate_items,
+        candidate_mask,
+        use_amp=use_amp,
+        repeats=1,
+    )
+    _, rec, ndcg, mrr, cov = result['means']
+    _, rec_std, ndcg_std, mrr_std, cov_std = result['stds']
+    all_actual = result['canonical_actual']
+    all_predicted = result['canonical_predicted']
+    num_users = len(all_actual)
+    inference_time = result['mean_elapsed_sec']
+    excluded_examples = result['excluded_examples']
 
-        if save_recs:
-            import pandas as pd
-            recs_df = pd.DataFrame({'user_id': list(range(len(all_actual))), 'recommendations': all_predicted})
-            recs_df.to_csv('recommendations.csv', index=False)
-            print("Recommendations saved to recommendations.csv")
-        
-        # Логирование (опционально, без ошибок):
-        logger.info(f"{description} inference: total {inference_time:.2f} sec, avg {inference_time/num_users*1000:.2f} ms/user")
+    if excluded_examples:
+        message = (
+            f"{description}: excluded {excluded_examples} examples with an "
+            "empty history or a target outside the training catalogue"
+        )
+        print(message)
+        logger.info(message)
+    repeat_message = (
+        f"{description}: one fixed stochastic inference run, "
+        f"seed={result['seeds'][0]}"
+    )
+    print(repeat_message)
+    logger.info(repeat_message)
+    latency_message = (
+        f"{description} inference time per run: total {inference_time:.2f} sec, "
+        f"avg {inference_time / num_users * 1000:.2f} ms per user"
+    )
+    print(latency_message)
+    logger.info(latency_message)
+
+    topN_list = args.metric_ks
+    print(f"\n{description.capitalize()} results:")
+    print(f"{'k':<5} {'recall':<12} {'ndcg':<12} {'mrr':<12} {'coverage':<12}")
+    for i, k in enumerate(topN_list):
+        print(
+            f"{k:<5} {rec[i]:<12.6f} {ndcg[i]:<12.6f} "
+            f"{mrr[i]:<12.6f} {cov[i]:<12.6f}"
+        )
+    if len(result['seeds']) > 1:
+        print("Std across inference seeds:")
+        for i, k in enumerate(topN_list):
+            print(
+                f"{k:<5} {rec_std[i]:<12.6f} {ndcg_std[i]:<12.6f} "
+                f"{mrr_std[i]:<12.6f} {cov_std[i]:<12.6f}"
+            )
+
+    tracker = getattr(args, "experiment_tracker", None)
+    if tracker is not None and description.lower() == "test":
+        tracker.log_final_metrics(
+            {k: {"recall": rec[i], "ndcg": ndcg[i], "mrr": mrr[i], "coverage": cov[i]}
+             for i, k in enumerate(topN_list)},
+            split="global_temporal_70_10_20",
+            mask_seen=True,
+            seed=args.random_seed,
+            inference_total_sec=inference_time,
+            inference_wall_total_sec=result['wall_elapsed_sec'],
+            inference_repeats=len(result['seeds']),
+            inference_seeds=result['seeds'],
+            inference_metric_std={
+                str(k): {
+                    "recall": rec_std[i], "ndcg": ndcg_std[i],
+                    "mrr": mrr_std[i], "coverage": cov_std[i],
+                }
+                for i, k in enumerate(topN_list)
+            },
+            n_users=num_users,
+            maxlen=args.max_len,
+            popularity_bias=recommendation_popularity(
+                all_predicted, getattr(args, "train_item_popularity", {}), topN_list
+            ),
+        )
+        tracker.close()
+
+    if save_recs:
+        import pandas as pd
+        recs_df = pd.DataFrame({
+            'user_id': list(range(len(all_actual))),
+            'recommendations': all_predicted,
+        })
+        recs_df.to_csv('recommendations.csv', index=False)
+        print(
+            "Recommendations saved to recommendations.csv "
+            f"using canonical inference seed {result['seeds'][0]}"
+        )
 
 def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint, args, logger):
     tracker = ExperimentTracker(args.dataset, "DiffuRec")
@@ -219,20 +349,26 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
     scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
     lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.decay_step, gamma=args.gamma)
     
-    best_metrics_dict = {}      # логирование, будет заполняться динамически для всех метрик
-    best_epoch = {}             # аналогично
-    best_recall10 = -1.0        # для early stopping
+    selected_metrics = None
+    selected_epoch = None
+    best_selection_key = None
     best_model = None
     bad_count = 0
+    candidate_items = set(args.coverage_candidate_items)
+    candidate_items.discard(0)
     
-    for epoch_temp in range(epochs):        
-        print('Epoch: {}'.format(epoch_temp))
-        logger.info('Epoch: {}'.format(epoch_temp))
+    for epoch_temp in range(epochs):
+        completed_epoch = epoch_temp + 1
+        print('Epoch: {}'.format(completed_epoch))
+        logger.info('Epoch: {}'.format(completed_epoch))
         model_joint.train()
-    
-        flag_update = 0
-        # for index_temp, train_batch in enumerate(tra_data_loader):
-        for index_temp, train_batch in enumerate(tqdm(tra_data_loader, desc=f"Epoch {epoch_temp:03d}/{epochs}", unit="batch")):
+
+        epoch_loss_sum = 0.0
+        for index_temp, train_batch in enumerate(tqdm(
+            tra_data_loader,
+            desc=f"Epoch {completed_epoch:03d}/{epochs}",
+            unit="batch",
+        )):
             train_batch = [x.to(device, non_blocking=True) for x in train_batch]
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
@@ -242,107 +378,82 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
             scaler.scale(loss_all).backward()
             scaler.step(optimizer)
             scaler.update()
+            epoch_loss_sum += loss_all.item()
             if index_temp % int(len(tra_data_loader) / 5 + 1) == 0:
                 print('[%d/%d] Loss: %.4f' % (index_temp, len(tra_data_loader), loss_all.item()))
                 logger.info('[%d/%d] Loss: %.4f' % (index_temp, len(tra_data_loader), loss_all.item()))
-        print("loss in epoch {}: {}".format(epoch_temp, loss_all.item()))
-        plotter.update(epoch=epoch_temp, loss=loss_all.item())
-        tracker.log_epoch(epoch_temp, train_loss=loss_all.item())
+        average_loss = epoch_loss_sum / len(tra_data_loader)
+        print("loss in epoch {}: {}".format(completed_epoch, average_loss))
+        plotter.update(epoch=completed_epoch, loss=average_loss)
+        tracker.log_epoch(completed_epoch, train_loss=average_loss)
         lr_scheduler.step()
 
-        if epoch_temp != 0 and epoch_temp % args.eval_interval == 0:
+        if completed_epoch % args.eval_interval == 0:
             print('start predicting: ', datetime.datetime.now())
             logger.info('start predicting: {}'.format(datetime.datetime.now()))
-            model_joint.eval()
-            
-            # Собираем все предсказания и истинные метки по батчам
-            all_actual = []      # список списков (каждый список содержит целевой айтем)
-            all_predicted = []   # список списков индексов top‑k_max (k_max = max(metric_ks))
-            
-            with torch.no_grad():
-                for val_batch in val_data_loader:
-                    val_batch = [x.to(device) for x in val_batch]
-                    full_history = filter_history_to_candidates(
-                        val_batch[2] if len(val_batch) > 2 else val_batch[0], candidate_mask
-                    )
-                    val_batch[0] = prepare_model_history(
-                        full_history, candidate_mask, val_batch[0].shape[1]
-                    )
-                    _, rep_diffu, _, _, _, _ = model_joint(val_batch[0], val_batch[1], train_flag=False)
-                    scores_rec_diffu = model_joint.diffu_rep_pre(rep_diffu)   # [batch_size, num_items]
-                    valid_rows = eligible_warm_start_rows(
-                        full_history, val_batch[1], candidate_mask
-                    )
-                    mask_ranking_scores(
-                        scores_rec_diffu, full_history, candidate_mask
-                    )
-                    # Получаем top‑k_max индексов для каждого пользователя в батче
-                    k_max = max(args.metric_ks)
-                    _, topk_indices = torch.topk(scores_rec_diffu, k=k_max, dim=-1)  # [batch_size, k_max]
-                    
-                    # Сохраняем
-                    for i in valid_rows.nonzero(as_tuple=False).squeeze(-1).tolist():
-                        all_actual.append([val_batch[1][i].item()])
-                        all_predicted.append(topk_indices[i].cpu().tolist())
-            
-            # Вычисляем метрики
-            topN_list = args.metric_ks
-            if not all_actual:
-                raise ValueError("No eligible warm-start validation examples remain")
-            precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
-                all_actual,
-                all_predicted,
-                topN_list,
-                len(args.coverage_candidate_items),
-                candidate_items=args.coverage_candidate_items,
+            result = evaluate_stochastic_ranking(
+                model_joint,
+                val_data_loader,
+                args,
+                candidate_items,
+                candidate_mask,
+                use_amp=use_amp,
             )
-            
-            # Формируем словарь для логирования (precision не нужен)
-            metrics_dict = {}
-            for k, rec, nd, mrr, cov in zip(topN_list, recalls, ndcgs, mrrs, covs):
-                if k == 10:
-                    metrics_dict[f'Recall@{k}'] = rec
-                    metrics_dict[f'NDCG@{k}'] = nd
-                    metrics_dict[f'MRR@{k}'] = mrr
-                    metrics_dict[f'Coverage@{k}'] = cov
-            
-            # Обновление best_metrics_dict и early stopping 
-            flag_update = 0
-            # Обновление best_metrics_dict для логирования (все метрики)
-            for key_temp, values_temp in metrics_dict.items():
-                if 'Best_' + key_temp not in best_metrics_dict or values_temp > best_metrics_dict['Best_' + key_temp]:
-                    best_metrics_dict['Best_' + key_temp] = values_temp
-                    best_epoch['Best_epoch_' + key_temp] = epoch_temp
+            _, recalls, ndcgs, mrrs, covs = result['means']
+            topN_list = args.metric_ks
+            idx10 = topN_list.index(10) if 10 in topN_list else 0
+            metrics_dict = {
+                'Recall@10': recalls[idx10],
+                'NDCG@10': ndcgs[idx10],
+                'MRR@10': mrrs[idx10],
+                'Coverage@10': covs[idx10],
+            }
+            selection_key = (
+                metrics_dict['Recall@10'],
+                metrics_dict['NDCG@10'],
+                metrics_dict['MRR@10'],
+                metrics_dict['Coverage@10'],
+            )
+            validation_message = (
+                f"Validation after epoch {completed_epoch}: "
+                f"recall@10={metrics_dict['Recall@10']:.6f}, "
+                f"ndcg@10={metrics_dict['NDCG@10']:.6f}, "
+                f"mrr@10={metrics_dict['MRR@10']:.6f}, "
+                f"coverage@10={metrics_dict['Coverage@10']:.6f}; "
+                f"mean over seeds={result['seeds']}"
+            )
+            print(validation_message)
+            logger.info(validation_message)
 
-            # Early stopping только по recall@10
-            recall10 = metrics_dict.get('Recall@10', 0.0)
-            if recall10 > best_recall10:
-                best_recall10 = recall10
+            if best_selection_key is None or selection_key > best_selection_key:
+                best_selection_key = selection_key
+                selected_metrics = metrics_dict.copy()
+                selected_epoch = completed_epoch
                 bad_count = 0
                 best_model = copy.deepcopy(model_joint)
-                print(f"New best recall@10: {recall10:.4f}")
-                # Также выводим все лучшие метрики
-                print(best_metrics_dict)
-                print(best_epoch)
-                logger.info(best_metrics_dict)
-                logger.info(best_epoch)
+                selection_message = (
+                    f"Selected checkpoint updated: epoch={selected_epoch}, "
+                    f"metrics={selected_metrics}"
+                )
+                print(selection_message)
+                logger.info(selection_message)
             else:
                 bad_count += 1
-            # plotter.update(
-            #     epoch=epoch_temp,
-            #     loss=loss_all.item(),
-            #     val_recall=recall10
-            # )
-            plotter.update(epoch=epoch_temp, val_recall=recall10)
-            idx10 = topN_list.index(10) if 10 in topN_list else 0
-            tracker.log_epoch(epoch_temp, **{
+
+            plotter.update(
+                epoch=completed_epoch,
+                val_recall=recalls[idx10],
+                val_ndcg=ndcgs[idx10],
+                val_mrr=mrrs[idx10],
+                val_coverage=covs[idx10],
+            )
+            tracker.log_epoch(completed_epoch, **{
                 "val_recall@10": recalls[idx10],
                 "val_ndcg@10": ndcgs[idx10],
                 "val_mrr@10": mrrs[idx10],
+                "val_coverage@10": covs[idx10],
             })
-            plotter.plot(save=True, show=False, suffix=f'_epoch{epoch_temp}')
-            # Сохранять график каждые eval_interval для отслеживания прогресса
-            # plotter.plot(save=True, show=False, suffix=f'_epoch{epoch_temp}')
+            plotter.plot(save=True, show=False, suffix=f'_epoch{completed_epoch}')
             if bad_count >= args.patience:
                 break
             # for key_temp, values_temp in metrics_dict.items():
@@ -401,11 +512,22 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
         #         break
             
     plotter.plot(save=True, show=False, suffix='_final')
-    logger.info(best_metrics_dict)
-    logger.info(best_epoch)
-    # Гарантируем, что best_model не None (если улучшений не было, берём последнюю модель)
     if best_model is None:
         best_model = copy.deepcopy(model_joint)
+        selected_epoch = completed_epoch
+        selected_metrics = None
+    final_selection_message = (
+        f"Final validation selection: epoch={selected_epoch}, "
+        f"metrics={selected_metrics}, rule=recall@10_then_ndcg_mrr_coverage"
+    )
+    print(final_selection_message)
+    logger.info(final_selection_message)
+    tracker.log_validation_selection(
+        selected_epoch,
+        selected_metrics,
+        rule="recall@10_then_ndcg_mrr_coverage",
+        inference_seeds=evaluation_seeds(args),
+    )
     # if args.eval_interval > epochs:
     #     best_model = copy.deepcopy(model_joint)
     
@@ -456,8 +578,6 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
     # print(best_epoch)
     # logger.info(best_metrics_dict)
     # logger.info(best_epoch)
-
-    print(args)
 
     # if args.diversity_measure:
     #     path_data = '../datasets/data/category/' + args.dataset +'/id_category_dict.pkl'

@@ -17,7 +17,7 @@ import pickle
 from utils import (Data_Train, Data_Val, Data_Test, Data_CHLS,
                    encode_item_ids_with_padding)
 from model import create_model_diffu, Att_Diffuse_model
-from trainer import model_train, LSHT_inference
+from trainer import model_train, LSHT_inference, optimizers
 from collections import Counter
 import polara
 from polara.datasets.movielens import get_movielens_data
@@ -67,6 +67,10 @@ parser.add_argument('--noise_schedule', default='trunc_lin', help='Beta generati
 parser.add_argument('--rescale_timesteps', default=True, help='rescal timesteps')
 parser.add_argument('--eval_interval', type=int, default=20, help='the number of epoch to eval')
 parser.add_argument('--patience', type=int, default=5, help='the number of epoch to wait before early stop')
+parser.add_argument(
+    '--eval_repeats', type=int, default=5,
+    help='Fixed stochastic inference runs averaged during validation only',
+)
 parser.add_argument('--description', type=str, default='Diffu_norm_score', help='Model brief introduction')
 parser.add_argument('--long_head', default=False, help='Long and short sequence, head and long-tail items')
 parser.add_argument('--diversity_measure', default=False, help='Measure the diversity of recommendation results')
@@ -297,7 +301,7 @@ def load_and_split_gts(quantiles=(0.7, 0.8), dataset_name='ml-1m'):
 
 def main(args):    
     fix_random_seed_as(args.random_seed)
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = False
     # data_raw = load_and_split_gts(quantiles=(0.7, 0.8))
     data_raw = load_and_split_gts(quantiles=(0.7, 0.8), dataset_name=args.dataset)
     
@@ -364,7 +368,10 @@ def main(args):
 
         diffu_rec = create_model_diffu(args)
         model = Att_Diffuse_model(diffu_rec, args).to(args.device)
-        optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = optimizers(model, args)
+        lr_scheduler = optim.lr_scheduler.StepLR(
+            optimizer, step_size=args.decay_step, gamma=args.gamma
+        )
         use_amp = args.amp and args.device == 'cuda'
         scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
         
@@ -387,6 +394,7 @@ def main(args):
                 scaler.update()
                 total_loss += loss.item()
             avg_loss = total_loss / len(tra_loader)
+            lr_scheduler.step()
             plotter.update(epoch=epoch, loss=avg_loss)
             args.experiment_tracker.log_epoch(epoch, train_loss=avg_loss)
             if checkpoint_due(epoch - 1, args.epochs):

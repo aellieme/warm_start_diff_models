@@ -15,7 +15,8 @@ class DemoRunnerTest(unittest.TestCase):
     def test_fast_diffurec_command(self, _):
         commands = build_commands(
             ["ml-1m"], [50], 50, {"DiffuRec"}, seed=42,
-            amp=True, fast_diffurec=True,
+            amp=True, fast_diffurec=True, diffurec_eval_repeats=3,
+            diffurec_lr=0.0015,
         )
         self.assertEqual(len(commands), 1)
         _, _, command = commands[0]
@@ -23,8 +24,9 @@ class DemoRunnerTest(unittest.TestCase):
         self.assertEqual(command[command.index("--batch_size") + 1], "1024")
         self.assertEqual(command[command.index("--hidden_size") + 1], "64")
         self.assertEqual(command[command.index("--num_blocks") + 1], "2")
-        self.assertEqual(command[command.index("--lr") + 1], "0.003")
+        self.assertEqual(command[command.index("--lr") + 1], "0.0015")
         self.assertEqual(command[command.index("--noise_schedule") + 1], "cosine")
+        self.assertEqual(command[command.index("--eval_repeats") + 1], "3")
         self.assertEqual(command[command.index("--device") + 1], "cuda")
 
 
