@@ -20,6 +20,16 @@ ALIASES = {
     "amazon_Toys_and_Games": {"adrec": "toys", "baseline": "toys"},
 }
 
+# Fixed final-training budgets used by the demo. They intentionally live here
+# rather than in notebook commands so rerunning the benchmark cannot silently
+# give different models different ad-hoc budgets.
+FIXED_MODEL_EPOCHS = {
+    "ADRec": 250,
+    "SASRec": 250,
+    "GPTRec": 250,
+    "T-DiffRec": 250,
+}
+
 # Fixed DiffuRec configurations used by the demo runner. Keep these
 # dataset/maxlen-specific: applying the ML-1M schedule to Amazon caused
 # materially different convergence and catalogue coverage. Selection
@@ -33,9 +43,17 @@ DIFFUREC_TUNED_PRESETS = {
         "lr": 0.003,
         "noise_schedule": "cosine",
     },
+    ("ml-1m", 100): {
+        "batch_size": 512,
+        "epochs": 55,
+        "hidden_size": 64,
+        "num_blocks": 2,
+        "lr": 0.003,
+        "noise_schedule": "trunc_lin",
+    },
     ("amazon_Baby", 50): {
-        "batch_size": 256,
-        "epochs": 100,
+        "batch_size": 128,
+        "epochs": 60,
         "hidden_size": 64,
         "num_blocks": 2,
         "lr": 0.001,
@@ -50,19 +68,27 @@ DIFFUREC_TUNED_PRESETS = {
         "noise_schedule": "trunc_lin",
     },
     ("amazon_Toys_and_Games", 50): {
-        "batch_size": 256,
-        "epochs": 70,
+        "batch_size": 128,
+        "epochs": 60,
         "hidden_size": 64,
         "num_blocks": 2,
         "lr": 0.003,
-        "noise_schedule": "cosine",
+        "noise_schedule": "trunc_lin",
+    },
+    ("amazon_Toys_and_Games", 100): {
+        "batch_size": 256,
+        "epochs": 100,
+        "hidden_size": 64,
+        "num_blocks": 2,
+        "lr": 0.003,
+        "noise_schedule": "trunc_lin",
     },
 }
 
 
 def build_commands(
-    datasets, maxlens, epochs, models, seed=42,
-    amp=False, tuned_diffurec=False, diffurec_eval_repeats=5,
+    datasets, maxlens, models, seed=42,
+    amp=False, diffurec_eval_repeats=5,
     diffurec_lr=None,
 ):
     commands = []
@@ -75,9 +101,7 @@ def build_commands(
     for dataset in datasets:
         alias = ALIASES[dataset]
         for maxlen in maxlens:
-            diffurec_epochs = epochs
-            diffurec_config = None
-            if tuned_diffurec and "DiffuRec" in models:
+            if "DiffuRec" in models:
                 preset_key = (dataset, maxlen)
                 if preset_key not in DIFFUREC_TUNED_PRESETS:
                     raise ValueError(
@@ -86,17 +110,16 @@ def build_commands(
                         "Select it on validation before adding it to the demo."
                     )
                 diffurec_config = dict(DIFFUREC_TUNED_PRESETS[preset_key])
-                diffurec_epochs = diffurec_config["epochs"]
                 if diffurec_lr is not None:
                     diffurec_config["lr"] = diffurec_lr
-            diffurec_args = [
-                sys.executable, "main.py", "--dataset", dataset, "--final_train",
-                "--max_len", maxlen, "--epochs", diffurec_epochs,
-                "--metric_ks", 10, 20, 100,
-                "--random_seed", seed, "--device", "cuda" if use_cuda else "cpu",
-                "--eval_repeats", diffurec_eval_repeats,
-            ]
-            if diffurec_config is not None:
+                diffurec_args = [
+                    sys.executable, "main.py", "--dataset", dataset, "--final_train",
+                    "--max_len", maxlen, "--epochs", diffurec_config["epochs"],
+                    "--metric_ks", 10, 20, 100,
+                    "--random_seed", seed,
+                    "--device", "cuda" if use_cuda else "cpu",
+                    "--eval_repeats", diffurec_eval_repeats,
+                ]
                 diffurec_args.extend([
                     "--batch_size", diffurec_config["batch_size"],
                     "--hidden_size", diffurec_config["hidden_size"],
@@ -104,22 +127,24 @@ def build_commands(
                     "--lr", diffurec_config["lr"],
                     "--noise_schedule", diffurec_config["noise_schedule"],
                 ])
-            if amp:
-                diffurec_args.append("--amp")
-            add("DiffuRec", REPO / "src/DiffuRec/src", diffurec_args)
+                if amp:
+                    diffurec_args.append("--amp")
+                add("DiffuRec", REPO / "src/DiffuRec/src", diffurec_args)
             add("ADRec", REPO / "src/ADRec/src", [
                 sys.executable, "main.py", "--dataset", alias["adrec"], "--final",
-                "--max_len", maxlen, "--epochs", epochs, "--metric_ks", 10, 20, 100,
+                "--max_len", maxlen, "--epochs", FIXED_MODEL_EPOCHS["ADRec"],
+                "--metric_ks", 10, 20, 100,
                 "--mask_seen", "True", "--random_seed", seed,
                 "--device", "cuda:0" if use_cuda else "cpu",
             ])
             add("SASRec", REPO / "src/SASRec", [
                 sys.executable, "main.py", "--dataset", dataset,
-                "--maxlen", maxlen, "--num_epochs", epochs,
+                "--maxlen", maxlen, "--num_epochs", FIXED_MODEL_EPOCHS["SASRec"],
             ])
             add("GPTRec", REPO / "src/GPTRec/src", [
                 sys.executable, "run_train_predict.py", f"dataset_name={dataset}",
-                f"final_epochs={epochs}", f"dataset.max_length={maxlen}",
+                f"final_epochs={FIXED_MODEL_EPOCHS['GPTRec']}",
+                f"dataset.max_length={maxlen}",
                 "evaluator.top_k=[10,20,100]",
             ])
 
@@ -129,7 +154,8 @@ def build_commands(
             ]))
         tdiff_args = [
             sys.executable, "main.py", "--dataset", dataset, "--final_train",
-            "--epochs", epochs, "--topN", "[10,20,100]",
+            "--epochs", FIXED_MODEL_EPOCHS["T-DiffRec"],
+            "--topN", "[10,20,100]",
         ]
         if use_cuda:
             tdiff_args.append("--cuda")
@@ -162,7 +188,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--datasets", nargs="+", choices=ALIASES, default=["ml-1m"])
     parser.add_argument("--maxlens", nargs="+", type=int, default=[50])
-    parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--models", nargs="+", choices=ALL_MODELS, default=list(ALL_MODELS))
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp", action="store_true", help="Enable AMP for DiffuRec")
@@ -172,11 +197,11 @@ def main():
     )
     parser.add_argument(
         "--diffurec-lr", type=float,
-        help="Override the learning rate selected by --tuned-diffurec",
+        help="Override the learning rate stored in the fixed DiffuRec preset",
     )
     parser.add_argument(
         "--tuned-diffurec", action="store_true",
-        help="Use a fixed dataset/maxlen DiffuRec preset",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--fast-diffurec", dest="tuned_diffurec", action="store_true",
@@ -187,8 +212,8 @@ def main():
     args = parser.parse_args()
 
     commands = build_commands(
-        args.datasets, args.maxlens, args.epochs, set(args.models), args.seed,
-        amp=args.amp, tuned_diffurec=args.tuned_diffurec,
+        args.datasets, args.maxlens, set(args.models), args.seed,
+        amp=args.amp,
         diffurec_eval_repeats=args.diffurec_eval_repeats,
         diffurec_lr=args.diffurec_lr,
     )

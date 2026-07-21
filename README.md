@@ -99,21 +99,27 @@ python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --ep
 # Same DiffuRec configuration with CUDA mixed precision
 python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 26 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42 --device cuda --amp
 
-# Run only fixed dataset/maxlen-specific configurations.
-# No --epochs is needed: each preset contains its fixed epoch count.
+# The demo runner always uses fixed dataset/maxlen-specific configurations.
+# Epoch counts are stored inside the runner and are not accepted from the CLI.
 # Every completed run is added to the results registry.
-python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets ml-1m --maxlens 50 --tuned-diffurec --amp --prepare-data --run
-python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets amazon_Baby --maxlens 50 100 --tuned-diffurec --amp --prepare-data --run
-python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets amazon_Toys_and_Games --maxlens 50 --tuned-diffurec --amp --prepare-data --run
+python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets ml-1m --maxlens 50 100 --amp --prepare-data --run
+python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets amazon_Baby --maxlens 50 100 --amp --prepare-data --run
+python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets amazon_Toys_and_Games --maxlens 50 100 --amp --prepare-data --run
 
-# Amazon Baby, max_len=50: validation-selected batch_size=256, 100 epochs
-python main.py --dataset amazon_Baby --final_train --max_len 50 --batch_size 256 --epochs 100 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.001 --noise_schedule trunc_lin --random_seed 42 --device cuda --amp
+# Amazon Baby, max_len=50: validation-selected batch_size=128, 60 epochs
+python main.py --dataset amazon_Baby --final_train --max_len 50 --batch_size 128 --epochs 60 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.001 --noise_schedule trunc_lin --random_seed 42 --device cuda --amp
 
 # Amazon Baby, max_len=100: validation-selected batch_size=128, 130 epochs
 python main.py --dataset amazon_Baby --final_train --max_len 100 --batch_size 128 --epochs 130 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.001 --noise_schedule trunc_lin --random_seed 42 --device cuda --amp
 
-# Amazon Toys, max_len=50: validation-selected batch_size=256, 70 epochs
-python main.py --dataset amazon_Toys_and_Games --final_train --max_len 50 --batch_size 256 --epochs 70 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42 --device cuda --amp
+# Amazon Toys, max_len=50: validation-selected batch_size=128, 60 epochs
+python main.py --dataset amazon_Toys_and_Games --final_train --max_len 50 --batch_size 128 --epochs 60 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule trunc_lin --random_seed 42 --device cuda --amp
+
+# Amazon Toys, max_len=100: validation-selected batch_size=256, 100 epochs
+python main.py --dataset amazon_Toys_and_Games --final_train --max_len 100 --batch_size 256 --epochs 100 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule trunc_lin --random_seed 42 --device cuda --amp
+
+# ML-1M, max_len=100: validation-selected batch_size=512, 55 epochs
+python main.py --dataset ml-1m --final_train --max_len 100 --batch_size 512 --epochs 55 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule trunc_lin --random_seed 42 --device cuda --amp
 
 ```
 
@@ -130,12 +136,14 @@ After an interruption, repeat the same command with
 `--resume_checkpoint latest`. Changing a training or validation-selection
 parameter is rejected when resuming instead of silently mixing configurations.
 
-The `--tuned-diffurec` presets currently fix ML-1M at `max_len=50`, Amazon Baby
-at `max_len=50/100`, and Amazon Toys at `max_len=50`. A requested combination
-without a fixed preset is rejected instead of silently receiving unrelated
-fallback parameters. All listed configurations were selected on validation;
-final test metrics are not used by the runner for preset selection. Use
-`--diffurec-lr` only when an explicit LR override is intended.
+The demo presets fix ML-1M, Amazon Baby, and Amazon Toys at both
+`max_len=50/100`. A requested combination without a fixed preset is rejected
+instead of silently receiving unrelated fallback parameters. All listed
+configurations were selected on validation; final test metrics are not used by
+the runner for preset selection. Use `--diffurec-lr` only when an explicit LR
+override is intended. ADRec, SASRec, GPTRec, and T-DiffRec use their fixed
+250-epoch final budgets from the demo runner, so notebook commands do not
+expose epoch counts.
 
 ### 2. ADRec
 
