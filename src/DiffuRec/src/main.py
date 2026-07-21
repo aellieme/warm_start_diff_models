@@ -71,6 +71,13 @@ parser.add_argument(
     '--eval_repeats', type=int, default=5,
     help='Fixed stochastic inference runs averaged during validation only',
 )
+parser.add_argument(
+    '--resume_checkpoint', type=str, default=None,
+    help=(
+        "Resume a validation/tuning run from a checkpoint path, or use "
+        "'latest' for the newest checkpoint matching the current configuration"
+    ),
+)
 parser.add_argument('--description', type=str, default='Diffu_norm_score', help='Model brief introduction')
 parser.add_argument('--long_head', default=False, help='Long and short sequence, head and long-tail items')
 parser.add_argument('--diversity_measure', default=False, help='Measure the diversity of recommendation results')

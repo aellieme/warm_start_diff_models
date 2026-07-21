@@ -20,11 +20,50 @@ ALIASES = {
     "amazon_Toys_and_Games": {"adrec": "toys", "baseline": "toys"},
 }
 
+# Fixed DiffuRec configurations used by the demo runner. Keep these
+# dataset/maxlen-specific: applying the ML-1M schedule to Amazon caused
+# materially different convergence and catalogue coverage. Selection
+# provenance is documented in README.md.
+DIFFUREC_TUNED_PRESETS = {
+    ("ml-1m", 50): {
+        "batch_size": 1024,
+        "epochs": 26,
+        "hidden_size": 64,
+        "num_blocks": 2,
+        "lr": 0.003,
+        "noise_schedule": "cosine",
+    },
+    ("amazon_Baby", 50): {
+        "batch_size": 256,
+        "epochs": 100,
+        "hidden_size": 64,
+        "num_blocks": 2,
+        "lr": 0.001,
+        "noise_schedule": "trunc_lin",
+    },
+    ("amazon_Baby", 100): {
+        "batch_size": 128,
+        "epochs": 130,
+        "hidden_size": 64,
+        "num_blocks": 2,
+        "lr": 0.001,
+        "noise_schedule": "trunc_lin",
+    },
+    ("amazon_Toys_and_Games", 50): {
+        "batch_size": 256,
+        "epochs": 70,
+        "hidden_size": 64,
+        "num_blocks": 2,
+        "lr": 0.003,
+        "noise_schedule": "cosine",
+    },
+}
+
 
 def build_commands(
     datasets, maxlens, epochs, models, seed=42,
-    amp=False, fast_diffurec=False, diffurec_eval_repeats=5,
-    diffurec_lr=0.003,
+    amp=False, tuned_diffurec=False, diffurec_eval_repeats=5,
+    diffurec_lr=None,
 ):
     commands = []
     use_cuda = torch.cuda.is_available()
@@ -36,16 +75,34 @@ def build_commands(
     for dataset in datasets:
         alias = ALIASES[dataset]
         for maxlen in maxlens:
+            diffurec_epochs = epochs
+            diffurec_config = None
+            if tuned_diffurec and "DiffuRec" in models:
+                preset_key = (dataset, maxlen)
+                if preset_key not in DIFFUREC_TUNED_PRESETS:
+                    raise ValueError(
+                        "No fixed DiffuRec preset for "
+                        f"dataset={dataset}, maxlen={maxlen}. "
+                        "Select it on validation before adding it to the demo."
+                    )
+                diffurec_config = dict(DIFFUREC_TUNED_PRESETS[preset_key])
+                diffurec_epochs = diffurec_config["epochs"]
+                if diffurec_lr is not None:
+                    diffurec_config["lr"] = diffurec_lr
             diffurec_args = [
                 sys.executable, "main.py", "--dataset", dataset, "--final_train",
-                "--max_len", maxlen, "--epochs", epochs, "--metric_ks", 10, 20, 100,
+                "--max_len", maxlen, "--epochs", diffurec_epochs,
+                "--metric_ks", 10, 20, 100,
                 "--random_seed", seed, "--device", "cuda" if use_cuda else "cpu",
                 "--eval_repeats", diffurec_eval_repeats,
             ]
-            if fast_diffurec:
+            if diffurec_config is not None:
                 diffurec_args.extend([
-                    "--batch_size", 1024, "--hidden_size", 64, "--num_blocks", 2,
-                    "--lr", diffurec_lr, "--noise_schedule", "cosine",
+                    "--batch_size", diffurec_config["batch_size"],
+                    "--hidden_size", diffurec_config["hidden_size"],
+                    "--num_blocks", diffurec_config["num_blocks"],
+                    "--lr", diffurec_config["lr"],
+                    "--noise_schedule", diffurec_config["noise_schedule"],
                 ])
             if amp:
                 diffurec_args.append("--amp")
@@ -114,15 +171,16 @@ def main():
         help="Fixed reverse-diffusion inference runs averaged for DiffuRec validation",
     )
     parser.add_argument(
-        "--diffurec-lr", type=float, default=0.003,
-        help="Learning rate used by --fast-diffurec (for example 0.0015 for Baby)",
+        "--diffurec-lr", type=float,
+        help="Override the learning rate selected by --tuned-diffurec",
     )
     parser.add_argument(
-        "--fast-diffurec", action="store_true",
-        help=(
-            "Use the tuned fast DiffuRec preset: batch_size=1024, hidden_size=64, "
-            "num_blocks=2, lr=0.003, noise_schedule=cosine"
-        ),
+        "--tuned-diffurec", action="store_true",
+        help="Use a fixed dataset/maxlen DiffuRec preset",
+    )
+    parser.add_argument(
+        "--fast-diffurec", dest="tuned_diffurec", action="store_true",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--prepare-data", action="store_true")
     parser.add_argument("--run", action="store_true", help="Execute commands; otherwise only print them")
@@ -130,7 +188,7 @@ def main():
 
     commands = build_commands(
         args.datasets, args.maxlens, args.epochs, set(args.models), args.seed,
-        amp=args.amp, fast_diffurec=args.fast_diffurec,
+        amp=args.amp, tuned_diffurec=args.tuned_diffurec,
         diffurec_eval_repeats=args.diffurec_eval_repeats,
         diffurec_lr=args.diffurec_lr,
     )

@@ -4,6 +4,9 @@ import datetime
 import torch
 import numpy as np
 import copy
+import hashlib
+import json
+import random
 import time
 import pickle
 import sys
@@ -18,7 +21,141 @@ from utils import (build_candidate_mask, eligible_warm_start_rows,
 from utils import prepare_model_history
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from experiment_tools.experiment_tracking import ExperimentTracker, recommendation_popularity
+from experiment_tools.experiment_tracking import (
+    ExperimentTracker,
+    checkpoint_path,
+    recommendation_popularity,
+    save_torch_checkpoint,
+)
+
+
+TUNING_CHECKPOINT_INTERVAL = 10
+TUNING_CHECKPOINT_KEEP = 2
+_RESUME_SIGNATURE_FIELDS = (
+    'dataset', 'random_seed', 'max_len', 'device', 'num_gpu', 'batch_size', 'hidden_size',
+    'dropout', 'emb_dropout', 'hidden_act', 'num_blocks', 'decay_step',
+    'gamma', 'metric_ks', 'optimizer', 'lr', 'loss_lambda',
+    'weight_decay', 'momentum', 'schedule_sampler_name', 'diffusion_steps',
+    'lambda_uncertainty', 'noise_schedule', 'rescale_timesteps',
+    'eval_interval', 'patience', 'eval_repeats', 'amp',
+)
+
+
+def _resume_signature(args):
+    """Return the training/selection settings that a resume must preserve."""
+    return {
+        field: getattr(args, field, None)
+        for field in _RESUME_SIGNATURE_FIELDS
+    }
+
+
+def _tuning_checkpoint_prefix(args):
+    signature_json = json.dumps(
+        _resume_signature(args), sort_keys=True, separators=(',', ':'),
+        default=str,
+    )
+    digest = hashlib.sha256(signature_json.encode('utf-8')).hexdigest()[:12]
+    stable_path = checkpoint_path(
+        'DiffuRec', args.dataset, args.max_len, args.random_seed,
+    )
+    directory = stable_path.parent / 'tuning'
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory, f'{stable_path.stem}_{digest}'
+
+
+def tuning_checkpoint_path(args, completed_epoch):
+    directory, prefix = _tuning_checkpoint_prefix(args)
+    return directory / f'{prefix}_epoch{int(completed_epoch):04d}.pt'
+
+
+def list_tuning_checkpoints(args):
+    directory, prefix = _tuning_checkpoint_prefix(args)
+    return sorted(directory.glob(f'{prefix}_epoch*.pt'))
+
+
+def _state_dict_on_cpu(model):
+    if model is None:
+        return None
+    return {
+        name: value.detach().cpu() if torch.is_tensor(value) else value
+        for name, value in model.state_dict().items()
+    }
+
+
+def _capture_rng_state():
+    state = {
+        'python': random.getstate(),
+        'numpy': np.random.get_state(),
+        'torch': torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state['cuda'] = [value.cpu() for value in torch.cuda.get_rng_state_all()]
+    return state
+
+
+def _restore_rng_state(state):
+    random.setstate(state['python'])
+    np.random.set_state(state['numpy'])
+    torch.set_rng_state(state['torch'].cpu())
+    if torch.cuda.is_available() and state.get('cuda'):
+        torch.cuda.set_rng_state_all([value.cpu() for value in state['cuda']])
+
+
+def _move_optimizer_state(optimizer, device):
+    for optimizer_state in optimizer.state.values():
+        for name, value in optimizer_state.items():
+            if torch.is_tensor(value):
+                optimizer_state[name] = value.to(device)
+
+
+def _prepare_resumed_epoch_loader(data_loader):
+    """Preserve the pre-interruption RandomSampler stream after worker restart."""
+    sampler = getattr(data_loader, 'sampler', None)
+    if sampler is None or not hasattr(sampler, 'generator'):
+        return
+    # RandomSampler(generator=None) draws exactly one seed from the global CPU
+    # RNG at the beginning of every epoch.  Reproduce that draw explicitly.
+    sampler_seed = int(torch.empty((), dtype=torch.int64).random_().item())
+    sampler.generator = torch.Generator().manual_seed(sampler_seed)
+    # A newly constructed DataLoader also draws a worker base seed.  Keep that
+    # bookkeeping off the restored training RNG stream; the dataset is static.
+    if getattr(data_loader, 'generator', None) is None:
+        data_loader.generator = torch.Generator().manual_seed(sampler_seed ^ 0x5DEECE66D)
+
+
+def save_tuning_checkpoint(payload, args, completed_epoch, keep=TUNING_CHECKPOINT_KEEP):
+    """Atomically save a rolling tuning checkpoint and retain only the newest files."""
+    path = tuning_checkpoint_path(args, completed_epoch)
+    save_torch_checkpoint(payload, path)
+    checkpoints = list_tuning_checkpoints(args)
+    for stale_path in checkpoints[:-max(1, int(keep))]:
+        stale_path.unlink(missing_ok=True)
+        print(f'Deleted old tuning checkpoint: {stale_path}')
+    return path
+
+
+def _load_tuning_checkpoint(path):
+    try:
+        return torch.load(path, map_location='cpu', weights_only=False)
+    except TypeError:  # Compatibility with older PyTorch releases.
+        return torch.load(path, map_location='cpu')
+
+
+def _resolve_resume_checkpoint(args):
+    requested = getattr(args, 'resume_checkpoint', None)
+    if not requested:
+        return None
+    if str(requested).lower() == 'latest':
+        checkpoints = list_tuning_checkpoints(args)
+        if not checkpoints:
+            raise FileNotFoundError(
+                'No tuning checkpoint matches the current DiffuRec configuration'
+            )
+        return checkpoints[-1]
+    path = Path(requested).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f'Tuning checkpoint not found: {path}')
+    return path
 
 def optimizers(model, args):
     if args.optimizer.lower() == 'adam':
@@ -356,12 +493,59 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
     bad_count = 0
     candidate_items = set(args.coverage_candidate_items)
     candidate_items.discard(0)
-    
-    for epoch_temp in range(epochs):
+
+    start_epoch = 0
+    resumed_training = False
+    resume_path = _resolve_resume_checkpoint(args)
+    if resume_path is not None:
+        checkpoint = _load_tuning_checkpoint(resume_path)
+        checkpoint_signature = checkpoint.get('resume_signature')
+        current_signature = _resume_signature(args)
+        if checkpoint_signature != current_signature:
+            raise ValueError(
+                'The tuning checkpoint configuration does not match the current '
+                f'arguments. Saved={checkpoint_signature}; current={current_signature}'
+            )
+        start_epoch = int(checkpoint['completed_epoch'])
+        if start_epoch >= epochs:
+            raise ValueError(
+                f'Checkpoint already completed epoch {start_epoch}, but --epochs={epochs}'
+            )
+        model_joint.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        _move_optimizer_state(optimizer, device)
+        lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
+        scaler.load_state_dict(checkpoint.get('scaler_state_dict', {}))
+        selected_metrics = checkpoint.get('selected_metrics')
+        selected_epoch = checkpoint.get('selected_epoch')
+        best_selection_key = checkpoint.get('best_selection_key')
+        bad_count = int(checkpoint.get('bad_count', 0))
+        if checkpoint.get('best_model_state_dict') is not None:
+            best_model = copy.deepcopy(model_joint)
+            best_model.load_state_dict(checkpoint['best_model_state_dict'])
+        for metric_name, metric_data in checkpoint.get('plotter_data', {}).items():
+            plotter.data[metric_name] = {
+                'epoch': list(metric_data['epoch']),
+                'value': list(metric_data['value']),
+            }
+        tracker.rows = copy.deepcopy(checkpoint.get('tracker_rows', []))
+        _restore_rng_state(checkpoint['rng_state'])
+        resumed_training = True
+        resume_message = (
+            f'Resumed tuning from {resume_path} after epoch {start_epoch}; '
+            f'continuing through epoch {epochs}'
+        )
+        print(resume_message)
+        logger.info(resume_message)
+
+    for epoch_temp in range(start_epoch, epochs):
         completed_epoch = epoch_temp + 1
         print('Epoch: {}'.format(completed_epoch))
         logger.info('Epoch: {}'.format(completed_epoch))
         model_joint.train()
+
+        if resumed_training:
+            _prepare_resumed_epoch_loader(tra_data_loader)
 
         epoch_loss_sum = 0.0
         for index_temp, train_batch in enumerate(tqdm(
@@ -388,6 +572,7 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
         tracker.log_epoch(completed_epoch, train_loss=average_loss)
         lr_scheduler.step()
 
+        should_stop = False
         if completed_epoch % args.eval_interval == 0:
             print('start predicting: ', datetime.datetime.now())
             logger.info('start predicting: {}'.format(datetime.datetime.now()))
@@ -455,7 +640,7 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
             })
             plotter.plot(save=True, show=False, suffix=f'_epoch{completed_epoch}')
             if bad_count >= args.patience:
-                break
+                should_stop = True
             # for key_temp, values_temp in metrics_dict.items():
             #     values_mean = values_temp  # уже число
             #     if values_mean > best_metrics_dict.get('Best_' + key_temp, -1):
@@ -511,6 +696,34 @@ def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint,
         #     if bad_count >= args.patience:
         #         break
             
+        if completed_epoch % TUNING_CHECKPOINT_INTERVAL == 0:
+            checkpoint_payload = {
+                'format_version': 1,
+                'completed_epoch': completed_epoch,
+                'resume_signature': _resume_signature(args),
+                'model_state_dict': _state_dict_on_cpu(model_joint),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'lr_scheduler_state_dict': lr_scheduler.state_dict(),
+                'scaler_state_dict': scaler.state_dict(),
+                'selected_metrics': copy.deepcopy(selected_metrics),
+                'selected_epoch': selected_epoch,
+                'best_selection_key': best_selection_key,
+                'best_model_state_dict': _state_dict_on_cpu(best_model),
+                'bad_count': bad_count,
+                'rng_state': _capture_rng_state(),
+                'plotter_data': copy.deepcopy(dict(plotter.data)),
+                'tracker_rows': copy.deepcopy(tracker.rows),
+            }
+            saved_path = save_tuning_checkpoint(
+                checkpoint_payload, args, completed_epoch,
+            )
+            checkpoint_message = f'Tuning checkpoint saved: {saved_path}'
+            print(checkpoint_message)
+            logger.info(checkpoint_message)
+
+        if should_stop:
+            break
+
     plotter.plot(save=True, show=False, suffix='_final')
     if best_model is None:
         best_model = copy.deepcopy(model_joint)

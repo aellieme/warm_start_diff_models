@@ -79,6 +79,7 @@ For a complete Google Colab workflow (setup, all models, TensorBoard, plots, res
 | `--batch_size` | Training batch size | `--batch_size 512` |
 | `--amp` | CUDA mixed precision for faster DiffuRec training | `--amp` |
 | `--eval_repeats` | Fixed stochastic DiffuRec inference runs averaged during validation | `--eval_repeats 5` |
+| `--resume_checkpoint` | Resume DiffuRec tuning from a saved path, or from `latest` matching the current configuration | `--resume_checkpoint latest` |
 | `--epochs` / `--num_epochs` | Number of training epochs | `--epochs 250` |
 | `--metric_ks` | List of K values for evaluation | `--metric_ks 10 20 100` |
 | `--hidden_size` | Embedding / hidden dimension | `--hidden_size 64` |
@@ -93,23 +94,48 @@ For a complete Google Colab workflow (setup, all models, TensorBoard, plots, res
 cd src/DiffuRec/src
 
 # Tuned fast configuration selected on ML-1M validation (26 final epochs)
-python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 26 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42 --eval_repeats 5
+python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 26 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42
 
 # Same DiffuRec configuration with CUDA mixed precision
-python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 26 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42 --device cuda --amp --eval_repeats 5
+python main.py --dataset ml-1m --final_train --max_len 50 --batch_size 1024 --epochs 26 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42 --device cuda --amp
 
-# Apply the fixed ML-1M-selected preset to all datasets through the demo runner
-# (run from the repository root; every completed run is added to the results registry)
-python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets ml-1m amazon_Baby amazon_Toys_and_Games --maxlens 50 --epochs 26 --fast-diffurec --diffurec-lr 0.003 --amp --diffurec-eval-repeats 5 --prepare-data --run
+# Run only fixed dataset/maxlen-specific configurations.
+# No --epochs is needed: each preset contains its fixed epoch count.
+# Every completed run is added to the results registry.
+python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets ml-1m --maxlens 50 --tuned-diffurec --amp --prepare-data --run
+python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets amazon_Baby --maxlens 50 100 --tuned-diffurec --amp --prepare-data --run
+python src/experiment_tools/run_demo_experiments.py --models DiffuRec --datasets amazon_Toys_and_Games --maxlens 50 --tuned-diffurec --amp --prepare-data --run
 
-# Amazon Baby, max_len=50, 150 epochs
-python main.py --dataset amazon_Baby --final_train --max_len 50 --batch_size 512 --epochs 150 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --random_seed 42
+# Amazon Baby, max_len=50: validation-selected batch_size=256, 100 epochs
+python main.py --dataset amazon_Baby --final_train --max_len 50 --batch_size 256 --epochs 100 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.001 --noise_schedule trunc_lin --random_seed 42 --device cuda --amp
 
-# Amazon Toys, max_len=100, batch_size=256, epochs=150
-python main.py --dataset amazon_Toys_and_Games --final_train --max_len 100 --batch_size 256 --epochs 150 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --random_seed 42
+# Amazon Baby, max_len=100: validation-selected batch_size=128, 130 epochs
+python main.py --dataset amazon_Baby --final_train --max_len 100 --batch_size 128 --epochs 130 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.001 --noise_schedule trunc_lin --random_seed 42 --device cuda --amp
+
+# Amazon Toys, max_len=50: validation-selected batch_size=256, 70 epochs
+python main.py --dataset amazon_Toys_and_Games --final_train --max_len 50 --batch_size 256 --epochs 70 --metric_ks 10 20 100 --hidden_size 64 --num_blocks 2 --lr 0.003 --noise_schedule cosine --random_seed 42 --device cuda --amp
+
 ```
 
 Training curves and final metrics are saved in `./log/`.
+
+Non-final DiffuRec tuning runs save a resumable checkpoint every 10 completed
+epochs. Each exact hyperparameter configuration retains only its two newest
+checkpoints. The files contain the model, optimizer, LR scheduler, AMP scaler,
+validation selection, plots/history, and RNG states. Set
+`EXPERIMENT_OUTPUT_DIR` to persistent storage (for example,
+`/content/drive/MyDrive/experiment_results/logs` in Colab) before training;
+checkpoints are written to the sibling `checkpoints/DiffuRec/tuning` directory.
+After an interruption, repeat the same command with
+`--resume_checkpoint latest`. Changing a training or validation-selection
+parameter is rejected when resuming instead of silently mixing configurations.
+
+The `--tuned-diffurec` presets currently fix ML-1M at `max_len=50`, Amazon Baby
+at `max_len=50/100`, and Amazon Toys at `max_len=50`. A requested combination
+without a fixed preset is rejected instead of silently receiving unrelated
+fallback parameters. All listed configurations were selected on validation;
+final test metrics are not used by the runner for preset selection. Use
+`--diffurec-lr` only when an explicit LR override is intended.
 
 ### 2. ADRec
 

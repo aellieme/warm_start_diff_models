@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
+import numpy as np
 import torch
 
 try:
@@ -76,6 +80,11 @@ def load_evaluation_helpers():
             module.evaluation_seeds,
             module.isolated_torch_rng,
             module.evaluate_stochastic_ranking,
+            module._capture_rng_state,
+            module._restore_rng_state,
+            module.list_tuning_checkpoints,
+            module.save_tuning_checkpoint,
+            module.model_train,
         )
     finally:
         sys.path.remove(str(source_dir))
@@ -93,10 +102,178 @@ def load_evaluation_helpers():
     evaluation_seeds,
     isolated_torch_rng,
     evaluate_stochastic_ranking,
+    capture_rng_state,
+    restore_rng_state,
+    list_tuning_checkpoints,
+    save_tuning_checkpoint,
+    model_train,
 ) = load_evaluation_helpers()
 
 
 class DiffuRecCpuSmokeTest(unittest.TestCase):
+    @staticmethod
+    def tuning_args(batch_size=512):
+        return SimpleNamespace(
+            dataset="ml-1m",
+            random_seed=42,
+            max_len=100,
+            device="cpu",
+            num_gpu=1,
+            batch_size=batch_size,
+            hidden_size=64,
+            dropout=0.1,
+            emb_dropout=0.3,
+            hidden_act="gelu",
+            num_blocks=2,
+            decay_step=100,
+            gamma=0.1,
+            metric_ks=[10, 20, 100],
+            optimizer="Adam",
+            lr=0.003,
+            loss_lambda=0.001,
+            weight_decay=0,
+            momentum=None,
+            schedule_sampler_name="lossaware",
+            diffusion_steps=32,
+            lambda_uncertainty=0.001,
+            noise_schedule="trunc_lin",
+            rescale_timesteps=True,
+            eval_interval=5,
+            patience=8,
+            eval_repeats=5,
+            amp=False,
+        )
+
+    def test_tuning_checkpoints_keep_only_two_newest_per_configuration(self):
+        args = self.tuning_args(batch_size=512)
+        other_args = self.tuning_args(batch_size=256)
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+            os.environ,
+            {"EXPERIMENT_OUTPUT_DIR": str(Path(directory) / "logs")},
+        ):
+            for epoch in (10, 20, 30):
+                save_tuning_checkpoint({"completed_epoch": epoch}, args, epoch)
+            save_tuning_checkpoint(
+                {"completed_epoch": 10}, other_args, 10,
+            )
+
+            checkpoints = list_tuning_checkpoints(args)
+            other_checkpoints = list_tuning_checkpoints(other_args)
+
+            self.assertEqual(
+                [path.stem[-9:] for path in checkpoints],
+                ["epoch0020", "epoch0030"],
+            )
+            self.assertEqual(len(other_checkpoints), 1)
+            self.assertTrue(all(path.is_file() for path in checkpoints))
+
+    def test_training_rng_state_round_trip(self):
+        import random
+
+        random.seed(42)
+        np.random.seed(42)
+        torch.manual_seed(42)
+        state = capture_rng_state()
+        expected = (random.random(), np.random.rand(), torch.rand(3))
+
+        random.seed(999)
+        np.random.seed(999)
+        torch.manual_seed(999)
+        restore_rng_state(state)
+        actual = (random.random(), np.random.rand(), torch.rand(3))
+
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual[1], expected[1])
+        self.assertTrue(torch.equal(actual[2], expected[2]))
+
+    def test_tuning_resume_restores_optimizer_and_training_epoch(self):
+        class TinyDiffuRec(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.logits = torch.nn.Parameter(torch.tensor([0.0, 0.1, 0.2, 0.3]))
+
+            def forward(self, sequence, target, train_flag=False):
+                representation = self.logits.unsqueeze(0).expand(sequence.shape[0], -1)
+                return None, representation, None, None, None, None
+
+            def loss_diffu_ce(self, representation, target):
+                return torch.nn.functional.cross_entropy(
+                    representation, target.squeeze(-1)
+                )
+
+        class NullLogger:
+            def info(self, *args, **kwargs):
+                pass
+
+        def make_args(root, epochs, resume_checkpoint=None):
+            args = self.tuning_args(batch_size=2)
+            args.epochs = epochs
+            args.resume_checkpoint = resume_checkpoint
+            args.log_file = str(Path(root) / "plots") + os.sep
+            args.description = "resume_test"
+            args.item_num = 3
+            args.coverage_candidate_items = {1, 2, 3}
+            args.train_item_popularity = {1: 1, 2: 1, 3: 1}
+            args.eval_interval = 100
+            return args
+
+        sequence = torch.tensor([[0, 1], [0, 2]], dtype=torch.long)
+        target = torch.tensor([[2], [3]], dtype=torch.long)
+        train_loader = [(sequence, target)]
+
+        with tempfile.TemporaryDirectory() as directory:
+            continuous_root = Path(directory) / "continuous"
+            split_root = Path(directory) / "split"
+
+            torch.manual_seed(42)
+            continuous_model = TinyDiffuRec()
+            continuous_args = make_args(continuous_root, epochs=20)
+            with mock.patch.dict(
+                os.environ,
+                {"EXPERIMENT_OUTPUT_DIR": str(continuous_root / "logs")},
+            ):
+                model_train(
+                    train_loader, [], None, continuous_model,
+                    continuous_args, NullLogger(),
+                )
+                continuous_checkpoint = torch.load(
+                    list_tuning_checkpoints(continuous_args)[-1],
+                    map_location="cpu",
+                    weights_only=False,
+                )
+
+            torch.manual_seed(42)
+            first_model = TinyDiffuRec()
+            first_args = make_args(split_root, epochs=10)
+            with mock.patch.dict(
+                os.environ,
+                {"EXPERIMENT_OUTPUT_DIR": str(split_root / "logs")},
+            ):
+                model_train(
+                    train_loader, [], None, first_model,
+                    first_args, NullLogger(),
+                )
+                resumed_model = TinyDiffuRec()
+                resumed_args = make_args(
+                    split_root, epochs=20, resume_checkpoint="latest",
+                )
+                model_train(
+                    train_loader, [], None, resumed_model,
+                    resumed_args, NullLogger(),
+                )
+                resumed_checkpoint = torch.load(
+                    list_tuning_checkpoints(resumed_args)[-1],
+                    map_location="cpu",
+                    weights_only=False,
+                )
+
+            self.assertEqual(continuous_checkpoint["completed_epoch"], 20)
+            self.assertEqual(resumed_checkpoint["completed_epoch"], 20)
+            self.assertTrue(torch.equal(
+                continuous_checkpoint["model_state_dict"]["logits"],
+                resumed_checkpoint["model_state_dict"]["logits"],
+            ))
+
     def test_evaluation_seeds_are_fixed_and_predeclared(self):
         args = SimpleNamespace(random_seed=42, eval_repeats=5)
         self.assertEqual(
