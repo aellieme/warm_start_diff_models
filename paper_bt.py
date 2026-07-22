@@ -30,13 +30,19 @@ Install in Colab if needed:
 
 from __future__ import annotations
 
+import argparse
+import shutil
 from itertools import combinations
 from pathlib import Path
 
 import arviz as az
+import matplotlib
 import numpy as np
 import pandas as pd
 import pymc as pm
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 
 # -------- SETTINGS YOU MAY CHANGE --------
@@ -63,9 +69,10 @@ HIGHER_IS_BETTER = True
 EXACT_TIES = True
 
 
-def locate_file(filename: str) -> Path:
-    """Find a file in the current folder or /content (Google Colab)."""
+def locate_file(filename: str, input_dir: Path | None = None) -> Path:
+    """Find an input file in the requested folder or common Colab locations."""
     candidates = [
+        *((input_dir / filename,) if input_dir is not None else ()),
         Path(filename),
         Path("/content") / filename,
         Path("/mnt/data") / filename,
@@ -209,7 +216,7 @@ def fit_paper_bayesian_bt(
             step=step,
             random_seed=RANDOM_SEED,
             return_inferencedata=True,
-            progressbar=True,
+            progressbar=False,
         )
 
     return trace
