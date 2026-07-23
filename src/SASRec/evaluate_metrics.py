@@ -1,6 +1,22 @@
 import numpy as np
 import pandas as pd
 
+def drop_invalid_items(history, candidate_items):
+    allowed = set(candidate_items)
+    return [int(item) for item in history if int(item) in allowed]
+
+def mask_invalid_items(scores, history, candidate_items, pad_token):
+    allowed = np.zeros(len(scores), dtype=bool)
+    valid_candidates = [
+        int(item) for item in candidate_items
+        if 0 <= int(item) < len(scores) and int(item) != pad_token
+    ]
+    allowed[valid_candidates] = True
+    scores[~allowed] = -np.inf
+    seen = [int(item) for item in history if 0 <= int(item) < len(scores)]
+    scores[seen] = -np.inf
+    return scores
+
 def downvote_seen_items(scores, data, data_description):
     userid = data_description['users']
     itemid = data_description['items']
@@ -10,12 +26,16 @@ def downvote_seen_items(scores, data, data_description):
     seen_idx_flat = np.ravel_multi_index((user_idx, item_idx), scores.shape)
     np.put(scores, seen_idx_flat, -np.inf)
 
-def topidx(a, topn):
-    parted = np.argpartition(a, -topn)[-topn:]
-    return parted[np.argsort(-a[parted])]
-
-def topn_recommendations(scores, topn=10):
-    recommendations = np.apply_along_axis(topidx, 1, scores, topn)
+def topk_recs_selection(scores, topn=10):
+    recommendations = np.full((len(scores), topn), -1, dtype=np.int64)
+    for row_index, row in enumerate(scores):
+        finite = np.flatnonzero(np.isfinite(row))
+        if finite.size == 0:
+            continue
+        take = min(topn, finite.size)
+        local = np.argpartition(row[finite], -take)[-take:]
+        ranked = finite[local[np.argsort(-row[finite][local])]]
+        recommendations[row_index, :take] = ranked
     return recommendations
 
 def model_evaluate(recommended_items, holdout, holdout_description, topn=10):

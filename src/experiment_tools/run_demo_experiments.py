@@ -89,7 +89,7 @@ DIFFUREC_TUNED_PRESETS = {
 def build_commands(
     datasets, maxlens, models, seed=42,
     amp=False, diffurec_eval_repeats=5,
-    diffurec_lr=None,
+    diffurec_lr=None, inference_only=False,
 ):
     commands = []
     use_cuda = torch.cuda.is_available()
@@ -101,6 +101,35 @@ def build_commands(
     for dataset in datasets:
         alias = ALIASES[dataset]
         for maxlen in maxlens:
+            if inference_only:
+                diffurec_args = [
+                    sys.executable, "inference.py", "--dataset", dataset,
+                    "--max_len", maxlen, "--metric_ks", 10, 20, 100,
+                    "--random_seed", seed,
+                    "--device", "cuda" if use_cuda else "cpu",
+                ]
+                if amp:
+                    diffurec_args.append("--amp")
+                add("DiffuRec", REPO / "src/DiffuRec/src", diffurec_args)
+                add("ADRec", REPO / "src/ADRec/src", [
+                    sys.executable, "inference.py", "--dataset", alias["adrec"],
+                    "--max_len", maxlen, "--metric_ks", 10, 20, 100,
+                    "--random_seed", seed,
+                    "--device", "cuda:0" if use_cuda else "cpu",
+                ])
+                add("SASRec", REPO / "src/SASRec", [
+                    sys.executable, "inference.py", "--dataset", dataset,
+                    "--maxlen", maxlen, "--metric_ks", 10, 20, 100,
+                    "--random_seed", seed,
+                    "--device", "cuda" if use_cuda else "cpu",
+                ])
+                add("GPTRec", REPO / "src/GPTRec/src", [
+                    sys.executable, "inference.py", "--dataset", dataset,
+                    "--max_len", maxlen, "--metric_ks", 10, 20, 100,
+                    "--random_seed", seed,
+                    "--device", "cuda" if use_cuda else "cpu",
+                ])
+                continue
             if "DiffuRec" in models:
                 preset_key = (dataset, maxlen)
                 if preset_key not in DIFFUREC_TUNED_PRESETS:
@@ -148,17 +177,24 @@ def build_commands(
                 "evaluator.top_k=[10,20,100]",
             ])
 
-        if "T-DiffRec" in models:
+        if "T-DiffRec" in models and not inference_only:
             commands.append(("T-DiffRec preprocessing", REPO / "src/DiffRec/T-DiffRec", [
                 sys.executable, "split_load_data_dp.py", "--dataset", dataset,
             ]))
-        tdiff_args = [
-            sys.executable, "main.py", "--dataset", dataset, "--final_train",
-            "--epochs", FIXED_MODEL_EPOCHS["T-DiffRec"],
-            "--topN", "[10,20,100]",
-        ]
-        if use_cuda:
-            tdiff_args.append("--cuda")
+        if inference_only:
+            tdiff_args = [
+                sys.executable, "inference.py", "--dataset", dataset,
+                "--topN", "[10,20,100]", "--random_seed", seed,
+                "--device", "cuda" if use_cuda else "cpu",
+            ]
+        else:
+            tdiff_args = [
+                sys.executable, "main.py", "--dataset", dataset, "--final_train",
+                "--epochs", FIXED_MODEL_EPOCHS["T-DiffRec"],
+                "--topN", "[10,20,100]",
+            ]
+            if use_cuda:
+                tdiff_args.append("--cuda")
         add("T-DiffRec", REPO / "src/DiffRec/T-DiffRec", tdiff_args)
         add("TopPopular", REPO / "src/TopPopular", [
             sys.executable, "TopPopular_model.py", "--dataset", alias["baseline"],
@@ -208,6 +244,10 @@ def main():
         help=argparse.SUPPRESS,
     )
     parser.add_argument("--prepare-data", action="store_true")
+    parser.add_argument(
+        "--inference-only", action="store_true",
+        help="Load existing checkpoints and run model inference.py files without training",
+    )
     parser.add_argument("--run", action="store_true", help="Execute commands; otherwise only print them")
     args = parser.parse_args()
 
@@ -216,12 +256,13 @@ def main():
         amp=args.amp,
         diffurec_eval_repeats=args.diffurec_eval_repeats,
         diffurec_lr=args.diffurec_lr,
+        inference_only=args.inference_only,
     )
     for model, cwd, command in commands:
         print(f"{model:24s} {cwd} {shlex.join(command)}")
     print(f"Total commands: {len(commands)}")
     if not args.run:
-        print("Dry run only. Add --run to start training.")
+        print("Dry run only. Add --run to execute the commands.")
         return
 
     if args.prepare_data:

@@ -119,7 +119,6 @@ def run_experiment(histories, ground_truth, popular_items, k_list):
     return results
 
 def print_results(title, topN_list, res):
-    print(f"\n===== {title} =====")
     header = f"{'K':<5} | {'Recall@K':<10} | {'NDCG@K':<10} | {'MRR@K':<10} | {'Coverage':<10} | {'Latency (s)':<12}"
     print(header)
     print("-" * len(header))

@@ -6,11 +6,10 @@ import torch
 from polara import get_movielens_data
 
 from data_utils import transform_indices, data_to_sequences
+from evaluate_metrics import (drop_invalid_items, mask_invalid_items,
+                              topk_recs_selection)
 from evaluate_topk_dp import compute_all_metrics
 from training import sasrec_model_scoring
-from warm_start import (filter_history_to_candidates,
-                        is_eligible_warm_start_example,
-                        mask_ranking_scores, topn_from_masked_scores)
 
 def load_amazon(dataset_name, data_dir='../data/amazon'):
     file_map = {
@@ -128,7 +127,8 @@ def run_inference_pipeline(
     itemid_col,
     time_col,
     val_seq_dict,     
-    topn=10
+    topn=10,
+    metric_ks=None,
 ):
     start_time = time.perf_counter()   
     history_sorted = history_data.sort_values([userid_col, time_col])
@@ -152,21 +152,19 @@ def run_inference_pipeline(
             # Полная история = train/adapt (из history_data) + валидационные + тестовые (до цели)
             train_history = train_seq_dict.get(uid, [])
             val_history = val_seq_dict.get(uid, [])
-            full_history = filter_history_to_candidates(
+            full_history = drop_invalid_items(
                 train_history + val_history + test_history,
                 candidate_items,
             )
             # full_history = train_seq_dict.get(uid, []) + test_history
-            if not is_eligible_warm_start_example(
-                full_history, target, candidate_items
-            ):
+            if not full_history or int(target) not in candidate_items:
                 continue
             seq_tensor = torch.as_tensor(full_history, dtype=torch.long, device=device)
             scores = model.score(seq_tensor).cpu().numpy()
             if scores.ndim == 2:
                 scores = scores[0]
             # маскирую все просмотренные 
-            mask_ranking_scores(
+            mask_invalid_items(
                 scores, full_history, candidate_items, model.pad_token
             )
             scores_list.append(scores)
@@ -177,12 +175,13 @@ def run_inference_pipeline(
         return np.array([]), [], ([], [], [], [], []), 0.0
 
     scores = np.stack(scores_list)
-    recs = topn_from_masked_scores(scores, topn=topn)
+    recs = topk_recs_selection(scores, topn=topn)
 
     actual = [[t] for t in targets_list]
     predicted = recs.tolist()
-    # topN_list = [topn]
-    topN_list = [10, 20, topn] if topn >= 20 else [topn]
+    topN_list = list(metric_ks) if metric_ks is not None else (
+        [10, 20, topn] if topn >= 20 else [topn]
+    )
     precisions, recalls, ndcgs, mrrs, covs = compute_all_metrics(
         actual, predicted, topN_list, len(candidate_items), candidate_items=candidate_items
     )

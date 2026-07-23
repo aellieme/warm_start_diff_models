@@ -32,70 +32,64 @@ from trainer import evaluate_and_print
 # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='ml-1m',
-                    choices=['ml-1m', 'amazon_Baby', 'amazon_Beauty',
-                             'amazon_Sports_and_Outdoors', 'amazon_Toys_and_Games'])
-# parser.add_argument('--dataset', default='ml-1m', help='Dataset name: toys, amazon_beauty, steam, ml-1m')
-parser.add_argument('--log_file', default='log/', help='log dir path')
-parser.add_argument('--final_train', action='store_true', help='Train on train+val without validation')
-parser.add_argument('--random_seed', type=int, default=42, help='Random seed')
-parser.add_argument('--max_len', type=int, default=50, help='The max length of sequence')
-parser.add_argument('--device', type=str, default='cuda', choices=['cpu', 'cuda'])
-parser.add_argument('--num_gpu', type=int, default=1, help='Number of GPU')
-parser.add_argument('--batch_size', type=int, default=1024, help='Batch Size')  
-parser.add_argument('--num_workers', type=int, default=2, help='DataLoader worker processes')
-parser.add_argument('--amp', action='store_true', help='Use CUDA mixed precision during training')
-parser.add_argument("--hidden_size", default=128, type=int, help="hidden size of model")
-parser.add_argument('--dropout', type=float, default=0.1, help='Dropout of representation')
-parser.add_argument('--emb_dropout', type=float, default=0.3, help='Dropout of item embedding')
-parser.add_argument("--hidden_act", default="gelu", type=str) # gelu relu
-parser.add_argument('--num_blocks', type=int, default=4, help='Number of Transformer blocks')
-parser.add_argument('--epochs', type=int, default=60, help='Number of epochs for training')  ## 500
-parser.add_argument('--decay_step', type=int, default=100, help='Decay step for StepLR')
-parser.add_argument('--gamma', type=float, default=0.1, help='Gamma for StepLR')
-parser.add_argument('--metric_ks', nargs='+', type=int, default=[5, 10, 20], help='ks for Metric@k')
-parser.add_argument('--optimizer', type=str, default='Adam', choices=['SGD', 'Adam'])
-parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
-parser.add_argument('--loss_lambda', type=float, default=0.001, help='loss weight for diffusion')
-parser.add_argument('--weight_decay', type=float, default=0, help='L2 regularization')
-parser.add_argument('--momentum', type=float, default=None, help='SGD momentum')
-parser.add_argument('--schedule_sampler_name', type=str, default='lossaware', help='Diffusion for t generation')
-parser.add_argument('--diffusion_steps', type=int, default=32, help='Diffusion step')
-parser.add_argument('--lambda_uncertainty', type=float, default=0.001, help='uncertainty weight')
-parser.add_argument('--noise_schedule', default='trunc_lin', help='Beta generation')  ## cosine, linear, trunc_cos, trunc_lin, pw_lin, sqrt
-parser.add_argument('--rescale_timesteps', default=True, help='rescal timesteps')
-parser.add_argument('--eval_interval', type=int, default=20, help='the number of epoch to eval')
-parser.add_argument('--patience', type=int, default=5, help='the number of epoch to wait before early stop')
-parser.add_argument(
-    '--eval_repeats', type=int, default=5,
-    help='Fixed stochastic inference runs averaged during validation only',
-)
-parser.add_argument(
-    '--resume_checkpoint', type=str, default=None,
-    help=(
-        "Resume a validation/tuning run from a checkpoint path, or use "
-        "'latest' for the newest checkpoint matching the current configuration"
-    ),
-)
-parser.add_argument('--description', type=str, default='Diffu_norm_score', help='Model brief introduction')
-parser.add_argument('--long_head', default=False, help='Long and short sequence, head and long-tail items')
-parser.add_argument('--diversity_measure', default=False, help='Measure the diversity of recommendation results')
-parser.add_argument('--epoch_time_avg', default=False, help='Calculate the average time of one epoch training')
-args = parser.parse_args()
-
-print(args)
-
-if not os.path.exists(args.log_file):
-    os.makedirs(args.log_file)
-if not os.path.exists(args.log_file + args.dataset):
-    os.makedirs(args.log_file + args.dataset )
-
-
-logging.basicConfig(level=logging.INFO, filename=args.log_file + args.dataset + '/' + time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime()) + '.log',
-                    datefmt='%Y/%m/%d %H:%M:%S', format='%(asctime)s - %(name)s - %(levelname)s - %(lineno)d - %(module)s - %(message)s', filemode='w')
 logger = logging.getLogger(__name__)
-logger.info(args)
+
+
+def build_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default='ml-1m',
+                        choices=['ml-1m', 'amazon_Baby', 'amazon_Beauty',
+                                 'amazon_Sports_and_Outdoors', 'amazon_Toys_and_Games'])
+    parser.add_argument('--log_file', default='log/', help='log dir path')
+    parser.add_argument('--final_train', action='store_true', help='Train on train+val without validation')
+    parser.add_argument('--random_seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--max_len', type=int, default=50, help='The max length of sequence')
+    parser.add_argument('--device', type=str, default='cuda', choices=['cpu', 'cuda'])
+    parser.add_argument('--num_gpu', type=int, default=1, help='Number of GPU')
+    parser.add_argument('--batch_size', type=int, default=1024, help='Batch Size')
+    parser.add_argument('--num_workers', type=int, default=2, help='DataLoader worker processes')
+    parser.add_argument('--amp', action='store_true', help='Use CUDA mixed precision during training')
+    parser.add_argument("--hidden_size", default=128, type=int, help="hidden size of model")
+    parser.add_argument('--dropout', type=float, default=0.1, help='Dropout of representation')
+    parser.add_argument('--emb_dropout', type=float, default=0.3, help='Dropout of item embedding')
+    parser.add_argument("--hidden_act", default="gelu", type=str)
+    parser.add_argument('--num_blocks', type=int, default=4, help='Number of Transformer blocks')
+    parser.add_argument('--epochs', type=int, default=60, help='Number of epochs for training')
+    parser.add_argument('--decay_step', type=int, default=100, help='Decay step for StepLR')
+    parser.add_argument('--gamma', type=float, default=0.1, help='Gamma for StepLR')
+    parser.add_argument('--metric_ks', nargs='+', type=int, default=[5, 10, 20], help='ks for Metric@k')
+    parser.add_argument('--optimizer', type=str, default='Adam', choices=['SGD', 'Adam'])
+    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
+    parser.add_argument('--loss_lambda', type=float, default=0.001, help='loss weight for diffusion')
+    parser.add_argument('--weight_decay', type=float, default=0, help='L2 regularization')
+    parser.add_argument('--momentum', type=float, default=None, help='SGD momentum')
+    parser.add_argument('--schedule_sampler_name', type=str, default='lossaware', help='Diffusion for t generation')
+    parser.add_argument('--diffusion_steps', type=int, default=32, help='Diffusion step')
+    parser.add_argument('--lambda_uncertainty', type=float, default=0.001, help='uncertainty weight')
+    parser.add_argument('--noise_schedule', default='trunc_lin', help='Beta generation')
+    parser.add_argument('--rescale_timesteps', default=True, help='rescal timesteps')
+    parser.add_argument('--eval_interval', type=int, default=20, help='the number of epoch to eval')
+    parser.add_argument('--patience', type=int, default=5, help='the number of epoch to wait before early stop')
+    parser.add_argument('--eval_repeats', type=int, default=5)
+    parser.add_argument('--resume_checkpoint', type=str, default=None)
+    parser.add_argument('--description', type=str, default='Diffu_norm_score')
+    parser.add_argument('--long_head', default=False)
+    parser.add_argument('--diversity_measure', default=False)
+    parser.add_argument('--epoch_time_avg', default=False)
+    return parser
+
+
+def configure_logging(args):
+    log_dir = Path(args.log_file) / args.dataset
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        filename=log_dir / f'{time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())}.log',
+        datefmt='%Y/%m/%d %H:%M:%S',
+        format='%(asctime)s - %(name)s - %(levelname)s - %(lineno)d - %(module)s - %(message)s',
+        filemode='w',
+    )
+    return logging.getLogger(__name__)
 
 
 def fix_random_seed_as(random_seed):
@@ -382,7 +376,7 @@ def main(args):
         use_amp = args.amp and args.device == 'cuda'
         scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
         
-        from plotting import TrainingPlotter
+        from visualization.plotting import TrainingPlotter
         plotter = TrainingPlotter(save_dir=args.log_file + args.dataset,
                                 model_name=f"DiffuRec_final_{time.strftime('%Y%m%d_%H%M%S')}",
                                 metrics=['loss'])
@@ -545,4 +539,8 @@ def main(args):
     
 
 if __name__ == '__main__':
+    args = build_parser().parse_args()
+    print(args)
+    logger = configure_logging(args)
+    logger.info(args)
     main(args)

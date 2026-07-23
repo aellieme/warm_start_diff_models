@@ -2,6 +2,7 @@
 
 import os
 import random
+import sys
 import time
 from pathlib import Path
 
@@ -15,7 +16,9 @@ import data_utils
 import evaluate_topk_dp as eval_metrics
 import models.gaussian_diffusion as gd
 from models.DNN import DNN
-from plotting import TrainingPlotter
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from visualization.plotting import TrainingPlotter
 
 
 DATASET = 'ml-1m'

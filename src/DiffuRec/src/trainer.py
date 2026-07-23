@@ -15,7 +15,6 @@ from pathlib import Path
 from tqdm import tqdm
 
 from evaluate_topk_dp import compute_all_metrics
-from plotting import TrainingPlotter
 from utils import (build_candidate_mask, eligible_warm_start_rows,
                    filter_history_to_candidates, mask_ranking_scores)
 from utils import prepare_model_history
@@ -460,8 +459,11 @@ def evaluate_and_print(model, data_loader, args, logger, description="evaluation
             "Recommendations saved to recommendations.csv "
             f"using canonical inference seed {result['seeds'][0]}"
         )
+    return result
 
 def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint, args, logger):
+    from visualization.plotting import TrainingPlotter
+
     tracker = ExperimentTracker(args.dataset, "DiffuRec")
     args.experiment_tracker = tracker
     plotter = TrainingPlotter(

@@ -1,5 +1,3 @@
-# evaluate_topk_dp.py
-
 import numpy as np
 
 def precision_at_k(actual: list, predicted: list, k: int) -> float:

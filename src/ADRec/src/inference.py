@@ -65,6 +65,16 @@ def main() -> None:
     payload = torch.load(model_path, map_location=device, weights_only=False)
     if not isinstance(payload, dict) or "model_state_dict" not in payload or "args" not in payload:
         raise ValueError(f"Unsupported ADRec checkpoint format: {model_path}")
+    saved_dataset = payload["args"].get("dataset")
+    saved_max_len = payload["args"].get("max_len")
+    if saved_dataset is not None and saved_dataset != cli.dataset:
+        raise ValueError(
+            f"Checkpoint dataset={saved_dataset} does not match --dataset={cli.dataset}"
+        )
+    if saved_max_len is not None and int(saved_max_len) != cli.max_len:
+        raise ValueError(
+            f"Checkpoint max_len={saved_max_len} does not match --max_len={cli.max_len}"
+        )
 
     args = argparse.Namespace(**payload["args"])
     args.dataset = cli.dataset

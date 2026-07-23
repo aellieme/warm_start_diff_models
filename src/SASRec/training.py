@@ -3,16 +3,15 @@ import torch.nn as nn
 import numpy as np
 from tqdm.auto import tqdm
 
-from plotting import TrainingPlotter
 from data_utils import data_to_sequences
-from warm_start import (filter_history_to_candidates,
-                        is_eligible_warm_start_example,
-                        mask_ranking_scores, topn_from_masked_scores)
+from evaluate_metrics import (drop_invalid_items, mask_invalid_items,
+                              topk_recs_selection)
 import time
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from visualization.plotting import TrainingPlotter
 from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path,
                                                   save_torch_checkpoint)
 
@@ -207,13 +206,11 @@ def validate_last_item(model, val_data, train_data, data_description, topn=10):
             target = row[itemid]
             test_history = row['history']   # из future_data
             # Полная история = train + future (до таргета)
-            full_history = filter_history_to_candidates(
+            full_history = drop_invalid_items(
                 train_seq_dict.get(uid, []) + test_history,
                 candidate_items,
             )
-            if not is_eligible_warm_start_example(
-                full_history, target, candidate_items
-            ):
+            if not full_history or int(target) not in candidate_items:
                 continue
 
             seq_tensor = torch.as_tensor(full_history, dtype=torch.long, device=device)
@@ -221,10 +218,10 @@ def validate_last_item(model, val_data, train_data, data_description, topn=10):
             if scores.ndim == 2:
                 scores = scores[0]
 
-            mask_ranking_scores(
+            mask_invalid_items(
                 scores, full_history, candidate_items, model.pad_token
             )
-            top_idx = topn_from_masked_scores(scores[None, :], topn)[0]
+            top_idx = topk_recs_selection(scores[None, :], topn)[0]
 
             if target in top_idx[:topn]:
                 hits += 1

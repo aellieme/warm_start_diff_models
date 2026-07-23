@@ -25,9 +25,8 @@ import evaluate_topk_dp as eval_metrics
 import data_utils
 from copy import deepcopy
 
-from plotting import TrainingPlotter
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from visualization.plotting import TrainingPlotter
 from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path,
                                                   recommendation_popularity, save_dataset_popularity,
                                                   save_torch_checkpoint)
@@ -499,7 +498,7 @@ if __name__ == '__main__':
 # import data_utils
 # from copy import deepcopy
 
-# from plotting import TrainingPlotter
+# from visualization.plotting import TrainingPlotter
 
 # import random
 # # random_seed = 1

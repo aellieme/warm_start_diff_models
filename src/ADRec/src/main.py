@@ -5,7 +5,7 @@ import torch
 import pprint
 import pickle
 from collections import Counter
-from trainer import (model_train, LSHT_inference, load_data, choose_model,
+from trainer import (model_train, load_data, choose_model,
                      item_num_create, save_dataset_popularity)
 from utils import *
 # import yaml

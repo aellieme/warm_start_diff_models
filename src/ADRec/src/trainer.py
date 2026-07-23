@@ -4,19 +4,18 @@ import os
 import torch
 from tqdm import tqdm
 import copy
-from metrics import *
 from utils import *
 from model import Att_Diffuse_model
 from pcgrad import PCGrad
 from torch import optim
 from sasrec import SASRec
 from evaluate_topk_dp import compute_all_metrics
-from plotting import TrainingPlotter
 import pandas as pd
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from visualization.plotting import TrainingPlotter
 from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path, popularity_from_sequences,
                                  recommendation_popularity, save_dataset_popularity)
 from experiment_tools.experiment_tracking import save_torch_checkpoint

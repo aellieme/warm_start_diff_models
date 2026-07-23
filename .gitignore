@@ -221,4 +221,9 @@ logs/
 reports/
 experiment_results/
 bradley_terry_rankings
-# tests/
+tests/
+D:\diploma\warm_start_diff_models\src\data
+src\data
+D:\diploma\warm_start_diff_models\tests
+D:\diploma\warm_start_diff_models\.matplotlib_test_cache
+.matplotlib_test_cache

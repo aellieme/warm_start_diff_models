@@ -1,2 +1,0 @@
--r visualization_requirements.txt
-einops

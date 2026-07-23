@@ -27,10 +27,10 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 from transformers import GPT2Config, GPT2LMHeadModel, BertConfig, BertModel
 
-from plotting import TrainingPlotter
 from pytorch_lightning.callbacks import Callback
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from visualization.plotting import TrainingPlotter
 from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path,
                                                   recommendation_popularity, save_dataset_popularity,
                                                   save_torch_checkpoint)
@@ -39,7 +39,7 @@ from datasets import CausalLMDataset, CausalLMPredictionDataset, PaddingCollateF
 # from datasets import CausalLMDataset, CausalLMPredictionDataset, PaddingCollateFn, MaskedLMDataset, MaskedLMPredictionDataset
 from metrics import Evaluator
 from modules import SeqRecHuggingface, SeqRec
-from models import SASRec, BERT4Rec
+from models_gpt import SASRec, BERT4Rec
 from postprocess import preds2recs
 from preprocess import add_time_idx
 

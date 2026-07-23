@@ -8,7 +8,10 @@ import logging
 from argparse import Namespace
 from functools import partial
 import os
+import sys
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from main import load_and_split_gts, item_num_create, fix_random_seed_as
 from model import create_model_diffu, Att_Diffuse_model
 from utils import (Data_Train, Data_Val, Data_Test, build_candidate_mask,
@@ -178,7 +181,7 @@ def main():
 
     optimizer = optim.Adam(model_final.parameters(), lr=final_args.lr, weight_decay=final_args.weight_decay)
 
-    from plotting import TrainingPlotter
+    from visualization.plotting import TrainingPlotter
     plotter = TrainingPlotter(
         save_dir=final_args.log_file + final_args.dataset,
         model_name=f"{final_args.description}_final_trainval_{time.strftime('%Y%m%d_%H%M%S')}",
