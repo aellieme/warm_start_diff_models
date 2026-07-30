@@ -8,6 +8,7 @@ cuda_visible_devices: 0
 project_name: sequential_recsys/generation_paper/hyper/${task_name}
 task_name: GPT
 seed: 42
+results_root: ${oc.env:EXPERIMENT_OUTPUT_DIR,../../../exp_results}
 
 dataset_name: ml-1m
 amazon_data_dir: ../../data/amazon
@@ -39,12 +40,17 @@ model_params:
   attn_pdrop: ${pdrop}  
 
 hydra:
+  sweep:
+    dir: ${results_root}/service_files/models/GPTRec/${dataset_name}/tuning_files/hydra/${now:%Y%m%d_%H%M%S}
+    subdir: trial_${hydra.job.num}
+  job:
+    chdir: false
   sweeper:
     sampler:
       _target_: optuna.samplers.TPESampler
     direction: maximize
     study_name: ${task_name}
-    storage: "sqlite:///${task_name}.db"
+    storage: sqlite:///${hydra.sweep.dir}/optuna.db
     n_trials: 50
     n_jobs: 1
     params:

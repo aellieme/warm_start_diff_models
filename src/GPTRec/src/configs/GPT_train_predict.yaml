@@ -3,6 +3,13 @@ cuda_visible_devices: 0
 project_name: sequential_recsys/generation_paper
 task_name: GPT_train_predict
 seed: 42
+results_root: ${oc.env:EXPERIMENT_OUTPUT_DIR,../../../exp_results}
+
+hydra:
+  run:
+    dir: ${results_root}/service_files/other_service_files/hydra/GPTRec/${dataset_name}/${now:%Y%m%d_%H%M%S}
+  job:
+    chdir: false
 
 dataset_name: ml-1m
 amazon_data_dir: ../../data/amazon
