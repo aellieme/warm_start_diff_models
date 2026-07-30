@@ -7,17 +7,32 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
+try:
+    from .experiment_tracking import normalize_dataset_name, output_root
+except ImportError:
+    from experiment_tracking import normalize_dataset_name, output_root
+
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--logdir", default="logs")
+    parser.add_argument("--logdir", type=Path, default=None)
     parser.add_argument("--dataset", required=True)
     args = parser.parse_args()
     summaries = []
-    for path in Path(args.logdir, args.dataset).glob("*/*/summary.json"):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if data.get("dataset") == args.dataset and data.get("final_metrics"):
-            summaries.append(data)
+    log_roots = (
+        [args.logdir]
+        if args.logdir is not None
+        else list((output_root() / "service_files" / "models").glob("*/*/logs"))
+    )
+    for log_root in log_roots:
+        for path in Path(log_root).glob("*/summary.json"):
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                normalize_dataset_name(data.get("dataset", ""))
+                == normalize_dataset_name(args.dataset)
+                and data.get("final_metrics")
+            ):
+                summaries.append(data)
     if not summaries:
         raise SystemExit(f"No completed runs found for {args.dataset!r}")
     signatures = {
@@ -26,7 +41,7 @@ def main():
     }
     if len(signatures) != 1:
         raise SystemExit("Runs are not comparable: K, split, mask_seen, or seed differ")
-    out = Path(args.logdir).resolve().parent / "reports" / "comparisons" / args.dataset
+    out = output_root() / "graphics" / "evaluation" / "comparisons" / args.dataset
     out.mkdir(parents=True, exist_ok=True)
     names = ("recall", "ndcg", "mrr", "coverage")
     fig, axes = plt.subplots(1, 4, figsize=(18, 4), squeeze=False)

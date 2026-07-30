@@ -61,8 +61,14 @@ def main(config):
     if hasattr(config, 'cuda_visible_devices'):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(config.cuda_visible_devices)
 
+    resolve_final_relevance_aggregation_temperature(config)
     train, validation, test, item_count = prepare_data(config)
-    tracker = ExperimentTracker(config.dataset_name, str(config.model))
+    tracker = ExperimentTracker(
+        config.dataset_name,
+        str(config.model),
+        maxlen=int(config.dataset.max_length),
+        run_type="training" if config.get("final_train", False) else "tuning",
+    )
     train_item_popularity = train.item_id.value_counts().to_dict()
     save_dataset_popularity(config.dataset_name, train_item_popularity)
     
@@ -94,20 +100,32 @@ def main(config):
 
         history_before_test = pd.concat([train, validation], ignore_index=True)
         history_before_test = add_time_idx(history_before_test)
-        start_time_inf = time.perf_counter()
-        recs = predict(trainer, seqrec_module, history_before_test, config,
-                       test_data=test, last_evaluation=True)
-        inf_time = time.perf_counter() - start_time_inf
+        test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
+        train_val_items_df = pd.concat([train, validation], ignore_index=True)
+        recommendations_by_k = None
+        if is_relevance_aggregation(config):
+            recs, recommendations_by_k, metrics, inf_time = (
+                run_relevance_aggregation_by_k(
+                    trainer, seqrec_module, history_before_test, test,
+                    test_last, train_val_items_df, config, "test_last",
+                    output_dir=tracker.run_dir,
+                )
+            )
+        else:
+            start_time_inf = time.perf_counter()
+            recs = predict(trainer, seqrec_module, history_before_test, config,
+                           test_data=test, last_evaluation=True)
+            inf_time = time.perf_counter() - start_time_inf
+            metrics = evaluate(
+                recs, test_last, train_val_items_df, config,
+                prefix='test_last', output_dir=tracker.run_dir,
+            )
         # print(f"Inference time: {inf_time:.4f} seconds")
         print(f"Inference time: {inf_time:.4f} seconds", flush=True)
-        recs.to_csv('recommendations.csv', index=False)
-        print("Recommendations saved to recommendations.csv")
+        recommendations_path = tracker.run_dir / "recommendations.csv"
+        recs.to_csv(recommendations_path, index=False)
+        print(f"Recommendations saved to {recommendations_path}")
         
-        test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
-        # Финальная модель обучена на train+validation: это warm-start каталог.
-        train_val_items_df = pd.concat([train, validation], ignore_index=True)
-        metrics = evaluate(recs, test_last, train_val_items_df, config, prefix='test_last')
-
         # test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
         # metrics = evaluate(recs, test_last, train, config, prefix='test_last')
 
@@ -143,9 +161,29 @@ def main(config):
             inference_total_sec=inf_time,
             n_users=int(recs["user_id"].nunique()), maxlen=int(config.dataset.max_length),
             ranking_protocol="warm_start_known_catalog_v2",
-            popularity_bias=recommendation_popularity(
-                recs.groupby("user_id")["item_id"].apply(list).tolist(),
-                train_item_popularity, top_k_list,
+            decoding_strategy=str(config.mode) if config.generation else "top_k",
+            ra_temperature=(
+                float(config.generation_params.temperature)
+                if is_relevance_aggregation(config) else None
+            ),
+            ra_num_sequences=(
+                int(config.generation_params.num_return_sequences)
+                if is_relevance_aggregation(config) else None
+            ),
+            popularity_bias=(
+                {
+                    int(k): recommendation_popularity(
+                        recommendations_by_k[int(k)].groupby("user_id")["item_id"]
+                        .apply(list).tolist(),
+                        train_item_popularity, [int(k)],
+                    )[int(k)]
+                    for k in top_k_list
+                }
+                if recommendations_by_k is not None
+                else recommendation_popularity(
+                    recs.groupby("user_id")["item_id"].apply(list).tolist(),
+                    train_item_popularity, top_k_list,
+                )
             ),
         )
         tracker.close()
@@ -173,14 +211,29 @@ def main(config):
 
         # Non-final runs are validation-only.  ``test_metrics`` is retained in
         # old configs for CLI compatibility but cannot expose the test split.
-        start_time_inf = time.perf_counter()
-        recs = predict(
-            trainer, seqrec_module, train, config,
-            test_data=validation, last_evaluation=True,
-        )
-        baseline_latency = time.perf_counter() - start_time_inf
         val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
-        val_metrics = evaluate(recs, val_last, train, config, prefix='val_last')
+        if is_relevance_aggregation(config):
+            select_relevance_aggregation_temperature(
+                trainer, seqrec_module, train, validation, config,
+                output_dir=tracker.run_dir,
+            )
+            recs, _, val_metrics, baseline_latency = (
+                run_relevance_aggregation_by_k(
+                    trainer, seqrec_module, train, validation, val_last, train,
+                    config, "val_last", output_dir=tracker.run_dir,
+                )
+            )
+        else:
+            start_time_inf = time.perf_counter()
+            recs = predict(
+                trainer, seqrec_module, train, config,
+                test_data=validation, last_evaluation=True,
+            )
+            baseline_latency = time.perf_counter() - start_time_inf
+            val_metrics = evaluate(
+                recs, val_last, train, config,
+                prefix='val_last', output_dir=tracker.run_dir,
+            )
 
         if hasattr(config, 'optuna_metrics'):
             return val_metrics[val_metrics['metric_name'] == config.optuna_metrics]['metric_value'].values
@@ -301,7 +354,7 @@ def create_dataloaders(train, validation, config):
     
     train_dataset = MaskedLMDataset(train, **config['dataset']) if config.model == 'BERT4Rec' else CausalLMDataset(train, **config['dataset'])
     max_len = config.dataset.max_length
-    if config.generation:
+    if config.generation and not is_relevance_aggregation(config):
         max_len = max_len - max(config.evaluator.top_k)
     eval_dataset = LastEvaluationDataset(
         train_data=train,
@@ -309,7 +362,9 @@ def create_dataloaders(train, validation, config):
         max_length=max_len,
         user_col='user_id', item_col='item_id', time_col='time_idx'
     )
-    collate_fn = PaddingCollateFn(left_padding=config.generation)
+    collate_fn = PaddingCollateFn(
+        left_padding=config.generation and not is_relevance_aggregation(config)
+    )
     # eval_dataset = MaskedLMPredictionDataset(validation, max_length=config.dataset.max_length, validation_mode=True) if config.model == 'BERT4Rec' else CausalLMPredictionDataset(validation, max_length=config.dataset.max_length, validation_mode=True)
 
     train_loader = DataLoader(train_dataset, batch_size=config.dataloader.batch_size,
@@ -391,17 +446,29 @@ def training(model, train_loader, eval_loader, config, tracker=None):
     early_stopping = EarlyStopping(monitor="val_ndcg", mode="max",
                                    patience=config.patience, verbose=False)
     model_summary = ModelSummary(max_depth=4)
-    checkpoint = ModelCheckpoint(save_top_k=1, monitor="val_ndcg",
-                                 mode="max", save_weights_only=True)
+    checkpoint = ModelCheckpoint(
+        dirpath=(tracker.run_dir / "checkpoints" if tracker is not None else None),
+        filename="best-validation-{epoch:03d}-{val_ndcg:.6f}",
+        save_top_k=1,
+        monitor="val_ndcg",
+        mode="max",
+        save_weights_only=True,
+    )
     progress_bar = TQDMProgressBar(refresh_rate=100)
     callbacks=[early_stopping, model_summary, checkpoint, progress_bar]
 
     from datetime import datetime
 
-    os.makedirs("./log", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = f"./log/{timestamp}"
-    plotter = TrainingPlotter(save_dir, model_name=config.model, metrics=['loss', 'val_loss', 'recall'])
+    save_dir = tracker.plot_dir if tracker is not None else f"./log/{timestamp}"
+    plotter = TrainingPlotter(
+        save_dir,
+        model_name=(
+            f"{tracker.run_id}__maxlen_{int(config.dataset.max_length)}"
+            if tracker is not None else config.model
+        ),
+        metrics=['loss', 'val_loss', 'recall'],
+    )
     plotting_callback = PlottingCallback(plotter, save_every=5, tracker=tracker)
 
     callbacks.append(plotting_callback)   # добавляем в существующий список
@@ -413,16 +480,80 @@ def training(model, train_loader, eval_loader, config, tracker=None):
             train_dataloaders=train_loader,
             val_dataloaders=eval_loader)
 
-    seqrec_module.load_state_dict(torch.load(checkpoint.best_model_path)['state_dict'])
+    selected_checkpoint = torch.load(checkpoint.best_model_path)
+    seqrec_module.load_state_dict(selected_checkpoint['state_dict'])
+    trainer.selected_epoch = int(
+        selected_checkpoint.get('epoch', trainer.current_epoch)
+    ) + 1
+    trainer.selected_checkpoint = checkpoint.best_model_path
 
     return trainer, seqrec_module
 
-def predict(trainer, seqrec_module, data, config, test_data=None, last_evaluation=False):
+def is_relevance_aggregation(config):
+    return (
+        bool(config.get("generation", False))
+        and str(config.get("mode", "")) == "relevance_aggregation"
+    )
+
+
+def resolve_final_relevance_aggregation_temperature(
+        config, checkpoint_config_path=None):
+    if not config.get("final_train", False) or not is_relevance_aggregation(config):
+        return None
+
+    requested = config.get("ra_temperature", "auto")
+    if str(requested).lower() != "auto":
+        temperature = float(requested)
+        if temperature <= 0:
+            raise ValueError("ra_temperature must be greater than zero")
+        config.generation_params.temperature = temperature
+        config.ra_temperature = temperature
+        config.ra_temperature_source = "manual"
+        config.ra_temperature_selected_on_validation = False
+        return temperature
+
+    selection_config_path = (
+        Path(checkpoint_config_path)
+        if checkpoint_config_path is not None
+        else checkpoint_path(
+            "GPTRec",
+            config.dataset_name,
+            int(config.dataset.max_length),
+            int(config.get("seed", 42)),
+        ).with_suffix(".yaml")
+    )
+    if selection_config_path.exists():
+        selected_config = OmegaConf.load(selection_config_path)
+        if is_relevance_aggregation(selected_config):
+            temperature = float(selected_config.generation_params.temperature)
+            if temperature > 0:
+                config.generation_params.temperature = temperature
+                config.ra_temperature = temperature
+                config.ra_temperature_source = "checkpoint"
+                print(
+                    f"Loaded RA temperature {temperature} "
+                    f"from {selection_config_path}"
+                )
+                return temperature
+
+    temperature = float(config.generation_params.temperature)
+    if temperature <= 0:
+        raise ValueError("generation_params.temperature must be greater than zero")
+    config.ra_temperature = temperature
+    config.ra_temperature_source = "base_config"
+    return temperature
+
+
+def predict(trainer, seqrec_module, data, config, test_data=None,
+            last_evaluation=False, predict_k=None):
+    prediction_k = int(
+        predict_k if predict_k is not None else max(config.evaluator.top_k)
+    )
     if last_evaluation and test_data is not None:
         #  Last Evaluation
         max_len = config.dataset.max_length
-        if config.generation:
-            max_len = max_len - max(config.evaluator.top_k)
+        if config.generation and not is_relevance_aggregation(config):
+            max_len = max_len - prediction_k
         dataset = LastEvaluationDataset(
             train_data=data,
             test_data=test_data,
@@ -447,7 +578,7 @@ def predict(trainer, seqrec_module, data, config, test_data=None, last_evaluatio
                 **config.generation_params
             )
         
-        seqrec_module.predict_top_k = max(config.evaluator.top_k)
+        seqrec_module.predict_top_k = prediction_k
         preds = trainer.predict(model=seqrec_module, dataloaders=loader)
         recs = preds2recs(preds)
         print('recs shape', recs.shape)
@@ -456,8 +587,11 @@ def predict(trainer, seqrec_module, data, config, test_data=None, last_evaluatio
     # Стандартный режим (без изменений)
     if config.model == 'GPT-2':
         if config.generation:
+            context_length = config.dataset.max_length
+            if not is_relevance_aggregation(config):
+                context_length -= prediction_k
             predict_dataset = CausalLMPredictionDataset(
-                data, max_length=config.dataset.max_length - max(config.evaluator.top_k))
+                data, max_length=context_length)
             predict_loader = DataLoader(
                 predict_dataset, shuffle=False,
                 collate_fn=PaddingCollateFn(left_padding=True),
@@ -489,14 +623,102 @@ def predict(trainer, seqrec_module, data, config, test_data=None, last_evaluatio
             batch_size=config.dataloader.test_batch_size,
             num_workers=config.dataloader.num_workers)
 
-    seqrec_module.predict_top_k = max(config.evaluator.top_k)
+    seqrec_module.predict_top_k = prediction_k
     preds = trainer.predict(model=seqrec_module, dataloaders=predict_loader)
     recs = preds2recs(preds)
     print('recs shape', recs.shape)
     return recs
 
 
-def evaluate(recs, test, train,  config, prefix='test'):
+def run_relevance_aggregation_by_k(
+        trainer, seqrec_module, history, future, ground_truth, catalogue,
+        config, prefix, output_dir=None):
+    recommendations = {}
+    metrics = {}
+    inference_seconds = 0.0
+    seed = int(config.get("seed", 42))
+
+    for k in [int(value) for value in config.evaluator.top_k]:
+        local_config = OmegaConf.create(
+            OmegaConf.to_container(config, resolve=True)
+        )
+        local_config.evaluator.top_k = [k]
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        started = time.perf_counter()
+        recs = predict(
+            trainer, seqrec_module, history, local_config,
+            test_data=future, last_evaluation=True, predict_k=k,
+        )
+        inference_seconds += time.perf_counter() - started
+        recommendations[k] = recs
+        metrics.update(evaluate(
+            recs, ground_truth, catalogue, local_config, prefix=prefix,
+            output_dir=(Path(output_dir) / f"k_{k}" if output_dir else None),
+        ))
+
+    combined = pd.concat(
+        [recs.assign(evaluation_k=k) for k, recs in recommendations.items()],
+        ignore_index=True,
+    )
+    return combined, recommendations, metrics, inference_seconds
+
+
+def select_relevance_aggregation_temperature(
+        trainer, seqrec_module, history, validation, config, output_dir=None):
+    temperatures = [
+        float(value) for value in config.get("ra_temperature_grid", [])
+    ]
+    if not temperatures:
+        return float(config.generation_params.temperature)
+
+    selection_k = int(config.get("ra_temperature_selection_k", 10))
+    validation_last = (
+        validation.sort_values("time_idx").groupby("user_id").last().reset_index()
+    )
+    scores = {}
+    seed = int(config.get("seed", 42))
+    for temperature in temperatures:
+        local_config = OmegaConf.create(
+            OmegaConf.to_container(config, resolve=True)
+        )
+        local_config.evaluator.top_k = [selection_k]
+        local_config.generation_params.temperature = temperature
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        recs = predict(
+            trainer, seqrec_module, history, local_config,
+            test_data=validation, last_evaluation=True, predict_k=selection_k,
+        )
+        result = evaluate(
+            recs, validation_last, history, local_config, prefix="val_last"
+        )
+        scores[temperature] = float(
+            result[f"val_last_ndcg@{selection_k}"]
+        )
+
+    best_temperature = max(temperatures, key=lambda value: scores[value])
+    config.generation_params.temperature = best_temperature
+    config.ra_temperature = best_temperature
+    config.ra_temperature_source = "validation"
+    if output_dir is not None:
+        selection_path = Path(output_dir) / "ra_temperature_selection.json"
+        selection_path.write_text(
+            json.dumps({
+                "selection_k": selection_k,
+                "metric": f"ndcg@{selection_k}",
+                "scores": {str(key): value for key, value in scores.items()},
+                "selected_temperature": best_temperature,
+            }, indent=2),
+            encoding="utf-8",
+        )
+    print(f"Selected RA temperature on validation: {best_temperature}")
+    return best_temperature
+
+
+def evaluate(recs, test, train, config, prefix='test', output_dir=None):
 
     evaluator = Evaluator(**config['evaluator'])
 
@@ -505,14 +727,17 @@ def evaluate(recs, test, train,  config, prefix='test'):
     print(f'{prefix} metrics\n', metrics)
 
     compute_by_time_idx_flag = test['time_idx'].nunique() > 1
-    if compute_by_time_idx_flag: #подробные метрики я сохраняю в файлы csv в папку метрикс csv, она создается если ее нет 
+    if compute_by_time_idx_flag and output_dir is not None:
         metrics_by_time_idx = evaluator.compute_metrics_by_time_idx(test, recs)
         metrics_by_time_idx_top_k_gt = evaluator.compute_metrics_by_time_idx(test, recs, top_k_gt=True)
-        os.makedirs("metrics_csv", exist_ok=True)
-        metrics_by_time_idx.to_csv(f"metrics_csv/{prefix}_metrics_by_time_idx.csv", index=False)
-        metrics_by_time_idx_top_k_gt.to_csv(f"metrics_csv/{prefix}_metrics_by_time_idx_top_k_gt.csv", index=False)
-        print(f"\nSaved metrics_by_time_idx to metrics_csv/{prefix}_metrics_by_time_idx.csv")
-        print(f"\nSaved metrics_by_time_idx_top_k_gt to metrics_csv/{prefix}_metrics_by_time_idx_top_k_gt.csv")
+        metrics_dir = Path(output_dir) / "metrics_by_time"
+        metrics_dir.mkdir(parents=True, exist_ok=True)
+        metrics_path = metrics_dir / f"{prefix}_metrics_by_time_idx.csv"
+        top_k_path = metrics_dir / f"{prefix}_metrics_by_time_idx_top_k_gt.csv"
+        metrics_by_time_idx.to_csv(metrics_path, index=False)
+        metrics_by_time_idx_top_k_gt.to_csv(top_k_path, index=False)
+        print(f"\nSaved metrics_by_time_idx to {metrics_path}")
+        print(f"\nSaved metrics_by_time_idx_top_k_gt to {top_k_path}")
 
     return metrics
 
@@ -530,8 +755,11 @@ def final_training(model, train_loader, config, tracker=None):
 
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    plotter = TrainingPlotter(save_dir=f"./log/{timestamp}",
-                              model_name=config.model,
+    plotter = TrainingPlotter(save_dir=tracker.plot_dir if tracker is not None else f"./log/{timestamp}",
+                              model_name=(
+                                  f"{tracker.run_id}__maxlen_{int(config.dataset.max_length)}"
+                                  if tracker is not None else config.model
+                              ),
                               metrics=['loss'])
 
     class FinalLossCallback(pl.Callback):

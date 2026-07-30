@@ -179,6 +179,16 @@ class SeqRecHuggingface(SeqRecBase):
         if generate and generate_kwargs is not None:
             self.generate_params.update(generate_kwargs)
 
+        if self.mode == 'relevance_aggregation' and self.generate:
+            if self.generate_params.get('top_k', 0) != 0:
+                raise ValueError("Relevance Aggregation requires top_k=0")
+            if not self.generate_params.get('do_sample', True):
+                raise ValueError("Relevance Aggregation requires do_sample=True")
+            if int(self.generate_params.get('num_return_sequences', 0)) < 1:
+                raise ValueError("Relevance Aggregation requires num_return_sequences >= 1")
+            if float(self.generate_params.get('temperature', 0)) <= 0:
+                raise ValueError("Relevance Aggregation requires temperature > 0")
+
     def process_multiple_sequences(self, batch, preds, scores):
         """
         Combine multiple sequences generated for one user into one and leave top-k with maximal score.
@@ -206,6 +216,14 @@ class SeqRecHuggingface(SeqRecBase):
     def predict_step(self, batch, batch_idx):
         user_ids = batch['user_id'].detach().cpu().numpy()
 
+        if self.generate and self.mode == 'relevance_aggregation':
+            preds, scores = self.make_prediction_generate(batch)
+            return {
+                'preds': preds.detach().cpu().numpy(),
+                'scores': scores.detach().cpu().numpy(),
+                'user_ids': user_ids,
+            }
+
         if not self.generate or \
                 ("num_return_sequences" not in self.generate_params
                  or ((self.generate_params["num_return_sequences"] == 1) & (self.mode != 'relevance_aggregation'))):
@@ -229,6 +247,9 @@ class SeqRecHuggingface(SeqRecBase):
         Input sequence may be cropped,
         maximum self.model.config.n_positions - self.predict_top_k last items are used as a sequence beginning.
         """
+        if self.mode == 'relevance_aggregation':
+            return self.make_prediction_relevance_aggregation(batch)
+
         if self.mode == 'reciprocal_rank_aggregation':
             seq = self.model.generate(
                 batch['input_ids'][:, - self.model.config.n_positions + self.predict_top_k:].to(self.model.device),
@@ -252,24 +273,68 @@ class SeqRecHuggingface(SeqRecBase):
             scores = torch.tile(scores_one, [preds.shape[0], 1])
 
         else:
-            seq = self.model.generate(
-                batch['input_ids'][:, -self.model.config.n_positions + self.predict_top_k:].to(self.model.device),
-                pad_token_id=self.padding_idx,
-                max_new_tokens=self.predict_top_k,
-                logits_processor=[CandidateItemsProcessor(self.candidate_item_ids)],
-                **self.generate_params
+            raise ValueError(f"Unknown generation mode: {self.mode}")
+
+        return preds, scores
+
+    def make_prediction_relevance_aggregation(self, batch):
+        num_sequences = int(self.generate_params["num_return_sequences"])
+        temperature = float(self.generate_params["temperature"])
+        batch_size = batch["input_ids"].shape[0]
+        device = self.model.device
+        sequences = batch["input_ids"].to(device).repeat_interleave(
+            num_sequences, dim=0
+        )
+        full_history = batch["full_history"].to(device)
+        repeated_history = full_history.repeat_interleave(num_sequences, dim=0)
+        vocabulary_size = self.model.config.vocab_size
+        candidate_mask = self.candidate_mask(vocabulary_size, device)
+        allowed = candidate_mask.unsqueeze(0).expand(
+            batch_size * num_sequences, -1
+        ).clone()
+        valid_history = repeated_history.clamp(min=0, max=vocabulary_size - 1)
+        allowed.scatter_(1, valid_history, False)
+        if (allowed.sum(dim=1) < self.predict_top_k).any():
+            raise ValueError(
+                "Not enough unseen warm-start items for requested recommendation K"
             )
 
-            preds = None
+        relevance = torch.zeros(
+            (batch_size * num_sequences, vocabulary_size),
+            dtype=torch.float32,
+            device=device,
+        )
+        max_positions = int(self.model.config.n_positions)
 
-            if 'temperature' in self.generate_params.keys():
-                temp = self.generate_params['temperature']
-                scores = torch.nn.functional.softmax(torch.stack(list(seq.scores), dim=0) / temp, dim=-1).sum(dim=0)
-            else:
-                scores = torch.nn.functional.softmax(torch.stack(list(seq.scores), dim=0), dim=-1).sum(dim=0)
+        for _ in range(self.predict_top_k):
+            model_input = sequences[:, -max_positions:]
+            attention_mask = model_input.ne(self.padding_idx)
+            position_ids = attention_mask.long().cumsum(dim=-1) - 1
+            position_ids.masked_fill_(~attention_mask, 0)
+            outputs = self.model(
+                input_ids=model_input,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+            )
+            logits = outputs.logits[:, -1, :].float()
+            logits = logits.masked_fill(~allowed, -torch.inf)
+            probabilities = torch.softmax(logits / temperature, dim=-1)
+            if not torch.isfinite(probabilities).all():
+                raise ValueError("Invalid probability distribution during RA generation")
+            relevance.add_(probabilities)
+            next_items = torch.multinomial(probabilities, num_samples=1)
+            sequences = torch.cat((sequences, next_items), dim=1)
 
-            scores = scores.scatter_(1, batch['full_history'].repeat_interleave(self.generate_params["num_return_sequences"], dim=0).to(self.model.device), -torch.inf)
-
+        relevance = relevance.reshape(
+            batch_size, num_sequences, vocabulary_size
+        ).sum(dim=1)
+        final_allowed = candidate_mask.unsqueeze(0).expand(batch_size, -1).clone()
+        final_history = full_history.clamp(min=0, max=vocabulary_size - 1)
+        final_allowed.scatter_(1, final_history, False)
+        relevance.masked_fill_(~final_allowed, -torch.inf)
+        scores, preds = torch.topk(
+            relevance, k=self.predict_top_k, dim=-1, largest=True, sorted=True
+        )
         return preds, scores
 
 

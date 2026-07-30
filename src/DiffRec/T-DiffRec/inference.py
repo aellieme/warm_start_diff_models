@@ -28,6 +28,11 @@ from experiment_tools.experiment_tracking import (  # noqa: E402
     recommendation_popularity,
     save_dataset_popularity,
 )
+from research_buckets.evaluate_buckets import (  # noqa: E402
+    evaluate_bucketed_hr,
+    print_bucketed_hr,
+)
+from research_buckets.popularity_buckets import build_popularity_buckets  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -164,8 +169,15 @@ def main() -> None:
         index: int(count) for index, count in enumerate(item_counts) if count > 0
     }
     save_dataset_popularity(cli.dataset, train_item_popularity)
+    bucket_by_item = build_popularity_buckets(
+        train_item_popularity, candidates
+    )
+    bucket_metrics = evaluate_bucketed_hr(
+        actual, predictions, bucket_by_item, topn
+    )
+    print_bucketed_hr(bucket_metrics)
 
-    tracker = ExperimentTracker(cli.dataset, 'T-DiffRec')
+    tracker = ExperimentTracker(cli.dataset, 'T-DiffRec', run_type='inference')
     pd.DataFrame({
         'user_id': users,
         'recommendations': predictions,

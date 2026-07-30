@@ -34,9 +34,15 @@ except ImportError:  # Logging must never make training unavailable.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 REGISTRY_FIELDS = [
-    "dataset", "model", "maxlen", "k", "recall", "ndcg", "mrr", "coverage",
-    "latency_sec", "latency_ms_per_user", "n_users", "seed", "split", "mask_seen",
-    "run_id", "created_at", "summary_path",
+    "run_id", "selected", "created_at", "run_type", "model", "dataset", "maxlen",
+    "epochs", "seed", "split", "mask_seen", "ranking_protocol", "batch_size",
+    "hidden_size", "embedding_dim", "num_layers", "num_heads", "dropout",
+    "learning_rate", "weight_decay", "optimizer", "scheduler", "patience",
+    "diffusion_steps", "sampling_steps", "noise_schedule", "loss", "loss_lambda",
+    "recall@10", "ndcg@10", "mrr@10", "coverage@10",
+    "recall@20", "ndcg@20", "mrr@20", "coverage@20",
+    "recall@100", "ndcg@100", "mrr@100", "coverage@100",
+    "latency_sec", "latency_ms_per_user", "n_users", "checkpoint", "summary_path",
 ]
 
 DATASET_NAMES = {
@@ -44,6 +50,7 @@ DATASET_NAMES = {
     "baby": "Amazon Baby",
     "amazon_baby": "Amazon Baby",
     "toys": "Amazon Toys",
+    "amazon_toys": "Amazon Toys",
     "amazon_toys_and_games": "Amazon Toys",
 }
 
@@ -62,8 +69,26 @@ MODEL_NAMES = {
 
 
 def output_root() -> Path:
-    default = REPO_ROOT / "experiment_results" / "logs"
-    return Path(os.environ.get("EXPERIMENT_OUTPUT_DIR", default)).resolve()
+    default = REPO_ROOT / "exp_results"
+    configured = Path(os.environ.get("EXPERIMENT_OUTPUT_DIR", default)).resolve()
+    return configured.parent if configured.name == "logs" else configured
+
+
+def _safe(value: object) -> str:
+    return str(value).replace("/", "-").replace("\\", "-").replace(" ", "_")
+
+
+def _dataset_folder(value: str) -> str:
+    normalized = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "baby": "amazon_baby",
+        "amazon_baby": "amazon_baby",
+        "toys": "amazon_toys",
+        "amazon_toys": "amazon_toys",
+        "amazon_toys_and_games": "amazon_toys",
+        "ml_1m": "ml-1m",
+    }
+    return aliases.get(normalized, _safe(normalized))
 
 
 def checkpoint_path(
@@ -74,16 +99,25 @@ def checkpoint_path(
     extension: str = ".pt",
 ) -> Path:
     """Return a stable checkpoint path beside logs and reports."""
-    safe = lambda value: str(value).replace("/", "-").replace("\\", "-").replace(" ", "_")
-    model_dir = output_root().parent / "checkpoints" / safe(normalize_model_name(model))
+    model_dir = output_root() / "checkpoints" / _safe(normalize_model_name(model))
     model_dir.mkdir(parents=True, exist_ok=True)
-    parts = [safe(dataset)]
+    parts = [_dataset_folder(dataset)]
     if maxlen is not None:
         parts.append(f"maxlen{int(maxlen)}")
     parts.append(f"seed{int(seed)}")
     if not extension.startswith("."):
         extension = f".{extension}"
     return model_dir / ("_".join(parts) + extension)
+
+
+def tuning_files_dir(model: str, dataset: str) -> Path:
+    path = (
+        output_root() / "service_files" / "models"
+        / _safe(normalize_model_name(model)) / _dataset_folder(dataset)
+        / "tuning_files"
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def checkpoint_due(epoch: int, total_epochs: int, every: int | None = None) -> bool:
@@ -104,10 +138,19 @@ def save_torch_checkpoint(payload, path: Path) -> None:
     os.replace(temporary, path)
 
 
-def make_run_dir(dataset: str, model: str, run_id: str | None = None) -> Path:
-    safe = lambda value: str(value).replace("/", "-").replace("\\", "-").replace(" ", "_")
+def make_run_dir(
+    dataset: str,
+    model: str,
+    run_id: str | None = None,
+    run_type: str = "training",
+) -> Path:
     run_id = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = output_root() / safe(dataset) / safe(model) / safe(run_id)
+    folder = "tuning_files" if run_type == "tuning" else "logs"
+    path = (
+        output_root() / "service_files" / "models"
+        / _safe(normalize_model_name(model)) / _dataset_folder(dataset)
+        / folder / _safe(run_id)
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -121,19 +164,38 @@ def normalize_model_name(value: str) -> str:
 
 
 def registry_path() -> Path:
-    return output_root().parent / "results_registry.csv"
+    return output_root() / "service_files" / "all_experiments.csv"
 
 
 class ExperimentTracker:
     """Append-only scalar history plus inexpensive local plots."""
 
-    def __init__(self, dataset: str, model: str, run_id: str | None = None):
+    def __init__(
+        self,
+        dataset: str,
+        model: str,
+        run_id: str | None = None,
+        maxlen: int | None = None,
+        run_type: str = "training",
+    ):
         self.dataset = str(dataset)
         self.model = str(model)
-        self.run_dir = make_run_dir(dataset, model, run_id)
+        self.maxlen = maxlen
+        self.run_type = run_type
+        self.run_dir = make_run_dir(dataset, model, run_id, run_type)
         self.run_id = self.run_dir.name
-        self.plot_dir = self.run_dir / "plots"
-        self.plot_dir.mkdir(exist_ok=True)
+        graphic_type = (
+            "tuning" if run_type == "tuning"
+            else "evaluation" if run_type in {"inference", "evaluation"}
+            else "training"
+        )
+        self.plot_dir = (
+            output_root() / "graphics" / graphic_type
+            / _safe(normalize_model_name(model)) / _dataset_folder(dataset)
+        )
+        self.plot_dir.mkdir(parents=True, exist_ok=True)
+        maxlen_name = f"maxlen_{int(maxlen)}" if maxlen is not None else "maxlen_not_applicable"
+        self.plot_prefix = f"{self.run_id}__{maxlen_name}__"
         self.history_path = self.run_dir / "history.csv"
         self.summary_path = self.run_dir / "summary.json"
         self.started = time.perf_counter()
@@ -168,6 +230,8 @@ class ExperimentTracker:
             "dataset": self.dataset,
             "model": self.model,
             "run_id": self.run_id,
+            "run_type": self.run_type,
+            "maxlen": self.maxlen,
             "created_at": created_at,
             "run_dir": str(self.run_dir),
             "final_metrics": {str(k): dict(values) for k, values in metrics_by_k.items()},
@@ -214,7 +278,10 @@ class ExperimentTracker:
             if name in series
         ]
         if losses:
-            self._line_plot(losses, "Training loss", "Loss", self.plot_dir / "loss.png")
+            self._line_plot(
+                losses, "Training loss", "Loss",
+                self.plot_dir / f"{self.plot_prefix}loss.png",
+            )
         if ranking:
             fig, axes = plt.subplots(1, len(ranking), figsize=(5 * len(ranking), 4), squeeze=False)
             for ax, name in zip(axes[0], ranking):
@@ -223,7 +290,10 @@ class ExperimentTracker:
                 ax.set(title=name.replace("val_", "Validation ").upper(), xlabel="Epoch", ylabel=name.split("_")[-1])
                 ax.grid(alpha=0.25)
             fig.tight_layout()
-            fig.savefig(self.plot_dir / "validation_ranking.png", dpi=150, bbox_inches="tight")
+            fig.savefig(
+                self.plot_dir / f"{self.plot_prefix}validation_ranking.png",
+                dpi=150, bbox_inches="tight",
+            )
             plt.close(fig)
 
     def plot_metrics_by_k(self, metrics_by_k: Mapping[int, Mapping[str, float]]) -> None:
@@ -240,7 +310,10 @@ class ExperimentTracker:
             ax.set(title=name.upper(), xlabel="K", ylabel=name.capitalize(), xticks=ks)
             ax.grid(alpha=0.25)
         fig.tight_layout()
-        fig.savefig(self.plot_dir / "metrics_by_k.png", dpi=150, bbox_inches="tight")
+        fig.savefig(
+            self.plot_dir / f"{self.plot_prefix}metrics_by_k.png",
+            dpi=150, bbox_inches="tight",
+        )
         plt.close(fig)
 
     def plot_popularity_bias(self, values_by_k: Mapping[int, Mapping[str, float]]) -> None:
@@ -258,7 +331,10 @@ class ExperimentTracker:
             ax.set(title=label, xlabel="K", ylabel=label, xticks=ks)
             ax.grid(alpha=0.25)
         fig.tight_layout()
-        fig.savefig(self.plot_dir / "popularity_bias.png", dpi=150, bbox_inches="tight")
+        fig.savefig(
+            self.plot_dir / f"{self.plot_prefix}popularity_bias.png",
+            dpi=150, bbox_inches="tight",
+        )
         plt.close(fig)
 
     def close(self) -> None:
@@ -308,36 +384,68 @@ class ExperimentTracker:
             normalize_dataset_name(self.dataset), normalize_model_name(self.model),
             "" if maxlen is None else str(int(maxlen)), self.run_id,
         )
-        new_rows = []
+        scope = (key_prefix[0], key_prefix[1], key_prefix[2], str(payload.get("seed", "")))
+        managed_scope = any(
+            (
+                row.get("dataset", ""), row.get("model", ""), row.get("maxlen", ""),
+                str(row.get("seed", "")),
+            ) == scope
+            and str(row.get("selected", "")).strip() != ""
+            for row in existing
+        )
+        previous_selection = next(
+            (
+                row.get("selected", "")
+                for row in existing
+                if (
+                    row.get("dataset", ""), row.get("model", ""), row.get("maxlen", ""),
+                    str(row.get("seed", "")), row.get("run_id", ""),
+                ) == (*scope, self.run_id)
+            ),
+            "false" if managed_scope else "",
+        )
+        new_row = {
+            "run_id": self.run_id,
+            "selected": previous_selection,
+            "created_at": payload.get("created_at", ""),
+            "run_type": payload.get("run_type", self.run_type),
+            "model": key_prefix[1],
+            "dataset": key_prefix[0],
+            "maxlen": key_prefix[2],
+            "epochs": len({row.get("epoch") for row in self.rows}),
+            "seed": payload.get("seed", ""),
+            "split": payload.get("split", ""),
+            "mask_seen": payload.get("mask_seen", ""),
+            "latency_sec": payload.get("latency_sec", ""),
+            "latency_ms_per_user": payload.get("latency_ms_per_user", ""),
+            "n_users": payload.get("n_users", ""),
+            "checkpoint": payload.get("checkpoint", ""),
+            "summary_path": str(self.summary_path),
+        }
         for k, values in metrics_by_k.items():
-            new_rows.append({
-                "dataset": key_prefix[0],
-                "model": key_prefix[1],
-                "maxlen": key_prefix[2],
-                "k": int(k),
-                "recall": values.get("recall", ""),
-                "ndcg": values.get("ndcg", ""),
-                "mrr": values.get("mrr", ""),
-                "coverage": values.get("coverage", ""),
-                "latency_sec": payload.get("latency_sec", ""),
-                "latency_ms_per_user": payload.get("latency_ms_per_user", ""),
-                "n_users": payload.get("n_users", ""),
-                "seed": payload.get("seed", ""),
-                "split": payload.get("split", ""),
-                "mask_seen": payload.get("mask_seen", ""),
-                "run_id": self.run_id,
-                "created_at": payload.get("created_at", ""),
-                "summary_path": str(self.summary_path),
-            })
-        replace_keys = {(row["dataset"], row["model"], row["maxlen"], row["run_id"], str(row["k"])) for row in new_rows}
-        existing = [row for row in existing if (
-            row.get("dataset"), row.get("model"), row.get("maxlen", ""),
-            row.get("run_id"), row.get("k"),
-        ) not in replace_keys]
+            for metric in ("recall", "ndcg", "mrr", "coverage"):
+                new_row[f"{metric}@{int(k)}"] = values.get(metric, "")
+        for field in REGISTRY_FIELDS:
+            if field in payload and field not in new_row:
+                new_row[field] = payload[field]
+        existing = [
+            row for row in existing
+            if not (
+                normalize_dataset_name(row.get("dataset", "")) == key_prefix[0]
+                and normalize_model_name(row.get("model", "")) == key_prefix[1]
+                and row.get("maxlen", "") == key_prefix[2]
+                and row.get("run_id", "") == self.run_id
+            )
+        ]
+        fieldnames = list(REGISTRY_FIELDS)
+        for row in existing + [new_row]:
+            for field in row:
+                if field not in fieldnames:
+                    fieldnames.append(field)
         with path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=REGISTRY_FIELDS)
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
-            writer.writerows(existing + new_rows)
+            writer.writerows(existing + [new_row])
 
 
 def popularity_from_sequences(sequences: Iterable[Iterable[int]], padding: int = 0) -> Counter:
@@ -347,7 +455,7 @@ def popularity_from_sequences(sequences: Iterable[Iterable[int]], padding: int =
 def save_dataset_popularity(dataset: str, popularity: Mapping[int, int]) -> Path | None:
     if plt is None or not popularity:
         return None
-    report_dir = output_root().parent / "reports" / "datasets" / str(dataset)
+    report_dir = output_root() / "datasets" / _dataset_folder(dataset)
     report_dir.mkdir(parents=True, exist_ok=True)
     counts = np.asarray(sorted(popularity.values(), reverse=True), dtype=float)
     with (report_dir / "summary.csv").open("w", newline="", encoding="utf-8") as handle:

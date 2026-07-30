@@ -186,9 +186,17 @@ def sasrec_model_scoring(model, data, data_description):
     return np.concatenate(scores, axis=0), user_order
 
 def validate_last_item(model, val_data, train_data, data_description, topn=10):
+    metrics = validate_last_item_metrics(
+        model, val_data, train_data, data_description, topn=topn
+    )
+    return metrics["recall"], metrics["mrr"]
+
+
+def validate_last_item_metrics(model, val_data, train_data, data_description, topn=10):
     model.eval()
     device = next(model.parameters()).device
-    from data_utils import data_to_sequences   
+    from data_utils import data_to_sequences
+    from evaluate_topk_dp import compute_all_metrics
 
     userid = data_description['users']
     itemid = data_description['items']
@@ -196,9 +204,8 @@ def validate_last_item(model, val_data, train_data, data_description, topn=10):
     train_seq_dict = data_to_sequences(train_data, data_description)
     candidate_items = set(train_data[itemid].unique().tolist())
 
-    hits = 0
-    reciprocal_ranks = []
-    n_users = 0
+    actual = []
+    predicted = []
 
     with torch.no_grad():
         for _, row in val_data.iterrows():
@@ -222,18 +229,23 @@ def validate_last_item(model, val_data, train_data, data_description, topn=10):
                 scores, full_history, candidate_items, model.pad_token
             )
             top_idx = topk_recs_selection(scores[None, :], topn)[0]
+            actual.append([int(target)])
+            predicted.append(top_idx.tolist())
 
-            if target in top_idx[:topn]:
-                hits += 1
-                rank = np.where(top_idx == target)[0][0] + 1
-                reciprocal_ranks.append(1.0 / rank)
-            else:
-                reciprocal_ranks.append(0.0)
-            n_users += 1
-
-    hr = hits / n_users if n_users > 0 else 0.0
-    mrr = np.mean(reciprocal_ranks) if reciprocal_ranks else 0.0
-    return hr, mrr
+    _, recalls, ndcgs, mrrs, coverages = compute_all_metrics(
+        actual,
+        predicted,
+        [topn],
+        len(candidate_items),
+        candidate_items=candidate_items,
+    )
+    return {
+        "recall": recalls[0],
+        "ndcg": ndcgs[0],
+        "mrr": mrrs[0],
+        "coverage": coverages[0],
+        "n_users": len(actual),
+    }
 
 def build_final_sasrec_model(
     config, train_val_data, data_description, num_epochs=None, tracker=None, data_index=None
@@ -248,8 +260,11 @@ def build_final_sasrec_model(
     model.to(device)
 
     plotter = TrainingPlotter(
-        save_dir='./log/',
-        model_name=f"SASRec_FINAL_{time.strftime('%Y%m%d_%H%M%S')}",
+        save_dir=tracker.plot_dir if tracker is not None else './log/',
+        model_name=(
+            f"{tracker.run_id}__maxlen_{config['maxlen']}"
+            if tracker is not None else f"SASRec_FINAL_{time.strftime('%Y%m%d_%H%M%S')}"
+        ),
         metrics=['loss']           
     )
 

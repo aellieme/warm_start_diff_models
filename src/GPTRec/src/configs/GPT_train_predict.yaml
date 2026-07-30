@@ -40,11 +40,19 @@ evaluator:
   top_k: [10, 20, 100]
 test_metrics: True
 
-mode: 'reciprocal_rank_aggregation'
+mode: 'relevance_aggregation'
 
-generation_params: {}
+generation_params:
+  num_return_sequences: 30
+  do_sample: true
+  temperature: 1.0
+  top_k: 0
 
-generation: False
+ra_temperature_grid: [0.3, 0.5, 0.8, 1.0, 1.2, 1.6, 2.0, 3.0, 5.0]
+ra_temperature_selection_k: 10
+ra_temperature: auto
 
-final_train: true
+generation: true
+
+final_train: false
 final_epochs: 150

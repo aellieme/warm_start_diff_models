@@ -1,17 +1,3 @@
-#!/usr/bin/env python3
-"""Prepare the three Recall input files used by ``paper_bt.py``.
-
-The script reads all nine sheets from ``experimental_results.xlsx``
-(three datasets by three cutoffs), validates them, and writes:
-
-* ``combined_k10.csv``
-* ``combined_k20.csv``
-* ``combined_k100.csv``
-
-The current workbook is always authoritative.  Legacy ADRec Recall values are
-used only when an ADRec cell is missing; no other old model result is restored.
-"""
-
 from __future__ import annotations
 
 import argparse

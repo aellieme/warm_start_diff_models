@@ -3,6 +3,11 @@ import time
 import argparse
 import logging
 import yaml
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from experiment_tools.experiment_tracking import make_run_dir
 
 import argparse
 
@@ -39,22 +44,21 @@ def make_logger(train_time):
     args = merge_config_with_args(config, args)
 
     # 计算日志文件夹路径
-    log_dir =os.path.join(args.log_file,args.model,args.dataset)
+    log_dir = make_run_dir(
+        args.dataset,
+        args.model,
+        str(train_time),
+        "training" if args.final else "tuning",
+    )
     # log_dir = os.path.abspath(args.log_file + args.model + args.dataset)
 
     # 检查并创建文件夹
-    if not os.path.exists(args.log_file):
-        print(f"Creating base log directory: {args.log_file}")
-        os.makedirs(args.log_file)
-    if not os.path.exists(log_dir):
-        print(f"Creating dataset-specific log directory: {log_dir}")
-        os.makedirs(log_dir)
 
     # 打印路径调试信息
     # print(f"Log directory: {log_dir}")
 
     # 设置日志文件的完整路径
-    log_file_path = os.path.join(log_dir, str(train_time) + str(args.description)+ '.log')
+    log_file_path = log_dir / (str(train_time) + str(args.description) + '.log')
     print(f"Log file path: {log_file_path}")
     reset_log(log_file_path)
     # 设置日志配置

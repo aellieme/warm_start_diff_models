@@ -24,6 +24,11 @@ from experiment_tools.experiment_tracking import (  # noqa: E402
     recommendation_popularity,
     save_dataset_popularity,
 )
+from research_buckets.evaluate_buckets import (  # noqa: E402
+    evaluate_bucketed_hr,
+    print_bucketed_hr,
+)
+from research_buckets.popularity_buckets import build_popularity_buckets  # noqa: E402
 from evaluate_topk_dp import compute_all_metrics  # noqa: E402
 from trainer import choose_model  # noqa: E402
 from utils import (  # noqa: E402
@@ -118,7 +123,9 @@ def main() -> None:
     if int(candidate_mask.sum().item()) < max(args.metric_ks):
         raise ValueError("Candidate catalogue is smaller than the largest metric K")
 
-    tracker = ExperimentTracker(args.dataset, "ADRec")
+    tracker = ExperimentTracker(
+        args.dataset, "ADRec", maxlen=args.max_len, run_type="inference"
+    )
     all_actual, all_predicted = [], []
     started = time.perf_counter()
     with torch.no_grad():
@@ -157,6 +164,13 @@ def main() -> None:
             args.metric_ks, recalls, ndcgs, mrrs, coverages
         )
     }
+    bucket_by_item = build_popularity_buckets(
+        args.train_item_popularity, args.coverage_candidate_items
+    )
+    bucket_metrics = evaluate_bucketed_hr(
+        all_actual, all_predicted, bucket_by_item, args.metric_ks
+    )
+    print_bucketed_hr(bucket_metrics)
     pd.DataFrame({
         "user_id": range(len(all_predicted)),
         "recommendations": all_predicted,

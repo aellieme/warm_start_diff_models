@@ -88,6 +88,22 @@ For a complete Google Colab workflow (setup, all models, TensorBoard, plots, res
 
 > Note: Not every model supports all arguments. Check the model’s own `main.py` for exact parameter names (e.g., GPTRec uses `dataset.max_length=50`). Below we provide the exact commands used in the experiments.
 
+### Inference without training
+
+Existing final checkpoints can be evaluated without starting training. For trained models the runner only dispatches each model's own `inference.py`; TopPopular and RandomRecs remain direct inference-only baselines:
+
+```bash
+python src/experiment_tools/run_demo_experiments.py --models DiffuRec ADRec T-DiffRec SASRec GPTRec --datasets ml-1m --maxlens 50 --inference-only --run
+```
+
+The same entry points can be run directly from the corresponding model directory:
+
+```bash
+python inference.py --dataset ml-1m --max_len 50 --metric_ks 10 20 100
+```
+
+For SASRec the length argument is named `--maxlen`; for T-DiffRec it is not used. Inference loads the stable checkpoint from `exp_results/checkpoints/<model>/`, evaluates the unchanged `global_temporal_70_10_20` warm-start test cohort, masks seen and unavailable items, and does not update model weights.
+
 ### 1. DiffuRec samples
 
 ```bash
@@ -123,15 +139,15 @@ python main.py --dataset ml-1m --final_train --max_len 100 --batch_size 512 --ep
 
 ```
 
-Training curves and final metrics are saved in `./log/`.
+Training files are saved under `exp_results/service_files/models/DiffuRec/<dataset>/`, and graphs are saved under `exp_results/graphics/`.
 
 Non-final DiffuRec tuning runs save a resumable checkpoint every 10 completed
 epochs. Each exact hyperparameter configuration retains only its two newest
 checkpoints. The files contain the model, optimizer, LR scheduler, AMP scaler,
 validation selection, plots/history, and RNG states. Set
 `EXPERIMENT_OUTPUT_DIR` to persistent storage (for example,
-`/content/drive/MyDrive/experiment_results/logs` in Colab) before training;
-checkpoints are written to the sibling `checkpoints/DiffuRec/tuning` directory.
+`/content/drive/MyDrive/exp_results` in Colab) before training;
+resume files are written to `service_files/models/DiffuRec/<dataset>/tuning_files/resume_checkpoints`.
 After an interruption, repeat the same command with
 `--resume_checkpoint latest`. Changing a training or validation-selection
 parameter is rejected when resuming instead of silently mixing configurations.
@@ -162,6 +178,22 @@ python main.py --dataset toys --final --max_len 50 --epochs 250 --batch_size 102
 
 > Note: ADRec uses `--mask_seen True` to filter already interacted items.
 
+To select the epoch count with the fixed ADRec configuration and then run
+fresh final training on train+validation:
+
+```bash
+python tune.py --dataset ml-1m --max_len 50 --max_epochs 250 --patience 4
+```
+
+This path does not run Optuna. It launches validation-only training, selects
+one checkpoint by Recall@10, NDCG@10, MRR@10, and Coverage@10, saves the
+selected number of completed epochs, and never loads or evaluates test data.
+Run final training separately with that epoch count:
+
+```bash
+python main.py --dataset ml-1m --final --max_len 50 --epochs SELECTED_EPOCHS --metric_ks 10 20 100 --mask_seen True
+```
+
 ### 3. T‑DiffRec
 
 ```bash
@@ -176,6 +208,20 @@ python split_load_data_dp.py --dataset amazon_Toys_and_Games
 python main.py --dataset ml-1m --final_train --epochs 250 --topN "[10,20,100]"
 python main.py --dataset amazon_Baby --final_train --epochs 250 --topN "[10,20,100]" --cuda
 python main.py --dataset amazon_Toys_and_Games --final_train --epochs 250 --topN "[10,20,100]" --cuda
+```
+
+The fixed-configuration validation workflow is:
+
+```bash
+python tune.py --dataset ml-1m --max_epochs 250 --patience 25 --topN "[10,20,100]"
+```
+
+Add `--cuda` when CUDA is available. This script does not run Optuna. It uses
+the existing non-final `main.py` path, saves the selected checkpoint and epoch,
+and never loads test data. Run final training separately:
+
+```bash
+python main.py --dataset ml-1m --final_train --epochs SELECTED_EPOCHS --topN "[10,20,100]"
 ```
 
 ### 4. SASRec
@@ -194,21 +240,45 @@ python main.py --dataset amazon_Toys_and_Games --maxlen 100
 ```
 
 SASRec uses the scalable cross‑entropy loss from [Mezentsev et al., RecSys 2024].  
-Training curves are saved as `*_training_curves_final.png` in `./log/`.
+Training curves are saved under `exp_results/graphics/training/SASRec/<dataset>/`.
+
+The fixed dataset-specific configuration can be run through validation to
+select the final epoch count before the train+validation run:
+
+```bash
+python tune.py --dataset ml-1m --maxlen 50 --max_epochs 250 --patience 10
+```
+
+Selection is lexicographic by Recall@10, NDCG@10, MRR@10, and Coverage@10.
+This path does not run Optuna: it uses the same fixed SASRec presets as the
+regular runner. Validation selects one checkpoint and its completed epoch
+count, and test data is not evaluated. Run final training separately:
+
+```bash
+python main.py --dataset ml-1m --maxlen 50 --num_epochs SELECTED_EPOCHS
+```
 
 ### 5. GPTRec
 
+GPTRec uses Relevance Aggregation with 30 sampled continuations and no
+sampling top-k cutoff. First run with `final_train=false` to select the
+temperature on validation (`NDCG@10`). The selected value is printed and saved
+in `ra_temperature_selection.json`; pass it as
+`generation_params.temperature=<value>` to the final command. RA is evaluated
+independently for every value in `evaluator.top_k`.
+
 ```bash
 cd src/GPTRec/src
+RA_TEMPERATURE=1.0  # replace with the value selected on validation
 
 # ml-1m, max_len=50, 250 epochs
-python run_train_predict.py dataset_name=ml-1m final_epochs=250 dataset.max_length=50 evaluator.top_k="[10,20,100]"
+python run_train_predict.py dataset_name=ml-1m final_epochs=250 dataset.max_length=50 evaluator.top_k="[10,20,100]" generation_params.temperature=$RA_TEMPERATURE
 
 # Amazon Baby, max_len=50
-python run_train_predict.py dataset_name=amazon_Baby final_epochs=250 dataset.max_length=50 evaluator.top_k="[10,20,100]"
+python run_train_predict.py dataset_name=amazon_Baby final_epochs=250 dataset.max_length=50 evaluator.top_k="[10,20,100]" generation_params.temperature=$RA_TEMPERATURE
 
 # Amazon Toys, max_len=100
-python run_train_predict.py dataset_name=amazon_Toys_and_Games final_epochs=250 dataset.max_length=100 evaluator.top_k="[10,20,100]"
+python run_train_predict.py dataset_name=amazon_Toys_and_Games final_epochs=250 dataset.max_length=100 evaluator.top_k="[10,20,100]" generation_params.temperature=$RA_TEMPERATURE
 ```
 
 ### 6. Baselines (Top‑Popular & Random)
@@ -232,34 +302,34 @@ python RandomRecsModel.py --dataset baby
 
 Before the first launch, install the dependencies for the graphs: `python -m pip install -r src/visualization_requirements.txt`. Then run the training with the usual commands above — no additional flag is needed, the graphs are built automatically.
 
-The results of each local run are stored in `experiment_results/logs/<dataset>/<model>/<run_id>/`. Depending on the training mode, `plots/` contains `loss.png`, `validation_ranking.png`, `metrics_by_k.png`, and `popularity_bias.png`. Reusable model checkpoints are stored in `experiment_results/checkpoints/<model>/`.
+Training and inference files are stored in `exp_results/service_files/models/<model>/<dataset>/logs/<run_id>/`; tuning files use the sibling `tuning_files/<run_id>/` directory. Graphs are stored separately in `exp_results/graphics/<training|tuning|evaluation>/<model>/<dataset>/`. `maxlen` is recorded in `all_experiments.csv`, summaries, checkpoint names, and graph names rather than creating another directory level. Reusable model checkpoints are stored in `exp_results/checkpoints/<model>/`.
 
-To view the loss and ranking metrics of all launches in TensorBoard, run `tensorboard --logdir experiment_results/logs` from the root of the project and open the address shown in the terminal.
+To view the loss and ranking metrics of all launches in TensorBoard, run `tensorboard --logdir exp_results/service_files/models` from the root of the project and open the address shown in the terminal.
 
 ### Automatic result tables
 
-Each completed run automatically updates `experiment_results/results_registry.csv`; no metrics need to be copied by hand. To keep logs, tables, and checkpoints between Google Colab sessions, mount Google Drive and set the output directory before training:
+Each completed run automatically updates `exp_results/service_files/all_experiments.csv`; no metrics need to be copied by hand. To keep logs, tables, and checkpoints between Google Colab sessions, mount Google Drive and set the output directory before training:
 
 ```python
 from google.colab import drive
 drive.mount('/content/drive')
 
 import os
-os.environ['EXPERIMENT_OUTPUT_DIR'] = '/content/drive/MyDrive/experiment_results/logs'
+os.environ['EXPERIMENT_OUTPUT_DIR'] = '/content/drive/MyDrive/exp_results'
 ```
 
-After any number of model runs, generate all 9 tables (3 datasets × K = 10, 20, 100) with `python src/experiment_tools/generate_result_tables.py`. The files `experimental_results.md` and `experimental_results.xlsx` will be saved in `MyDrive/experiment_results/reports/tables/`; missing experiments are shown as `—`.
+After any number of model runs, generate all 9 tables (3 datasets × K = 10, 20, 100) with `python src/experiment_tools/generate_result_tables.py`. The files `experimental_results.md` and `experimental_results.xlsx` will be saved in `MyDrive/exp_results/experiment_tables/`; missing experiments are shown as `—`.
 
 If Google Drive was not used, download the local Colab results before disconnecting the runtime:
 
 ```python
-!python src/experiment_tools/package_experiment_results.py --output /content/experiment_results.zip
+!python src/experiment_tools/package_experiment_results.py --output /content/exp_results.zip
 
 from google.colab import files
-files.download("experiment_results.zip")
+files.download("exp_results.zip")
 ```
 
-Extract the downloaded archive into the root of the local project in VS Code. It creates one local `experiment_results/` folder containing logs, tables, and checkpoints.
+Extract the downloaded archive into the root of the local project in VS Code. It creates one local `exp_results/` folder containing logs, tables, and checkpoints.
 
 ---
 

@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""Build a clean, non-archived Google Drive folder for thesis review."""
-
 from __future__ import annotations
 
 import argparse

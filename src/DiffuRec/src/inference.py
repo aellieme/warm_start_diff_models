@@ -20,6 +20,11 @@ from experiment_tools.experiment_tracking import (  # noqa: E402
     checkpoint_path,
     save_dataset_popularity,
 )
+from research_buckets.evaluate_buckets import (  # noqa: E402
+    evaluate_bucketed_hr,
+    print_bucketed_hr,
+)
+from research_buckets.popularity_buckets import build_popularity_buckets  # noqa: E402
 from main import fix_random_seed_as, item_num_create, load_and_split_gts  # noqa: E402
 from model import Att_Diffuse_model, create_model_diffu  # noqa: E402
 from trainer import evaluate_and_print  # noqa: E402
@@ -113,11 +118,23 @@ def main() -> None:
     model.load_state_dict(payload['model_state_dict'])
     model.eval()
 
-    tracker = ExperimentTracker(args.dataset, 'DiffuRec')
+    tracker = ExperimentTracker(
+        args.dataset, 'DiffuRec', maxlen=args.max_len, run_type='inference'
+    )
     args.experiment_tracker = tracker
     result = evaluate_and_print(
         model, test_loader, args, logging.getLogger(__name__), description='test'
     )
+    bucket_by_item = build_popularity_buckets(
+        args.train_item_popularity, args.coverage_candidate_items
+    )
+    bucket_metrics = evaluate_bucketed_hr(
+        result['canonical_actual'],
+        result['canonical_predicted'],
+        bucket_by_item,
+        args.metric_ks,
+    )
+    print_bucketed_hr(bucket_metrics)
     pd.DataFrame({
         'user_id': range(len(result['canonical_predicted'])),
         'recommendations': result['canonical_predicted'],

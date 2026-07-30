@@ -206,24 +206,24 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+src/DiffRec/__pycache__
+src/DiffRec/T-DiffRec/__pycache__
+src/DiffRec/*.pyc
 
-D:\diploma\warm_start_diff_models\src\DiffRec\__pycache__
-D:\diploma\warm_start_diff_models\src\DiffRec\T-DiffRec\__pycache__
-D:\diploma\warm_start_diff_models\src\DiffRec\*.pyc
 
-
-D:\diploma\warm_start_diff_models\src\GPT-2_4Rec\outputs
+src/GPT-2_4Rec/outputs
 src/GPT-2_4Rec/lightning_logs/version_1/hparams.yaml
-D:\diploma\warm_start_diff_models\src\data\amazon
+src/data/amazon
 AGENTS.md
 .agents
+/.codex/
 logs/
 reports/
 experiment_results/
 bradley_terry_rankings
 tests/
-D:\diploma\warm_start_diff_models\src\data
-src\data
-D:\diploma\warm_start_diff_models\tests
-D:\diploma\warm_start_diff_models\.matplotlib_test_cache
+src/data
+/tests
 .matplotlib_test_cache
+/exp_results/
+/tmp/

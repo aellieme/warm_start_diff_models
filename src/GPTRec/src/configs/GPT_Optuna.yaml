@@ -7,16 +7,19 @@ cuda_visible_devices: 0
 
 project_name: sequential_recsys/generation_paper/hyper/${task_name}
 task_name: GPT
-seed: 17
+seed: 42
 
-optuna_metrics: val_ndcg@10
+dataset_name: ml-1m
+amazon_data_dir: ../../data/amazon
+
+optuna_metrics: val_recall@10
 
 data_path: ../data/ml-20m.csv
 last_n_items: 10
 
 dataset:
   max_length: 50 # 128
-  shift_labels: False
+  shift_labels: True
 
 dataloader:
   batch_size: 32
@@ -60,13 +63,19 @@ trainer_params:
   max_epochs: 100
 patience: 10
 
-generation: False
-mode: 'reciprocal_rank_aggregation'
+generation: True
+mode: 'relevance_aggregation'
 generation_params:
-  num_return_sequences: 1
-  do_sample: False
+  num_return_sequences: 30
+  do_sample: True
+  temperature: 1.0
+  top_k: 0
 
+ra_temperature_grid: [0.3, 0.5, 0.8, 1.0, 1.2, 1.6, 2.0, 3.0, 5.0]
+ra_temperature_selection_k: 10
+ra_temperature_selection_metric: recall
 
 evaluator:
   top_k: [10]
-test_metrics: True
+test_metrics: False
+final_train: False

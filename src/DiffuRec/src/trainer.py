@@ -25,6 +25,7 @@ from experiment_tools.experiment_tracking import (
     checkpoint_path,
     recommendation_popularity,
     save_torch_checkpoint,
+    tuning_files_dir,
 )
 
 
@@ -54,12 +55,13 @@ def _tuning_checkpoint_prefix(args):
         default=str,
     )
     digest = hashlib.sha256(signature_json.encode('utf-8')).hexdigest()[:12]
-    stable_path = checkpoint_path(
-        'DiffuRec', args.dataset, args.max_len, args.random_seed,
-    )
-    directory = stable_path.parent / 'tuning'
+    directory = tuning_files_dir('DiffuRec', args.dataset) / 'resume_checkpoints'
     directory.mkdir(parents=True, exist_ok=True)
-    return directory, f'{stable_path.stem}_{digest}'
+    prefix = (
+        f'DiffuRec_{args.dataset}_maxlen{args.max_len}'
+        f'_seed{args.random_seed}_{digest}'
+    )
+    return directory, prefix
 
 
 def tuning_checkpoint_path(args, completed_epoch):
@@ -454,9 +456,10 @@ def evaluate_and_print(model, data_loader, args, logger, description="evaluation
             'user_id': list(range(len(all_actual))),
             'recommendations': all_predicted,
         })
-        recs_df.to_csv('recommendations.csv', index=False)
+        recommendations_path = tracker.run_dir / "recommendations.csv"
+        recs_df.to_csv(recommendations_path, index=False)
         print(
-            "Recommendations saved to recommendations.csv "
+            f"Recommendations saved to {recommendations_path} "
             f"using canonical inference seed {result['seeds'][0]}"
         )
     return result
@@ -464,11 +467,15 @@ def evaluate_and_print(model, data_loader, args, logger, description="evaluation
 def model_train(tra_data_loader, val_data_loader, test_data_loader, model_joint, args, logger):
     from visualization.plotting import TrainingPlotter
 
-    tracker = ExperimentTracker(args.dataset, "DiffuRec")
+    tracker = ExperimentTracker(
+        args.dataset, "DiffuRec",
+        run_id=getattr(args, "experiment_run_id", None),
+        maxlen=args.max_len, run_type="tuning",
+    )
     args.experiment_tracker = tracker
     plotter = TrainingPlotter(
-        save_dir=args.log_file + args.dataset,
-        model_name=f"{args.description}_{time.strftime('%Y%m%d_%H%M%S')}",
+        save_dir=tracker.plot_dir,
+        model_name=f"{tracker.run_id}__maxlen_{args.max_len}",
         metrics=['loss', 'recall@10']
         )
     epochs = args.epochs

@@ -13,6 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from experiment_tools.experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
 from experiment_tools.warm_start import build_last_item_examples
+from research_buckets.evaluate_buckets import evaluate_bucketed_hr, print_bucketed_hr
+from research_buckets.popularity_buckets import build_popularity_buckets
 
 random.seed(42)
 np.random.seed(42)
@@ -153,8 +155,13 @@ if __name__ == "__main__":
     print_results(f"TopPopular ({args.dataset})", args.topk_list, results)
     dataset_name = {"baby": "amazon_Baby", "toys": "amazon_Toys_and_Games"}.get(args.dataset, args.dataset)
     popularity = train_val_df['movieid'].value_counts().to_dict()
+    bucket_by_item = build_popularity_buckets(popularity, popular_items)
+    bucket_metrics = evaluate_bucketed_hr(
+        ground_truth, results['predictions'], bucket_by_item, args.topk_list
+    )
+    print_bucketed_hr(bucket_metrics)
     save_dataset_popularity(dataset_name, popularity)
-    tracker = ExperimentTracker(dataset_name, "TopPopular")
+    tracker = ExperimentTracker(dataset_name, "TopPopular", run_type="evaluation")
     tracker.log_final_metrics(
         {k: {"recall": results['recalls'][i], "ndcg": results['ndcgs'][i],
              "mrr": results['mrrs'][i], "coverage": results['covs'][i]}

@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""Create presentation-ready Bradley-Terry plots from saved CSV outputs."""
-
 from __future__ import annotations
 
 import argparse

@@ -87,7 +87,9 @@ def main():
 
     print("Training SASRec on train+val (80%)...")
     # Используем build_final_sasrec_model – она обучает на всех переданных данных без валидации
-    tracker = ExperimentTracker(args.dataset, "SASRec")
+    tracker = ExperimentTracker(
+        args.dataset, "SASRec", maxlen=config["maxlen"], run_type="training"
+    )
     train_item_popularity = train_val_data[itemid_col].value_counts().to_dict()
     save_dataset_popularity(args.dataset, train_item_popularity)
     model = build_final_sasrec_model(
@@ -95,7 +97,7 @@ def main():
         num_epochs=config['num_epochs'], tracker=tracker, data_index=data_index,
     )
 
-    log_dir = './log/'
+    log_dir = tracker.plot_dir
     # Ищем все файлы с суффиксом '_final.png'
     pattern = os.path.join(log_dir, '*_training_curves_final.png')
     files = glob.glob(pattern)
@@ -108,7 +110,7 @@ def main():
         plt.axis('off')
         plt.show()
     else:
-        print("График не найден. Проверьте папку ./log/")
+        print(f"График не найден в {tracker.plot_dir}")
 
     # Сохранение модели
     model_path = checkpoint_path("SASRec", args.dataset, config["maxlen"], seed)
@@ -162,8 +164,9 @@ def main():
         'userid': users,
         'recommendations': [list(rec) for rec in recs]   # каждый rec - массив из topn айтемов
     })
-    recommendations_df.to_csv('recommendations_top20.csv', index=False)
-    print("Recommendations saved to recommendations_top20.csv")
+    recommendations_path = tracker.run_dir / "recommendations.csv"
+    recommendations_df.to_csv(recommendations_path, index=False)
+    print(f"Recommendations saved to {recommendations_path}")
 if __name__ == "__main__":
     main()
 # import time

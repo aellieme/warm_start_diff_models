@@ -8,9 +8,13 @@ import os
 from pathlib import Path
 
 try:
-    from .experiment_tracking import output_root, registry_path
+    from .experiment_tracking import (
+        normalize_dataset_name, normalize_model_name, output_root, registry_path,
+    )
 except ImportError:  # Allow direct execution: python src/experiment_tools/generate_result_tables.py
-    from experiment_tracking import output_root, registry_path
+    from experiment_tracking import (
+        normalize_dataset_name, normalize_model_name, output_root, registry_path,
+    )
 
 
 DATASETS = ("ML-1M", "Amazon Toys", "Amazon Baby")
@@ -30,24 +34,57 @@ def read_registry(path: Path) -> list[dict]:
         return list(csv.DictReader(handle))
 
 
-def select_latest_runs(rows: list[dict], seed: int = 42) -> dict[tuple[str, str, str], list[dict]]:
+def _selection_value(value) -> bool | None:
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    return None
+
+
+def select_runs(rows: list[dict], seed: int = 42) -> dict[tuple[str, str, str], list[dict]]:
     eligible = [row for row in rows if str(row.get("seed", "")) == str(seed)]
     grouped: dict[tuple[str, str, str], dict[str, list[dict]]] = {}
     for row in eligible:
-        key = (row.get("dataset", ""), row.get("model", ""), row.get("maxlen", ""))
+        key = (
+            normalize_dataset_name(row.get("dataset", "")),
+            normalize_model_name(row.get("model", "")),
+            row.get("maxlen", ""),
+        )
         grouped.setdefault(key, {}).setdefault(row.get("run_id", ""), []).append(row)
     selected = {}
     for key, runs in grouped.items():
-        latest_id = max(
-            runs,
-            key=lambda run_id: max((item.get("created_at", "") for item in runs[run_id]), default=""),
+        selected_ids = [
+            run_id for run_id, run_rows in runs.items()
+            if any(_selection_value(row.get("selected")) is True for row in run_rows)
+        ]
+        if len(selected_ids) > 1:
+            raise ValueError(
+                f"Several runs are selected for dataset={key[0]}, model={key[1]}, "
+                f"maxlen={key[2]}: {selected_ids}"
+            )
+        if selected_ids:
+            selected[key] = runs[selected_ids[0]]
+            continue
+        managed = any(
+            _selection_value(row.get("selected")) is False
+            for run_rows in runs.values()
+            for row in run_rows
         )
-        selected[key] = runs[latest_id]
+        if not managed:
+            latest_id = max(
+                runs,
+                key=lambda run_id: max(
+                    (item.get("created_at", "") for item in runs[run_id]), default=""
+                ),
+            )
+            selected[key] = runs[latest_id]
     return selected
 
 
 def build_tables(rows: list[dict], seed: int = 42):
-    selected = select_latest_runs(rows, seed)
+    selected = select_runs(rows, seed)
     tables = []
     number = 1
     for dataset in DATASETS:
@@ -55,7 +92,7 @@ def build_tables(rows: list[dict], seed: int = 42):
             body = []
             for model, maxlen in ROWS:
                 run_rows = selected.get((dataset, model, maxlen), [])
-                result = next((row for row in run_rows if row.get("k") == str(k)), None)
+                result = _result_for_k(run_rows, k)
                 body.append({
                     "Model": model,
                     "Maxlen": maxlen or "-",
@@ -68,6 +105,24 @@ def build_tables(rows: list[dict], seed: int = 42):
             tables.append({"number": number, "dataset": dataset, "k": k, "rows": body})
             number += 1
     return tables
+
+
+def _result_for_k(run_rows: list[dict], k: int) -> dict | None:
+    result = next((row for row in run_rows if row.get("k") == str(k)), None)
+    if result is not None:
+        return result
+    if not run_rows:
+        return None
+    wide = run_rows[0]
+    if not any(wide.get(f"{metric}@{k}", "") not in ("", None) for metric in METRICS):
+        return None
+    return {
+        "recall": wide.get(f"recall@{k}", ""),
+        "ndcg": wide.get(f"ndcg@{k}", ""),
+        "mrr": wide.get(f"mrr@{k}", ""),
+        "coverage": wide.get(f"coverage@{k}", ""),
+        "latency_sec": wide.get("latency_sec", ""),
+    }
 
 
 def _format(row: dict | None, key: str, digits: int) -> str:
@@ -124,7 +179,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     source = args.registry or registry_path()
-    destination = args.output_dir or (output_root().parent / "reports" / "tables")
+    destination = args.output_dir or (output_root() / "experiment_tables")
     destination.mkdir(parents=True, exist_ok=True)
     tables = build_tables(read_registry(source), args.seed)
     markdown_path = destination / "experimental_results.md"

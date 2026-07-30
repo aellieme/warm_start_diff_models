@@ -30,11 +30,13 @@ evaluator:
   top_k: [10]
 test_metrics: true
 
-generation: false
-mode: 'reciprocal_rank_aggregation'
+generation: true
+mode: 'relevance_aggregation'
 generation_params:
-  num_return_sequences: 1
-  do_sample: false
+  num_return_sequences: 30
+  do_sample: true
+  temperature: 1.0
+  top_k: 0
   
 # cuda_visible_devices: 0
 

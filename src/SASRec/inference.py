@@ -20,6 +20,11 @@ from experiment_tools.experiment_tracking import (  # noqa: E402
     recommendation_popularity,
     save_dataset_popularity,
 )
+from research_buckets.evaluate_buckets import (  # noqa: E402
+    evaluate_bucketed_hr,
+    print_bucketed_hr,
+)
+from research_buckets.popularity_buckets import build_popularity_buckets  # noqa: E402
 from load_evaluate_pipeline import (  # noqa: E402
     prepare_data_and_description,
     run_inference_pipeline,
@@ -96,7 +101,18 @@ def main() -> None:
         raise ValueError('No eligible warm-start test examples remain')
 
     precisions, recalls, ndcgs, mrrs, coverages = metrics
-    tracker = ExperimentTracker(cli.dataset, 'SASRec')
+    target_by_user = test_examples.set_index(userid_col)[itemid_col].to_dict()
+    targets = [[target_by_user[user]] for user in users]
+    bucket_by_item = build_popularity_buckets(
+        train_item_popularity, train_val_data[itemid_col].unique().tolist()
+    )
+    bucket_metrics = evaluate_bucketed_hr(
+        targets, recs.tolist(), bucket_by_item, cli.metric_ks
+    )
+    print_bucketed_hr(bucket_metrics)
+    tracker = ExperimentTracker(
+        cli.dataset, 'SASRec', maxlen=cli.maxlen, run_type='inference'
+    )
     pd.DataFrame({
         'user_id': users,
         'recommendations': [list(map(int, rec)) for rec in recs],

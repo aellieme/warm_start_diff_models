@@ -12,20 +12,20 @@ except ImportError:  # Allow direct execution: python src/experiment_tools/packa
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, default=Path("experiment_results.zip"))
+    parser.add_argument("--output", type=Path, default=Path("exp_results.zip"))
     args = parser.parse_args()
-    results_root = output_root().parent
+    results_root = output_root()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(args.output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for name in ("logs", "reports", "checkpoints"):
+        for name in (
+            "bt", "checkpoints", "datasets", "experiment_tables", "graphics",
+            "other_files", "service_files",
+        ):
             root = results_root / name
             if root.exists():
                 for path in root.rglob("*"):
                     if path.is_file():
-                        archive.write(path, Path("experiment_results") / path.relative_to(results_root))
-        registry = results_root / "results_registry.csv"
-        if registry.exists():
-            archive.write(registry, Path("experiment_results") / registry.name)
+                        archive.write(path, Path("exp_results") / path.relative_to(results_root))
     print(args.output.resolve())
 
 

@@ -162,17 +162,24 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
     if int(candidate_mask.sum().item()) < max(metric_ks):
         raise ValueError("Candidate catalogue is smaller than the largest metric K")
     torch.set_float32_matmul_precision('high')
+    tracker = ExperimentTracker(
+        args.dataset, args.model, str(train_time),
+        maxlen=args.max_len,
+        run_type="training" if final else "tuning",
+    )
     plotter = TrainingPlotter(
-        save_dir=os.path.join(args.log_file, args.model, args.dataset),
-        model_name=f"{args.model}_{args.dataset}_{train_time}",
+        save_dir=tracker.plot_dir,
+        model_name=f"{tracker.run_id}__maxlen_{args.max_len}",
         metrics=['loss', 'recall@10']
     )
-    tracker = ExperimentTracker(args.dataset, args.model, str(train_time))
     optimizer = PCGrad(optimizers(model_joint, args), args)
     lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer.optim, T_max=500)
     best_metrics_dict = {'Best_Recall@5': 0, 'Best_NDCG@5': 0, 'Best_Recall@10': 0, 'Best_NDCG@10': 0, 'Best_Recall@20': 0, 'Best_NDCG@20': 0}
     best_epoch = {'Best_epoch_Recall@5': 0, 'Best_epoch_NDCG@5': 0, 'Best_epoch_Recall@10': 0, 'Best_epoch_NDCG@10': 0, 'Best_epoch_Recall@20': 0, 'Best_epoch_NDCG@20': 0}
-    best_recall10 = -1.0
+    best_selection_key = None
+    selected_epoch = None
+    selected_metrics = None
+    evaluations_without_improvement = 0
     best_model = None
 
     for epoch_temp in range(epochs):
@@ -246,8 +253,9 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
                             all_predicted.append(topk_idx[i].cpu().tolist())
                     if final:
                         recs_df = pd.DataFrame({'user_id': list(range(len(all_actual))), 'recommendations': all_predicted})
-                        recs_df.to_csv('recommendations.csv', index=False)
-                        print("Recommendations saved to recommendations.csv")
+                        recommendations_path = tracker.run_dir / "recommendations.csv"
+                        recs_df.to_csv(recommendations_path, index=False)
+                        print(f"Recommendations saved to {recommendations_path}")
 
                 if not all_actual:
                     raise ValueError("No eligible warm-start validation examples remain")
@@ -260,15 +268,29 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
                 )
                 idx10 = metric_ks.index(10) if 10 in metric_ks else 0
                 recall10 = recalls[idx10]
+                selection_key = (
+                    recalls[idx10], ndcgs[idx10], mrrs[idx10], covs[idx10]
+                )
                 tracker.log_epoch(epoch_temp, **{
                     "val_recall@10": recalls[idx10],
                     "val_ndcg@10": ndcgs[idx10],
                     "val_mrr@10": mrrs[idx10],
+                    "val_coverage@10": covs[idx10],
                 })
 
-                if recall10 > best_recall10:
-                    best_recall10 = recall10
+                if best_selection_key is None or selection_key > best_selection_key:
+                    best_selection_key = selection_key
+                    selected_epoch = epoch_temp + 1
+                    selected_metrics = {
+                        "Recall@10": recalls[idx10],
+                        "NDCG@10": ndcgs[idx10],
+                        "MRR@10": mrrs[idx10],
+                        "Coverage@10": covs[idx10],
+                    }
                     best_model = copy.deepcopy(model_joint)
+                    evaluations_without_improvement = 0
+                else:
+                    evaluations_without_improvement += 1
                 
                 plotter.plot(save=True, show=False, suffix=f'_epoch{epoch_temp}')
 
@@ -283,6 +305,9 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
                 for k, r, n, m, c in zip(metric_ks, recalls, ndcgs, mrrs, covs):
                     print(f"k={k}: Recall={r:.4f}, NDCG={n:.4f}, MRR={m:.4f}, Cov={c:.4f}")
                     logger.info(f"k={k}: Recall={r:.4f}, NDCG={n:.4f}, MRR={m:.4f}, Cov={c:.4f}")
+                if evaluations_without_improvement >= args.patience:
+                    print(f"Early stopping after {args.patience} validation checks without improvement")
+                    break
     plotter.plot(save=True, show=False, suffix='_final')
     # сли никакая модель не сохранилась
     if best_model is None:
@@ -301,6 +326,19 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
     saved_args = {key: value for key, value in vars(args).items() if key != "experiment_tracker"}
     save_torch_checkpoint({"model_state_dict": best_model.state_dict(), "args": saved_args}, output_path)
     print(f"Final model saved to {output_path}")
+    if val_data_loader is not None:
+        if selected_epoch is None:
+            selected_epoch = epochs
+            selected_metrics = None
+        tracker.log_validation_selection(
+            selected_epoch,
+            selected_metrics,
+            rule="recall@10_then_ndcg_mrr_coverage",
+            checkpoint=str(output_path),
+            split="global_temporal_70_10_20",
+            mask_seen=True,
+            seed=getattr(args, "random_seed", 42),
+        )
     logger.info(best_metrics_dict)
     logger.info(best_epoch)
     # all_actual = []
@@ -338,8 +376,9 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
                     top_100_item.append(top100.cpu())
             if final:
                 recs_df = pd.DataFrame({'user_id': list(range(len(all_actual))), 'recommendations': all_predicted})
-                recs_df.to_csv('recommendations.csv', index=False)
-                print("Recommendations saved to recommendations.csv")
+                recommendations_path = tracker.run_dir / "recommendations.csv"
+                recs_df.to_csv(recommendations_path, index=False)
+                print(f"Recommendations saved to {recommendations_path}")
         test_elapsed = time.time() - start_test_time
         logger.info(f"Test inference time: {test_elapsed:.2f}s")
         print(f"Test inference time: {test_elapsed:.2f}s")
@@ -368,6 +407,7 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
             n_users=len(all_actual),
             maxlen=args.max_len,
             ranking_protocol="warm_start_known_catalog_v2",
+            checkpoint=str(output_path),
             popularity_bias=recommendation_popularity(all_predicted, args.train_item_popularity, metric_ks),
         )
 
@@ -375,11 +415,11 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
         logger.info('Test------------------------------------------------------')
         print(test_metrics_dict_mean)
         logger.info(test_metrics_dict_mean)
-        if best_recall10 >= 0:
+        if best_selection_key is not None:
             print('Best Eval---------------------------------------------------------')
-            print(f"Best Recall@10: {best_recall10:.4f}")
+            print(f"Best Recall@10: {best_selection_key[0]:.4f}")
             logger.info('Best Eval---------------------------------------------------------')
-            logger.info(f"Best Recall@10: {best_recall10:.4f}")
+            logger.info(f"Best Recall@10: {best_selection_key[0]:.4f}")
         # print('Best Eval---------------------------------------------------------')
         # print(f"Best Recall@10: {best_recall10:.4f}")
         # logger.info(f"Best Recall@10: {best_recall10:.4f}")

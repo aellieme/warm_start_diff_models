@@ -7,7 +7,8 @@ from collections import Counter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path,
-                                                  save_dataset_popularity, save_torch_checkpoint)
+                                                  make_run_dir, save_dataset_popularity,
+                                                  save_torch_checkpoint)
 import torch
 import torch.backends.cudnn as cudnn
 import numpy as np
@@ -80,8 +81,13 @@ def build_parser():
 
 
 def configure_logging(args):
-    log_dir = Path(args.log_file) / args.dataset
-    log_dir.mkdir(parents=True, exist_ok=True)
+    args.experiment_run_id = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
+    log_dir = make_run_dir(
+        args.dataset,
+        "DiffuRec",
+        args.experiment_run_id,
+        "training" if args.final_train else "tuning",
+    )
     logging.basicConfig(
         level=logging.INFO,
         filename=log_dir / f'{time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())}.log',
@@ -365,7 +371,11 @@ def main(args):
             item for sequence in merged_train.values() for item in sequence
         )
         save_dataset_popularity(args.dataset, args.train_item_popularity)
-        args.experiment_tracker = ExperimentTracker(args.dataset, "DiffuRec")
+        args.experiment_tracker = ExperimentTracker(
+            args.dataset, "DiffuRec",
+            run_id=getattr(args, "experiment_run_id", None),
+            maxlen=args.max_len, run_type="training",
+        )
 
         diffu_rec = create_model_diffu(args)
         model = Att_Diffuse_model(diffu_rec, args).to(args.device)
@@ -377,8 +387,8 @@ def main(args):
         scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
         
         from visualization.plotting import TrainingPlotter
-        plotter = TrainingPlotter(save_dir=args.log_file + args.dataset,
-                                model_name=f"DiffuRec_final_{time.strftime('%Y%m%d_%H%M%S')}",
+        plotter = TrainingPlotter(save_dir=args.experiment_tracker.plot_dir,
+                                model_name=f"{args.experiment_tracker.run_id}__maxlen_{args.max_len}",
                                 metrics=['loss'])
         
         for epoch in range(1, args.epochs+1):

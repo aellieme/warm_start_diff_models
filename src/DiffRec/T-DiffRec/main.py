@@ -57,6 +57,7 @@ if __name__ == '__main__':
     parser.add_argument('--weight_decay', type=float, default=0.0)
     parser.add_argument('--batch_size', type=int, default=400)
     parser.add_argument('--epochs', type=int, default=1000, help='upper epoch limit')
+    parser.add_argument('--patience', type=int, default=25)
     parser.add_argument('--topN', type=str, default='[10, 20, 50, 100]')
     parser.add_argument('--tst_w_val', action='store_true', help='test with validation')
     parser.add_argument('--cuda', action='store_true', help='use CUDA')
@@ -196,17 +197,18 @@ if __name__ == '__main__':
     out_dims = eval(args.dims) + [n_item]
     in_dims = out_dims[::-1]
     model = DNN(in_dims, out_dims, args.emb_size, time_type="cat", norm=args.norm).to(device)
-    checkpoint_payload = lambda: {
-        "model_state_dict": model.state_dict(),
-        "model_kwargs": {
-            "in_dims": in_dims,
-            "out_dims": out_dims,
-            "emb_size": args.emb_size,
-            "time_type": "cat",
-            "norm": args.norm,
-        },
-        "args": vars(args),
-    }
+    def checkpoint_payload(state_dict=None):
+        return {
+            "model_state_dict": model.state_dict() if state_dict is None else state_dict,
+            "model_kwargs": {
+                "in_dims": in_dims,
+                "out_dims": out_dims,
+                "emb_size": args.emb_size,
+                "time_type": "cat",
+                "norm": args.norm,
+            },
+            "args": vars(args),
+        }
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     training_candidate_mask_tensor = torch.as_tensor(
@@ -345,15 +347,21 @@ if __name__ == '__main__':
         )
         return metrics, predicted
 
-    best_recall, best_epoch = -100, 0
+    best_selection_key = None
+    best_epoch = 0
     best_results = None
+    best_state_dict = None
     
+    tracker = ExperimentTracker(
+        args.dataset, "T-DiffRec",
+        run_type="training" if args.final_train else "tuning",
+    )
+    best_model_path = tracker.run_dir / "best_validation.pth"
     plotter = TrainingPlotter(
-            save_dir='./log/' + args.dataset,
-            model_name=f"T-DiffRec_{time.strftime('%Y%m%d_%H%M%S')}",
+            save_dir=tracker.plot_dir,
+            model_name=f"{tracker.run_id}__maxlen_not_applicable",
             metrics=['loss', 'recall@10']
         )
-    tracker = ExperimentTracker(args.dataset, "T-DiffRec")
     popularity_data = (
         protocol_data['train_binary'] + protocol_data['valid_binary']
         if args.final_train else protocol_data['train_binary']
@@ -365,7 +373,7 @@ if __name__ == '__main__':
     print("Start training...")
     for epoch in range(1, args.epochs + 1):
         # Ранняя остановка только если не финальное обучение
-        if not args.final_train and epoch - best_epoch >= 25:
+        if not args.final_train and best_epoch and epoch - best_epoch >= args.patience:
             print('-'*18)
             print('Exiting from training early')
             break
@@ -410,19 +418,24 @@ if __name__ == '__main__':
                 "val_recall@10": valid_results[1][idx10],
                 "val_ndcg@10": valid_results[2][idx10],
                 "val_mrr@10": valid_results[3][idx10],
+                "val_coverage@10": valid_results[4][idx10],
             })
             plotter.plot(save=True, show=False, suffix=f'_epoch{epoch}')
             print_results(None, valid_results, None)
 
-            if recall10 > best_recall:
-                best_recall, best_epoch = recall10, epoch
+            selection_key = (
+                valid_results[1][idx10],
+                valid_results[2][idx10],
+                valid_results[3][idx10],
+                valid_results[4][idx10],
+            )
+            if best_selection_key is None or selection_key > best_selection_key:
+                best_selection_key, best_epoch = selection_key, epoch
                 best_results = valid_results
-
-                if not os.path.exists(args.save_path):
-                    os.makedirs(args.save_path)
-                torch.save(model, '{}{}_lr{}_wd{}_bs{}_dims{}_emb{}_{}_steps{}_scale{}_min{}_max{}_sample{}_reweight{}_wmin{}_wmax{}_{}.pth' \
-                    .format(args.save_path, args.dataset, args.lr, args.weight_decay, args.batch_size, args.dims, args.emb_size, args.mean_type, \
-                    args.steps, args.noise_scale, args.noise_min, args.noise_max, args.sampling_steps, args.reweight, args.w_min, args.w_max, args.log_name))
+                best_state_dict = copy.deepcopy(model.state_dict())
+                save_torch_checkpoint(
+                    checkpoint_payload(best_state_dict), best_model_path
+                )
         
         print("Runing Epoch {:03d} ".format(epoch) + 'train loss {:.4f}'.format(total_loss) + " costs " + time.strftime(
                             "%H: %M: %S", time.gmtime(time.time()-start_time)))
@@ -444,11 +457,15 @@ if __name__ == '__main__':
             'user_id': test_users,
             'recommendations': [list(map(int, rec)) for rec in test_preds]
         })
-        recs_df.to_csv('recommendations.csv', index=False)
-        print("Recommendations saved to recommendations.csv")
+        recommendations_path = tracker.run_dir / "recommendations.csv"
+        recs_df.to_csv(recommendations_path, index=False)
+        print(f"Recommendations saved to {recommendations_path}")
         
         # Выводим таблицу метрик с точностью .6f
         print_table_metrics(test_results, topn_values)
+        final_model_path = checkpoint_path(
+            "T-DiffRec", args.dataset, seed=random_seed, extension=".pth"
+        )
         tracker.log_final_metrics(
             {k: {"recall": test_results[1][i], "ndcg": test_results[2][i],
                  "mrr": test_results[3][i], "coverage": test_results[4][i]}
@@ -457,11 +474,11 @@ if __name__ == '__main__':
             seed=getattr(args, "random_seed", 42), inference_total_sec=inf_time,
             n_users=len(test_preds), maxlen=None,
             ranking_protocol="warm_start_known_catalog_v2",
+            checkpoint=str(final_model_path),
             popularity_bias=recommendation_popularity(test_preds, train_item_popularity, topn_values),
         )
         
         # Сохраняем финальную модель
-        final_model_path = checkpoint_path("T-DiffRec", args.dataset, seed=random_seed, extension=".pth")
         save_torch_checkpoint(checkpoint_payload(), final_model_path)
         print(f"Final model saved to {final_model_path}")
         plotter.plot(save=True, show=False, suffix='_final')
@@ -470,6 +487,31 @@ if __name__ == '__main__':
         exit(0)  #
 
     print("End. Best Epoch {:03d} ".format(best_epoch))
+    if best_state_dict is None:
+        best_epoch = args.epochs
+        best_state_dict = copy.deepcopy(model.state_dict())
+        save_torch_checkpoint(checkpoint_payload(best_state_dict), best_model_path)
+    stable_path = checkpoint_path(
+        "T-DiffRec", args.dataset, seed=random_seed, extension=".pth"
+    )
+    save_torch_checkpoint(checkpoint_payload(best_state_dict), stable_path)
+    selected_metrics = None
+    if best_selection_key is not None:
+        selected_metrics = {
+            "Recall@10": best_selection_key[0],
+            "NDCG@10": best_selection_key[1],
+            "MRR@10": best_selection_key[2],
+            "Coverage@10": best_selection_key[3],
+        }
+    tracker.log_validation_selection(
+        best_epoch,
+        selected_metrics,
+        rule="recall@10_then_ndcg_mrr_coverage",
+        checkpoint=str(stable_path),
+        split="global_temporal_70_10_20",
+        mask_seen=True,
+        seed=random_seed,
+    )
     plotter.plot(save=True, show=False, suffix='_final')
     tracker.close()
     print_results(None, best_results, None)
