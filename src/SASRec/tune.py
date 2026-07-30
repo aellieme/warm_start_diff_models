@@ -147,16 +147,23 @@ def select_validation_checkpoint(
         metrics = validate_last_item_metrics(
             model, val_data, train_data, data_description, topn=10
         )
+        mean_loss = float(np.mean(losses))
         current_key = selection_key(metrics)
         tracker.log_epoch(
             epoch,
-            train_loss=float(np.mean(losses)),
+            train_loss=mean_loss,
             **{
                 "val_recall@10": metrics["recall"],
                 "val_ndcg@10": metrics["ndcg"],
                 "val_mrr@10": metrics["mrr"],
                 "val_coverage@10": metrics["coverage"],
             },
+        )
+        print(
+            f"Epoch {epoch}/{config['num_epochs']}: loss={mean_loss:.4f}, "
+            f"Recall@10={metrics['recall']:.4f}, NDCG@10={metrics['ndcg']:.4f}, "
+            f"MRR@10={metrics['mrr']:.4f}, Coverage@10={metrics['coverage']:.4f}",
+            flush=True,
         )
 
         if best_key is None or current_key > best_key:
@@ -171,6 +178,7 @@ def select_validation_checkpoint(
         else:
             epochs_without_improvement += 1
             if epochs_without_improvement >= patience:
+                print(f"Early stopping at epoch {epoch}", flush=True)
                 break
 
     tracker.log_validation_selection(
