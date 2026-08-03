@@ -20,6 +20,9 @@ def parse_args():
     parser.add_argument("--max_epochs", type=int, default=250)
     parser.add_argument("--patience", type=int, default=4)
     parser.add_argument("--random_seed", type=int, default=42)
+    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--hidden_size", type=int, default=128)
+    parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument(
         "--device",
         default="cuda:0" if torch.cuda.is_available() else "cpu",
@@ -42,6 +45,12 @@ def selection_command(args):
         str(args.patience),
         "--random_seed",
         str(args.random_seed),
+        "--batch_size",
+        str(args.batch_size),
+        "--hidden_size",
+        str(args.hidden_size),
+        "--lr",
+        str(args.lr),
         "--device",
         args.device,
         "--metric_ks",
