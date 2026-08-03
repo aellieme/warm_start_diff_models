@@ -23,6 +23,8 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--hidden_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=0.001)
+    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--emb_dropout", type=float, default=0.3)
     parser.add_argument(
         "--device",
         default="cuda:0" if torch.cuda.is_available() else "cpu",
@@ -51,6 +53,10 @@ def selection_command(args):
         str(args.hidden_size),
         "--lr",
         str(args.lr),
+        "--dropout",
+        str(args.dropout),
+        "--emb_dropout",
+        str(args.emb_dropout),
         "--device",
         args.device,
         "--metric_ks",
