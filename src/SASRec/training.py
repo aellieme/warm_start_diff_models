@@ -13,7 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from visualization.plotting import TrainingPlotter
 from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path,
-                                                  save_torch_checkpoint)
+                                                  save_torch_checkpoint, capture_rng_state,
+                                                  restore_rng_state)
 
 def random_neq(l, r, s, random_state):
     t = random_state.randint(l, r)
@@ -248,7 +249,8 @@ def validate_last_item_metrics(model, val_data, train_data, data_description, to
     }
 
 def build_final_sasrec_model(
-    config, train_val_data, data_description, num_epochs=None, tracker=None, data_index=None
+    config, train_val_data, data_description, num_epochs=None, tracker=None, data_index=None,
+    resume_checkpoint=None,
 ):
     if num_epochs is None:
         num_epochs = config['num_epochs']
@@ -268,7 +270,16 @@ def build_final_sasrec_model(
         metrics=['loss']           
     )
 
-    for epoch in tqdm(range(num_epochs), desc='Final training'):
+    start_epoch = 0
+    if resume_checkpoint:
+        resume = torch.load(resume_checkpoint, map_location=device)
+        model.load_state_dict(resume["model_state_dict"])
+        optimizer.load_state_dict(resume["optimizer_state_dict"])
+        start_epoch = int(resume["next_epoch"])
+        restore_rng_state(resume.get("rng_state"))
+        print(f"Resuming from epoch {start_epoch}")
+
+    for epoch in tqdm(range(start_epoch, num_epochs), desc='Final training'):
         epoch_loss = train_sasrec_epoch(
             model, n_batches, config['l2_emb'], sampler, optimizer, criterion, device
         )
@@ -278,10 +289,14 @@ def build_final_sasrec_model(
             tracker.log_epoch(epoch, train_loss=avg_loss)
             if checkpoint_due(epoch, num_epochs):
                 path = checkpoint_path(
-                    "SASRec", tracker.dataset, config["maxlen"], config.get("manual_seed", 42)
+                    "SASRec", tracker.dataset, config["maxlen"], config.get("manual_seed", 42),
+                    extension=".resume.pt",
                 )
                 save_torch_checkpoint({
                     "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "next_epoch": epoch + 1,
+                    "rng_state": capture_rng_state(),
                     "config": config,
                     "data_description": data_description,
                     "data_index": data_index,

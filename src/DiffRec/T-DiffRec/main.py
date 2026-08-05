@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from visualization.plotting import TrainingPlotter
 from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path,
                                                   recommendation_popularity, save_dataset_popularity,
+                                                  capture_rng_state, restore_rng_state,
                                                   save_torch_checkpoint)
 
 import random
@@ -58,6 +59,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=400)
     parser.add_argument('--epochs', type=int, default=1000, help='upper epoch limit')
     parser.add_argument('--patience', type=int, default=25)
+    parser.add_argument('--resume_checkpoint', type=str, default=None)
     parser.add_argument('--topN', type=str, default='[10, 20, 50, 100]')
     parser.add_argument('--tst_w_val', action='store_true', help='test with validation')
     parser.add_argument('--cuda', action='store_true', help='use CUDA')
@@ -351,6 +353,7 @@ if __name__ == '__main__':
     best_epoch = 0
     best_results = None
     best_state_dict = None
+    start_epoch = 1
     
     tracker = ExperimentTracker(
         args.dataset, "T-DiffRec",
@@ -369,9 +372,21 @@ if __name__ == '__main__':
     train_item_counts = np.asarray(popularity_data.sum(axis=0)).ravel()
     train_item_popularity = {i: int(v) for i, v in enumerate(train_item_counts) if v > 0}
     save_dataset_popularity(args.dataset, train_item_popularity)
+
+    if args.resume_checkpoint:
+        resume = torch.load(args.resume_checkpoint, map_location=device)
+        model.load_state_dict(resume["model_state_dict"])
+        optimizer.load_state_dict(resume["optimizer_state_dict"])
+        start_epoch = int(resume["next_epoch"])
+        best_selection_key = resume.get("best_selection_key")
+        best_epoch = int(resume.get("best_epoch", 0))
+        best_results = resume.get("best_results")
+        best_state_dict = resume.get("best_state_dict")
+        restore_rng_state(resume.get("rng_state"))
+        print(f"Resuming from epoch {start_epoch}")
     
     print("Start training...")
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(start_epoch, args.epochs + 1):
         # Ранняя остановка только если не финальное обучение
         if not args.final_train and best_epoch and epoch - best_epoch >= args.patience:
             print('-'*18)
@@ -401,10 +416,6 @@ if __name__ == '__main__':
         avg_loss = (total_loss / len(train_loader)).item()
         plotter.update(epoch=epoch, loss=avg_loss)
         tracker.log_epoch(epoch, train_loss=avg_loss)
-        if checkpoint_due(epoch - 1, args.epochs):
-            periodic_path = checkpoint_path("T-DiffRec", args.dataset, seed=random_seed, extension=".pth")
-            save_torch_checkpoint(checkpoint_payload(), periodic_path)
-        
         # Валидация и сохранение модели только при обычном обучении (не final_train)
         if not args.final_train and epoch % 5 == 0:
             valid_results, _ = evaluate_last_item(
@@ -436,6 +447,20 @@ if __name__ == '__main__':
                 save_torch_checkpoint(
                     checkpoint_payload(best_state_dict), best_model_path
                 )
+
+        if checkpoint_due(epoch - 1, args.epochs):
+            periodic_path = checkpoint_path("T-DiffRec", args.dataset, seed=random_seed, extension=".resume.pth")
+            payload = checkpoint_payload()
+            payload.update({
+                "optimizer_state_dict": optimizer.state_dict(),
+                "next_epoch": epoch + 1,
+                "best_selection_key": best_selection_key,
+                "best_epoch": best_epoch,
+                "best_results": best_results,
+                "best_state_dict": best_state_dict,
+                "rng_state": capture_rng_state(),
+            })
+            save_torch_checkpoint(payload, periodic_path)
         
         print("Runing Epoch {:03d} ".format(epoch) + 'train loss {:.4f}'.format(total_loss) + " costs " + time.strftime(
                             "%H: %M: %S", time.gmtime(time.time()-start_time)))

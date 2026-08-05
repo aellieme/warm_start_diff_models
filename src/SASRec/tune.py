@@ -11,6 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from experiment_tools.experiment_tracking import (
     ExperimentTracker,
+    capture_rng_state,
+    checkpoint_due,
+    restore_rng_state,
     save_torch_checkpoint,
 )
 from load_evaluate_pipeline import prepare_data_and_description
@@ -121,6 +124,7 @@ def select_validation_checkpoint(
     data_index,
     tracker,
     patience,
+    resume_checkpoint=None,
 ):
     fix_random_seed(config["manual_seed"])
     model, sampler, n_batches, criterion, optimizer = prepare_sasrec_model(
@@ -133,8 +137,23 @@ def select_validation_checkpoint(
     best_epoch = None
     best_path = tracker.run_dir / "best_validation.pt"
     epochs_without_improvement = 0
+    start_epoch = 1
 
-    for epoch in range(1, config["num_epochs"] + 1):
+    if resume_checkpoint:
+        resume = torch.load(resume_checkpoint, map_location=device)
+        model.load_state_dict(resume["model_state_dict"])
+        optimizer.load_state_dict(resume["optimizer_state_dict"])
+        start_epoch = int(resume["next_epoch"])
+        best_key = resume.get("best_key")
+        best_metrics = resume.get("best_metrics")
+        best_epoch = resume.get("best_epoch")
+        epochs_without_improvement = int(resume.get("epochs_without_improvement", 0))
+        restore_rng_state(resume.get("rng_state"))
+        if resume.get("best_checkpoint"):
+            best_path = Path(resume["best_checkpoint"])
+        print(f"Resuming from epoch {start_epoch}", flush=True)
+
+    for epoch in range(start_epoch, config["num_epochs"] + 1):
         losses = train_sasrec_epoch(
             model,
             n_batches,
@@ -177,9 +196,25 @@ def select_validation_checkpoint(
             )
         else:
             epochs_without_improvement += 1
-            if epochs_without_improvement >= patience:
-                print(f"Early stopping at epoch {epoch}", flush=True)
-                break
+
+        if checkpoint_due(epoch - 1, config["num_epochs"]):
+            resume_path = tracker.run_dir / "resume.pt"
+            payload = checkpoint_payload(model, config, data_description, data_index)
+            payload.update({
+                "optimizer_state_dict": optimizer.state_dict(),
+                "next_epoch": epoch + 1,
+                "best_key": best_key,
+                "best_metrics": best_metrics,
+                "best_epoch": best_epoch,
+                "epochs_without_improvement": epochs_without_improvement,
+                "best_checkpoint": str(best_path),
+                "rng_state": capture_rng_state(),
+            })
+            save_torch_checkpoint(payload, resume_path)
+
+        if epochs_without_improvement >= patience:
+            print(f"Early stopping at epoch {epoch}", flush=True)
+            break
 
     tracker.log_validation_selection(
         best_epoch,
@@ -220,6 +255,7 @@ def parse_args():
     parser.add_argument("--max_epochs", type=int, default=250)
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--resume_checkpoint", default=None)
     return parser.parse_args()
 
 
@@ -253,6 +289,7 @@ def main():
             data_index,
             selection_tracker,
             args.patience,
+            args.resume_checkpoint,
         )
     )
     selection_tracker.close()

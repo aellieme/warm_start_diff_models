@@ -18,7 +18,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from visualization.plotting import TrainingPlotter
 from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path, popularity_from_sequences,
-                                 recommendation_popularity, save_dataset_popularity)
+                                                   recommendation_popularity, save_dataset_popularity,
+                                                   capture_rng_state, restore_rng_state)
 from experiment_tools.experiment_tracking import save_torch_checkpoint
 
 def downvote_seen_items(scores, hist_pad):
@@ -182,8 +183,28 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
     selected_metrics = None
     evaluations_without_improvement = 0
     best_model = None
+    start_epoch = 0
 
-    for epoch_temp in range(epochs):
+    if args.resume_checkpoint:
+        resume = torch.load(args.resume_checkpoint, map_location=device)
+        model_joint.load_state_dict(resume["model_state_dict"])
+        optimizer.optim.load_state_dict(resume["optimizer_state_dict"])
+        lr_scheduler.load_state_dict(resume["scheduler_state_dict"])
+        start_epoch = int(resume["next_epoch"])
+        best_selection_key = resume.get("best_selection_key")
+        selected_epoch = resume.get("selected_epoch")
+        selected_metrics = resume.get("selected_metrics")
+        evaluations_without_improvement = int(resume.get("evaluations_without_improvement", 0))
+        restore_rng_state(resume.get("rng_state"))
+        best_state_dict = resume.get("best_model_state_dict")
+        if best_state_dict is not None:
+            best_model = copy.deepcopy(model_joint)
+            best_model.load_state_dict(best_state_dict)
+        if start_epoch > 5 and args.model == 'adrec':
+            model_joint.item_embedding.weight.requires_grad = True
+        print(f"Resuming from epoch {start_epoch}")
+
+    for epoch_temp in range(start_epoch, epochs):
         model_joint.train()
         if epoch_temp == 5 and args.model == 'adrec':
             print(f'warm up finished in epoch {epoch_temp}')
@@ -218,13 +239,25 @@ def model_train(model_joint, tra_data_loader, val_data_loader, test_data_loader,
         avg_loss = sum(ce_losses) / len(ce_losses)
         plotter.update(epoch=epoch_temp, loss=avg_loss)
         tracker.log_epoch(epoch_temp, train_loss=avg_loss, diffusion_loss=sum(dif_losses) / len(dif_losses))
+        lr_scheduler.step()
         if checkpoint_due(epoch_temp, epochs):
             periodic_path = checkpoint_path(
-                "ADRec", args.dataset, getattr(args, "max_len", None), args.random_seed, ".pth"
+                "ADRec", args.dataset, getattr(args, "max_len", None), args.random_seed, ".resume.pth"
             )
             saved_args = {key: value for key, value in vars(args).items() if key != "experiment_tracker"}
-            save_torch_checkpoint({"model_state_dict": model_joint.state_dict(), "args": saved_args}, periodic_path)
-        lr_scheduler.step()
+            save_torch_checkpoint({
+                "model_state_dict": model_joint.state_dict(),
+                "optimizer_state_dict": optimizer.optim.state_dict(),
+                "scheduler_state_dict": lr_scheduler.state_dict(),
+                "next_epoch": epoch_temp + 1,
+                "best_model_state_dict": best_model.state_dict() if best_model is not None else None,
+                "best_selection_key": best_selection_key,
+                "selected_epoch": selected_epoch,
+                "selected_metrics": selected_metrics,
+                "evaluations_without_improvement": evaluations_without_improvement,
+                "rng_state": capture_rng_state(),
+                "args": saved_args,
+            }, periodic_path)
         # plotter.plot(save=True, show=False, suffix=f'_epoch{epoch_temp}')
 
         if epoch_temp != 0 and epoch_temp % args.eval_interval == 0:

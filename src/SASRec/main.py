@@ -33,6 +33,7 @@ def main():
                                  'amazon_Sports_and_Outdoors', 'amazon_Toys_and_Games'])
     parser.add_argument('--maxlen', type=int, default=None, help='Override maxlen')
     parser.add_argument('--num_epochs', type=int, default=None, help='Override num_epochs')
+    parser.add_argument('--resume_checkpoint', default=None)
     args = parser.parse_args()
 
     # Получаем все данные, включая train_val_data (80% до T_test)
@@ -95,6 +96,7 @@ def main():
     model = build_final_sasrec_model(
         config, train_val_data, data_description,
         num_epochs=config['num_epochs'], tracker=tracker, data_index=data_index,
+        resume_checkpoint=args.resume_checkpoint,
     )
 
     log_dir = tracker.plot_dir

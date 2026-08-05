@@ -66,10 +66,24 @@ class SeqRecBase(pl.LightningModule):
 
         preds, scores = self.make_prediction(batch)
         metrics = self.compute_val_metrics(batch['target'], preds)
+        self._validation_recommended_items.update(
+            preds.detach().reshape(-1).cpu().tolist()
+        )
 
         self.log("val_ndcg", metrics['ndcg'], prog_bar=True)
         self.log("val_hit_rate", metrics['hit_rate'], prog_bar=True)
         self.log("val_mrr", metrics['mrr'], prog_bar=True)
+
+    def on_validation_epoch_start(self):
+        self._validation_recommended_items = set()
+
+    def on_validation_epoch_end(self):
+        catalogue_size = int(self.candidate_item_ids.numel())
+        coverage = (
+            len(self._validation_recommended_items) / catalogue_size
+            if catalogue_size else 0.0
+        )
+        self.log("val_coverage", coverage, prog_bar=True)
 
     def make_prediction(self, batch):
 

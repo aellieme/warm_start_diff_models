@@ -63,3 +63,4 @@ generation: true
 
 final_train: false
 final_epochs: 150
+resume_checkpoint: null

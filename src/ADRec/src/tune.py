@@ -25,6 +25,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--emb_dropout", type=float, default=0.3)
+    parser.add_argument("--resume_checkpoint", default=None)
     parser.add_argument(
         "--device",
         default="cuda:0" if torch.cuda.is_available() else "cpu",
@@ -34,7 +35,7 @@ def parse_args():
 
 
 def selection_command(args):
-    return [
+    command = [
         sys.executable,
         "main.py",
         "--dataset",
@@ -66,6 +67,9 @@ def selection_command(args):
         "--mask_seen",
         "True",
     ]
+    if args.resume_checkpoint:
+        command.extend(["--resume_checkpoint", args.resume_checkpoint])
+    return command
 
 
 def latest_selection(dataset, previous):

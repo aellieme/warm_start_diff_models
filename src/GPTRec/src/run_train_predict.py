@@ -428,6 +428,7 @@ class PlottingCallback(Callback):
                 "val_recall@10": val_recall,
                 "val_ndcg@10": metrics.get("val_ndcg"),
                 "val_mrr@10": metrics.get("val_mrr"),
+                "val_coverage@10": metrics.get("val_coverage"),
             })
         if (epoch % self.save_every == 0) or (epoch == trainer.max_epochs - 1):
             self.plotter.plot(save=True, show=False)
@@ -454,8 +455,16 @@ def training(model, train_loader, eval_loader, config, tracker=None):
         mode="max",
         save_weights_only=True,
     )
+    resume_checkpoint = ModelCheckpoint(
+        dirpath=(tracker.run_dir / "checkpoints" if tracker is not None else None),
+        filename="resume-{epoch:03d}",
+        every_n_epochs=25,
+        save_top_k=1,
+        save_last=False,
+        save_weights_only=False,
+    )
     progress_bar = TQDMProgressBar(refresh_rate=100)
-    callbacks=[early_stopping, model_summary, checkpoint, progress_bar]
+    callbacks=[early_stopping, model_summary, checkpoint, resume_checkpoint, progress_bar]
 
     from datetime import datetime
 
@@ -478,7 +487,9 @@ def training(model, train_loader, eval_loader, config, tracker=None):
 
     trainer.fit(model=seqrec_module,
             train_dataloaders=train_loader,
-            val_dataloaders=eval_loader)
+            val_dataloaders=eval_loader,
+            ckpt_path=config.get("resume_checkpoint"),
+    )
 
     selected_checkpoint = torch.load(checkpoint.best_model_path)
     seqrec_module.load_state_dict(selected_checkpoint['state_dict'])
@@ -782,18 +793,30 @@ def final_training(model, train_loader, config, tracker=None):
 
     loss_callback = FinalLossCallback(plotter, tracker=tracker)
     progress_bar = TQDMProgressBar(refresh_rate=100)
+    resume_checkpoint = ModelCheckpoint(
+        dirpath=(tracker.run_dir / "checkpoints" if tracker is not None else None),
+        filename="resume-{epoch:03d}",
+        every_n_epochs=25,
+        save_top_k=1,
+        save_last=False,
+        save_weights_only=False,
+    )
 
     trainer_params = dict(config.get('trainer_params', {}))
     trainer_params.pop('max_epochs', None)
 
     trainer = pl.Trainer(
-        callbacks=[progress_bar, loss_callback],
+        callbacks=[progress_bar, loss_callback, resume_checkpoint],
         max_epochs=config.get('final_epochs', 80),
-        enable_checkpointing=False,
+        enable_checkpointing=True,
         **trainer_params
     )
 
-    trainer.fit(model=seqrec_module, train_dataloaders=train_loader)
+    trainer.fit(
+        model=seqrec_module,
+        train_dataloaders=train_loader,
+        ckpt_path=config.get("resume_checkpoint"),
+    )
 
     plotter.plot(save=True, show=False)
     print(f"График сохранён в: {plotter.save_dir}") 

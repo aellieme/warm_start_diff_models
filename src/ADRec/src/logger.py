@@ -130,6 +130,7 @@ def cmdline_args():
     parser.add_argument('--geodesic', type=str2bool)
     parser.add_argument('--mask_seen', type=str2bool, help='Mask seen items')
     parser.add_argument('--final', action='store_true', help='Use train+val for final training')
+    parser.add_argument('--resume_checkpoint', type=str, default=None)
     # 解析命令行参数
     args = parser.parse_args()
 
