@@ -429,6 +429,7 @@ class PlottingCallback(Callback):
                 "val_ndcg@10": metrics.get("val_ndcg"),
                 "val_mrr@10": metrics.get("val_mrr"),
                 "val_coverage@10": metrics.get("val_coverage"),
+                "val_balanced_score@10": metrics.get("val_balanced_score"),
             })
         if (epoch % self.save_every == 0) or (epoch == trainer.max_epochs - 1):
             self.plotter.plot(save=True, show=False)
@@ -444,7 +445,7 @@ def training(model, train_loader, eval_loader, config, tracker=None):
     elif config.model == 'BERT4Rec':
         seqrec_module = SeqRec(model, **module_kwargs)
 
-    early_stopping = EarlyStopping(monitor="val_ndcg", mode="max",
+    early_stopping = EarlyStopping(monitor="val_balanced_score", mode="max",
                                    patience=config.patience, verbose=False)
     model_summary = ModelSummary(max_depth=4)
     checkpoint = ModelCheckpoint(
@@ -452,6 +453,14 @@ def training(model, train_loader, eval_loader, config, tracker=None):
         filename="best-validation-{epoch:03d}-{val_ndcg:.6f}",
         save_top_k=1,
         monitor="val_ndcg",
+        mode="max",
+        save_weights_only=True,
+    )
+    balanced_checkpoint = ModelCheckpoint(
+        dirpath=(tracker.run_dir / "checkpoints" if tracker is not None else None),
+        filename="best-balanced-{epoch:03d}-{val_balanced_score:.6f}",
+        save_top_k=1,
+        monitor="val_balanced_score",
         mode="max",
         save_weights_only=True,
     )
@@ -464,7 +473,8 @@ def training(model, train_loader, eval_loader, config, tracker=None):
         save_weights_only=False,
     )
     progress_bar = TQDMProgressBar(refresh_rate=100)
-    callbacks=[early_stopping, model_summary, checkpoint, resume_checkpoint, progress_bar]
+    callbacks=[early_stopping, model_summary, checkpoint, balanced_checkpoint,
+               resume_checkpoint, progress_bar]
 
     from datetime import datetime
 
@@ -491,12 +501,12 @@ def training(model, train_loader, eval_loader, config, tracker=None):
             ckpt_path=config.get("resume_checkpoint"),
     )
 
-    selected_checkpoint = torch.load(checkpoint.best_model_path)
+    selected_checkpoint = torch.load(balanced_checkpoint.best_model_path)
     seqrec_module.load_state_dict(selected_checkpoint['state_dict'])
     trainer.selected_epoch = int(
         selected_checkpoint.get('epoch', trainer.current_epoch)
     ) + 1
-    trainer.selected_checkpoint = checkpoint.best_model_path
+    trainer.selected_checkpoint = balanced_checkpoint.best_model_path
 
     return trainer, seqrec_module
 

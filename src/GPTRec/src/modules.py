@@ -2,6 +2,7 @@
 Pytorch Lightning Modules.
 """
 from collections import Counter
+import math
 
 import numpy as np
 import pytorch_lightning as pl
@@ -66,6 +67,9 @@ class SeqRecBase(pl.LightningModule):
 
         preds, scores = self.make_prediction(batch)
         metrics = self.compute_val_metrics(batch['target'], preds)
+        batch_size = int(batch['target'].shape[0])
+        self._validation_ndcg_sum += metrics['ndcg'] * batch_size
+        self._validation_user_count += batch_size
         self._validation_recommended_items.update(
             preds.detach().reshape(-1).cpu().tolist()
         )
@@ -76,6 +80,8 @@ class SeqRecBase(pl.LightningModule):
 
     def on_validation_epoch_start(self):
         self._validation_recommended_items = set()
+        self._validation_ndcg_sum = 0.0
+        self._validation_user_count = 0
 
     def on_validation_epoch_end(self):
         catalogue_size = int(self.candidate_item_ids.numel())
@@ -83,7 +89,13 @@ class SeqRecBase(pl.LightningModule):
             len(self._validation_recommended_items) / catalogue_size
             if catalogue_size else 0.0
         )
+        ndcg = (
+            self._validation_ndcg_sum / self._validation_user_count
+            if self._validation_user_count else 0.0
+        )
+        balanced_score = (ndcg ** 0.8) * (coverage ** 0.2)
         self.log("val_coverage", coverage, prog_bar=True)
+        self.log("val_balanced_score", balanced_score, prog_bar=True)
 
     def make_prediction(self, batch):
 
