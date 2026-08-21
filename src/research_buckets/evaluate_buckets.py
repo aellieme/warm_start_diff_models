@@ -72,6 +72,61 @@ def evaluate_bucketed_hr(
     }
 
 
+def evaluate_bucketed_coverage(
+    predictions: Sequence,
+    bucket_by_item: Mapping[Hashable, str],
+    ks: Iterable[int],
+    candidate_items: Iterable[Hashable],
+) -> dict[str, dict]:
+    metric_ks = list(ks)
+    if not metric_ks:
+        raise ValueError("ks must not be empty")
+    if len(metric_ks) != len(set(metric_ks)):
+        raise ValueError("ks must not contain duplicates")
+    if any(not isinstance(k, int) or isinstance(k, bool) or k <= 0 for k in metric_ks):
+        raise ValueError("every k must be a positive integer")
+
+    unknown_buckets = set(bucket_by_item.values()) - set(BUCKET_NAMES)
+    if unknown_buckets:
+        raise ValueError(f"unknown bucket names: {sorted(unknown_buckets)}")
+
+    candidates = set(candidate_items)
+    if candidates - set(bucket_by_item):
+        raise ValueError("every candidate item must have a popularity bucket")
+
+    catalog_by_bucket = {
+        bucket: {item for item in candidates if bucket_by_item[item] == bucket}
+        for bucket in BUCKET_NAMES
+    }
+    recommended = {
+        bucket: {k: set() for k in metric_ks}
+        for bucket in BUCKET_NAMES
+    }
+
+    for raw_predictions in predictions:
+        recommendations = (
+            raw_predictions.tolist()
+            if hasattr(raw_predictions, "tolist")
+            else list(raw_predictions)
+        )
+        for k in metric_ks:
+            for item in recommendations[:k]:
+                if item in candidates:
+                    recommended[bucket_by_item[item]][k].add(item)
+
+    return {
+        bucket: {
+            "coverage": {
+                k: len(recommended[bucket][k]) / len(catalog_by_bucket[bucket])
+                if catalog_by_bucket[bucket]
+                else 0.0
+                for k in metric_ks
+            },
+        }
+        for bucket in BUCKET_NAMES
+    }
+
+
 def print_bucketed_hr(results: Mapping[str, dict]) -> None:
     ks = list(results["tail"]["hr"])
     header = f"{'bucket':<8} {'num_cases':<12}" + "".join(
