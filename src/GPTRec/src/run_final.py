@@ -53,7 +53,7 @@ def objective(trial):
     model = create_model(cfg, item_count=item_count)
     trainer, seqrec_module = training(model, train_loader, eval_loader, cfg)
 
-    val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
+    val_last = validation.sort_values('time_idx', kind='mergesort').groupby('user_id').last().reset_index()
     recs = predict(
         trainer, seqrec_module,
         train,
@@ -129,7 +129,7 @@ recs = predict(
     last_evaluation=True,
 )
 
-test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
+test_last = test.sort_values('time_idx', kind='mergesort').groupby('user_id').last().reset_index()
 metrics = evaluate(recs, test_last, train_val, final_cfg, prefix='test_last')
 print("Final test metrics:", metrics)
 

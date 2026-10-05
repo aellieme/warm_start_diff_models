@@ -54,7 +54,7 @@ def run_trial(config, tracker=None):
         output_dir=tracker.run_dir,
     )
     validation_last = (
-        validation.sort_values("time_idx")
+        validation.sort_values("time_idx", kind="mergesort")
         .groupby("user_id")
         .last()
         .reset_index()

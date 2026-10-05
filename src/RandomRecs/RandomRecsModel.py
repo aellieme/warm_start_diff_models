@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from experiment_tools.experiment_tracking import ExperimentTracker, recommendation_popularity, save_dataset_popularity
-from experiment_tools.warm_start import build_last_item_examples
+from experiment_tools.warm_start import build_last_item_examples, load_movielens
 from research_buckets.evaluate_buckets import evaluate_bucketed_hr, print_bucketed_hr
 from research_buckets.popularity_buckets import build_popularity_buckets
 
@@ -21,11 +21,7 @@ random.seed(42)
 np.random.seed(42)
 
 def load_movielens_local(data_dir='../data/info'):
-    ratings_path = os.path.join(data_dir, 'ratings.dat')
-    if not os.path.exists(ratings_path):
-        raise FileNotFoundError(f"ratings.dat not found at {ratings_path}")
-    df = pd.read_csv(ratings_path, sep='::', engine='python',
-                     names=['userid', 'movieid', 'rating', 'timestamp'])
+    df = load_movielens(data_dir)
     df = df[['userid', 'movieid', 'timestamp']]
     user_enc = LabelEncoder()
     item_enc = LabelEncoder()
@@ -65,7 +61,7 @@ def load_amazon(dataset_name, data_dir='../data/amazon'):
     return df
 
 def global_temporal_split(df, train_ratio=0.7, val_ratio=0.1):
-    df = df.sort_values('timestamp').reset_index(drop=True)
+    df = df.sort_values('timestamp', kind='mergesort').reset_index(drop=True)
     total = len(df)
     train_cutoff = df['timestamp'].quantile(train_ratio)
     val_cutoff   = df['timestamp'].quantile(train_ratio + val_ratio)

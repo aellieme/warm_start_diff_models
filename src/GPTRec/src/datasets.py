@@ -21,7 +21,7 @@ class LMDataset(Dataset):
         self.time_col = time_col
         self.candidate_items = sorted({int(item) for item in df[item_col].unique()})
 
-        self.data = df.sort_values(time_col).groupby(user_col)[item_col].agg(list).to_dict()
+        self.data = df.sort_values(time_col, kind='mergesort').groupby(user_col)[item_col].agg(list).to_dict()
         self.user_ids = list(self.data.keys())
 
         if num_negatives:
@@ -242,8 +242,8 @@ class LastEvaluationDataset(Dataset):
         self.time_col = time_col
         
         # группируем train и test последовательности по пользователям
-        train_seqs = train_data.sort_values(time_col).groupby(user_col)[item_col].agg(list).to_dict()
-        test_seqs = test_data.sort_values(time_col).groupby(user_col)[item_col].agg(list).to_dict()
+        train_seqs = train_data.sort_values(time_col, kind='mergesort').groupby(user_col)[item_col].agg(list).to_dict()
+        test_seqs = test_data.sort_values(time_col, kind='mergesort').groupby(user_col)[item_col].agg(list).to_dict()
         candidate_items = set(train_data[item_col].unique().tolist())
         
         self.samples = []

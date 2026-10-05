@@ -21,7 +21,6 @@ from torch import nn
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 import torch
-from polara import get_movielens_data
 
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
@@ -30,6 +29,7 @@ from transformers import GPT2Config, GPT2LMHeadModel, BertConfig, BertModel
 from pytorch_lightning.callbacks import Callback
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from experiment_tools.warm_start import load_movielens
 from visualization.plotting import TrainingPlotter
 from experiment_tools.experiment_tracking import (ExperimentTracker, checkpoint_due, checkpoint_path,
                                                   recommendation_popularity, save_dataset_popularity,
@@ -100,7 +100,7 @@ def main(config):
 
         history_before_test = pd.concat([train, validation], ignore_index=True)
         history_before_test = add_time_idx(history_before_test)
-        test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
+        test_last = test.sort_values('time_idx', kind='mergesort').groupby('user_id').last().reset_index()
         train_val_items_df = pd.concat([train, validation], ignore_index=True)
         recommendations_by_k = None
         if is_relevance_aggregation(config):
@@ -211,7 +211,7 @@ def main(config):
 
         # Non-final runs are validation-only.  ``test_metrics`` is retained in
         # old configs for CLI compatibility but cannot expose the test split.
-        val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
+        val_last = validation.sort_values('time_idx', kind='mergesort').groupby('user_id').last().reset_index()
         if is_relevance_aggregation(config):
             select_relevance_aggregation_temperature(
                 trainer, seqrec_module, train, validation, config,
@@ -291,7 +291,7 @@ def prepare_data(config):
     dataset_name = config.get('dataset_name', 'ml-1m')
     
     if dataset_name == 'ml-1m':
-        data = get_movielens_data(include_time=True)
+        data = load_movielens()
         data = data.rename(columns={'userid': 'user_id', 'movieid': 'item_id'})
         # унифицируем индексацию (item_id с 1)
         data['user_id'] = pd.Categorical(data['user_id']).codes
@@ -300,7 +300,7 @@ def prepare_data(config):
         amazon_data_dir = config.get('amazon_data_dir', '../data/amazon')
         data = load_amazon(dataset_name, amazon_data_dir)
     
-    # data = get_movielens_data(include_time=True)   
+    # data = load_movielens()   
     # data = data.rename(columns={'userid': 'user_id', 'movieid': 'item_id'})
     
     
@@ -310,7 +310,7 @@ def prepare_data(config):
     ratios = getattr(config, 'split_ratios', [0.7, 0.1, 0.2])
     assert len(ratios) == 3 #and abs(sum(ratios) - 1.0) < 1e-6
 
-    data = data.sort_values(global_time_col)
+    data = data.sort_values(global_time_col, kind='mergesort')
     
 
     time_values = data[global_time_col]
@@ -696,7 +696,7 @@ def select_relevance_aggregation_temperature(
 
     selection_k = int(config.get("ra_temperature_selection_k", 10))
     validation_last = (
-        validation.sort_values("time_idx").groupby("user_id").last().reset_index()
+        validation.sort_values("time_idx", kind="mergesort").groupby("user_id").last().reset_index()
     )
     scores = {}
     seed = int(config.get("seed", 42))

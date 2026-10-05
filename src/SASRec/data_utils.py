@@ -32,7 +32,7 @@ def data_to_sequences(data, data_description):
     itemid = data_description['items']
     order = data_description['order']
     sequences = (
-        data.sort_values([userid, order])
+        data.sort_values(order, kind='mergesort')
         .groupby(userid, sort=False)[itemid].apply(list)
     )
     return sequences

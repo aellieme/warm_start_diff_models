@@ -45,7 +45,7 @@ def main(config):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(config.cuda_visible_devices)
 
     train, validation, test, item_count = prepare_data(config)
-    test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
+    test_last = test.sort_values('time_idx', kind='mergesort').groupby('user_id').last().reset_index()
 
     model = create_model(config, item_count=item_count)
     model_checkpoint = Path(config.model_checkpoint)
@@ -95,13 +95,13 @@ def main(config):
     # oценка baseline на test
     if config.get('test_metrics', True):
         # metrics_baseline = evaluate(recs, test, train, config, prefix='test')
-        test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
+        test_last = test.sort_values('time_idx', kind='mergesort').groupby('user_id').last().reset_index()
         metrics_baseline = evaluate(
             recs, test_last, history_before_test, config, prefix='test_last'
         )
     else:
         # metrics_baseline = evaluate(recs, validation, train, config, prefix='val')
-        val_last = validation.sort_values('time_idx').groupby('user_id').last().reset_index()
+        val_last = validation.sort_values('time_idx', kind='mergesort').groupby('user_id').last().reset_index()
         metrics_baseline = evaluate(recs, val_last, train, config, prefix='val_last')
         
         

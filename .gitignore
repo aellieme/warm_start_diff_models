@@ -227,3 +227,8 @@ src/data
 .matplotlib_test_cache
 /exp_results/
 /tmp/
+!/tests/
+/tests/*
+!/tests/test_dataset_consistency.py
+!/tests/test_demo_notebooks.py
+/tests/

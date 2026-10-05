@@ -34,6 +34,9 @@ def main():
     parser.add_argument('--maxlen', type=int, default=None, help='Override maxlen')
     parser.add_argument('--num_epochs', type=int, default=None, help='Override num_epochs')
     parser.add_argument('--resume_checkpoint', default=None)
+    for name, kind in [('hidden_units', int), ('dropout_rate', float), ('num_blocks', int),
+                       ('num_heads', int), ('batch_size', int), ('learning_rate', float), ('l2_emb', float)]:
+        parser.add_argument('--' + name, type=kind, default=None)
     args = parser.parse_args()
 
     # Получаем все данные, включая train_val_data (80% до T_test)
@@ -85,6 +88,9 @@ def main():
         config['maxlen'] = args.maxlen
     if args.num_epochs is not None:
         config['num_epochs'] = args.num_epochs
+    for name in ('hidden_units', 'dropout_rate', 'num_blocks', 'num_heads', 'batch_size', 'learning_rate', 'l2_emb'):
+        if getattr(args, name) is not None:
+            config[name] = getattr(args, name)
 
     print("Training SASRec on train+val (80%)...")
     # Используем build_final_sasrec_model – она обучает на всех переданных данных без валидации

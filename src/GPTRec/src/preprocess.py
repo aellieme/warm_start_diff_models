@@ -7,7 +7,7 @@ def add_time_idx(df, user_col='user_id', timestamp_col='timestamp', sort=True):
     """Add time index to interactions dataframe."""
 
     if sort:
-        df = df.sort_values([user_col, timestamp_col])
+        df = df.sort_values([user_col, timestamp_col], kind='mergesort')
 
     df['time_idx'] = df.groupby(user_col).cumcount()
     df['time_idx_reversed'] = df.groupby(user_col).cumcount(ascending=False)

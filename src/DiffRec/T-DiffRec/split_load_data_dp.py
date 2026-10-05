@@ -3,7 +3,6 @@ import sys
 import json
 import numpy as np
 import pandas as pd
-from polara import get_movielens_data
 import argparse
 
 current_file_dir = os.path.dirname(os.path.abspath(__file__))
@@ -13,6 +12,9 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # DATA_DIR = '../../data/ml-1m/'
+sys.path.insert(0, os.path.dirname(project_root))
+from experiment_tools.warm_start import load_movielens
+
 T_VALUES = [10, 20, 50, 100]      
 # def ensure_dirs():
 #     for d in [DATA_DIR]:
@@ -59,7 +61,7 @@ class GlobalTemporalSplitter:
     """
     def __init__(self, df, user_col='userid', item_col='movieid', time_col='timestamp'):
         # сортировка по времени (глобально)
-        self.df = df.sort_values(by=time_col).reset_index(drop=True)
+        self.df = df.sort_values(by=time_col, kind='mergesort').reset_index(drop=True)
         self.u_col = user_col
         self.i_col = item_col
         self.time_col = time_col
@@ -85,6 +87,7 @@ class GlobalTemporalSplitter:
         train_df = self.df[self.df[self.time_col] <= train_cutoff].copy()
         val_df   = self.df[(self.df[self.time_col] > train_cutoff) & (self.df[self.time_col] <= val_cutoff)].copy()
         test_df  = self.df[self.df[self.time_col] > val_cutoff].copy()
+        self._verify_no_leakage(train_df, val_df, test_df)
 
         print(f"[Split] Train: {len(train_df)} ({len(train_df)/n:.2%})")
         print(f"[Split] Valid: {len(val_df)} ({len(val_df)/n:.2%})")
@@ -142,7 +145,7 @@ class GlobalTemporalSplitter:
         targets = np.full(len(u_map), -1, dtype=np.int64)
         history_pairs = []
         for raw_uid, group in df.groupby(self.u_col, sort=False):
-            group = group.sort_values(self.time_col)
+            group = group.sort_values(self.time_col, kind='mergesort')
             mapped_uid = u_map[raw_uid]
             raw_items = group[self.i_col].tolist()
             mapped_target = i_map.get(raw_items[-1])
@@ -185,25 +188,26 @@ class GlobalTemporalSplitter:
                 'target': 'last_raw_event',
             }, handle, indent=2)
 
-        self._verify_no_leakage(data_dict)
+    def _verify_no_leakage(self, train_df, val_df, test_df):
+        parts = [train_df, val_df, test_df]
+        indices = pd.Index(np.concatenate([part.index.to_numpy() for part in parts]))
+        if not indices.is_unique:
+            raise ValueError("Leakage: the same source event occurs in multiple splits")
+        if len(indices) != len(self.df) or set(indices) != set(self.df.index):
+            raise ValueError("Splits must contain every source event exactly once")
+        nonempty = [part for part in parts if not part.empty]
+        for earlier, later in zip(nonempty, nonempty[1:]):
+            if not earlier[self.time_col].max() < later[self.time_col].min():
+                raise ValueError("Leakage: split time ranges overlap or are out of order")
 
-    def _verify_no_leakage(self, data_dict):
-        # Проверка, что взаимодействия не пересекаются между сплитами
-        train_set = set(map(tuple, data_dict['train']))
-        val_set   = set(map(tuple, data_dict['val']))
-        test_set  = set(map(tuple, data_dict['test']))
+        print("[Verification] PASSED: Source events and time ranges do not overlap.")
 
-        assert len(train_set & val_set) == 0, "Leakage: Train & Valid overlap!"
-        assert len(train_set & test_set) == 0, "Leakage: Train & Test overlap!"
-        assert len(val_set & test_set) == 0, "Leakage: Valid & Test overlap!"
-
-        print("[Verification] PASSED: No data leakage detected between splits.")
 
 def initialize_data(dataset='ml-1m'):
     data_dir = f'../../data/{dataset}/'
     os.makedirs(data_dir, exist_ok=True)
     if dataset == 'ml-1m':
-        df = get_movielens_data(include_time=True)
+        df = load_movielens()
     else:
         df = load_amazon(dataset)
     print('Dataset loaded')

@@ -20,8 +20,7 @@ from utils import (Data_Train, Data_Val, Data_Test, Data_CHLS,
 from model import create_model_diffu, Att_Diffuse_model
 from trainer import model_train, LSHT_inference, optimizers
 from collections import Counter
-import polara
-from polara.datasets.movielens import get_movielens_data
+from experiment_tools.warm_start import load_movielens
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
@@ -143,11 +142,7 @@ def item_num_create(args, item_num):
 def load_movielens_local(data_dir='../../data/info/'):
     import pandas as pd
     from sklearn.preprocessing import LabelEncoder
-    ratings_path = os.path.join(data_dir, 'ratings.dat')
-    if not os.path.exists(ratings_path):
-        raise FileNotFoundError(f"ratings.dat not found at {ratings_path}")
-    df = pd.read_csv(ratings_path, sep='::', engine='python',
-                     names=['userid', 'movieid', 'rating', 'timestamp'])
+    df = load_movielens(data_dir)
     df = df[['userid', 'movieid', 'timestamp']]
     user_enc = LabelEncoder()
     df['userid'] = user_enc.fit_transform(df['userid'])
@@ -247,7 +242,7 @@ def load_and_split_gts(quantiles=(0.7, 0.8), dataset_name='ml-1m'):
     # smap = {idx: original for idx, original in enumerate(item_enc.classes_)}
     
     # 3. Глобальная сортировка по времени
-    df = df.sort_values('timestamp').reset_index(drop=True)
+    df = df.sort_values('timestamp', kind='mergesort').reset_index(drop=True)
     
     # 4. Вычисление глобальных квантилей
     T_valid = df['timestamp'].quantile(quantiles[0])   # 70%
@@ -259,7 +254,7 @@ def load_and_split_gts(quantiles=(0.7, 0.8), dataset_name='ml-1m'):
     test_examples = {}
     
     for uid, group in df.groupby('userid'):
-        group = group.sort_values('timestamp')
+        group = group.sort_values('timestamp', kind='mergesort')
         # items = group['movieid'].tolist()
         items = group['itemid'].tolist()
         timestamps = group['timestamp'].tolist()

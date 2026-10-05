@@ -1,0 +1,1253 @@
+{
+  "ADRec": {
+    "ml-1m|50": [
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.001,
+          "dropout": 0.2,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 106
+        },
+        "source": "exp_results/service_files/models/ADRec/ml-1m/tuning_files/2026-08-04_13-40-21/validation_selection.json",
+        "validation": {
+          "recall@10": 0.288135593220339,
+          "ndcg@10": 0.15781199222350262,
+          "mrr@10": 0.11819427629808986,
+          "coverage@10": 0.4307734654555464
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 256,
+          "hidden_size": 128,
+          "lr": 0.001,
+          "dropout": 0.1,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 36
+        },
+        "source": "exp_results/service_files/models/ADRec/ml-1m/tuning_files/2026-08-03_11-41-54/validation_selection.json",
+        "validation": {
+          "recall@10": 0.2838983050847458,
+          "ndcg@10": 0.15794700943726012,
+          "mrr@10": 0.11978157788539145,
+          "coverage@10": 0.37764932562620424
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "ml-1m|100": [
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.001,
+          "dropout": 0.1,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 86
+        },
+        "source": "exp_results/service_files/models/ADRec/ml-1m/tuning_files/2026-08-03_09-27-41/validation_selection.json",
+        "validation": {
+          "recall@10": 0.3061440677966102,
+          "ndcg@10": 0.16288798936936882,
+          "mrr@10": 0.1194604183481302,
+          "coverage@10": 0.4340765207817231
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.001,
+          "dropout": 0.1,
+          "emb_dropout": 0.2,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 101
+        },
+        "source": "exp_results/service_files/models/ADRec/ml-1m/tuning_files/2026-08-03_12-46-53/validation_selection.json",
+        "validation": {
+          "recall@10": 0.298728813559322,
+          "ndcg@10": 0.1597089167331677,
+          "mrr@10": 0.11768563357546409,
+          "coverage@10": 0.43159922928709055
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 256,
+          "hidden_size": 128,
+          "lr": 0.001,
+          "dropout": 0.1,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 101
+        },
+        "source": "exp_results/service_files/models/ADRec/ml-1m/tuning_files/2026-08-03_10-34-50/validation_selection.json",
+        "validation": {
+          "recall@10": 0.2944915254237288,
+          "ndcg@10": 0.1617231801894796,
+          "mrr@10": 0.12140671240247512,
+          "coverage@10": 0.4266446462978255
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "amazon_Baby|50": [
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.0003,
+          "dropout": 0.2,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 41
+        },
+        "source": "exp_results/service_files/models/ADRec/amazon_baby/tuning_files/2026-08-03_14-33-22/validation_selection.json",
+        "validation": {
+          "recall@10": 0.042126157917953246,
+          "ndcg@10": 0.023787807522352197,
+          "mrr@10": 0.018259657193269895,
+          "coverage@10": 0.26610144280827014
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.0003,
+          "dropout": 0.1,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 36
+        },
+        "source": "exp_results/service_files/models/ADRec/amazon_baby/tuning_files/2026-08-03_13-17-32/validation_selection.json",
+        "validation": {
+          "recall@10": 0.04146449051610057,
+          "ndcg@10": 0.023143873126329425,
+          "mrr@10": 0.017611730767884276,
+          "coverage@10": 0.2946601219693589
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.001,
+          "dropout": 0.1,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 11
+        },
+        "source": "exp_results/service_files/models/ADRec/amazon_baby/tuning_files/2026-08-03_09-41-21/validation_selection.json",
+        "validation": {
+          "recall@10": 0.04058226731363035,
+          "ndcg@10": 0.021480170621390206,
+          "mrr@10": 0.015689744505359853,
+          "coverage@10": 0.13520749665327977
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "amazon_Baby|100": [
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.0003,
+          "dropout": 0.2,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 56
+        },
+        "source": "exp_results/service_files/models/ADRec/amazon_baby/tuning_files/2026-08-04_13-48-15/validation_selection.json",
+        "validation": {
+          "recall@10": 0.0423467137185708,
+          "ndcg@10": 0.024080165267165526,
+          "mrr@10": 0.018620861077852695,
+          "coverage@10": 0.30269225048341514
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.0003,
+          "dropout": 0.1,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 26
+        },
+        "source": "exp_results/service_files/models/ADRec/amazon_baby/tuning_files/2026-08-03_13-29-21/validation_selection.json",
+        "validation": {
+          "recall@10": 0.04058226731363035,
+          "ndcg@10": 0.021745629572269096,
+          "mrr@10": 0.01608324406074737,
+          "coverage@10": 0.2585155436561059
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.001,
+          "dropout": 0.1,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 11
+        },
+        "source": "exp_results/service_files/models/ADRec/amazon_baby/tuning_files/2026-08-03_09-46-59/validation_selection.json",
+        "validation": {
+          "recall@10": 0.03992059991177768,
+          "ndcg@10": 0.021251229168467653,
+          "mrr@10": 0.015622702543743566,
+          "coverage@10": 0.12196935891715008
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "amazon_Toys_and_Games|50": [
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.001,
+          "dropout": 0.2,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 26
+        },
+        "source": "exp_results/service_files/models/ADRec/amazon_toys/tuning_files/2026-08-04_14-18-38/validation_selection.json",
+        "validation": {
+          "recall@10": 0.06518804243008679,
+          "ndcg@10": 0.03777245330583984,
+          "mrr@10": 0.02939018230242917,
+          "coverage@10": 0.41333333333333333
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.001,
+          "dropout": 0.1,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 16
+        },
+        "source": "exp_results/service_files/models/ADRec/amazon_toys/tuning_files/2026-08-03_10-05-03/validation_selection.json",
+        "validation": {
+          "recall@10": 0.06441658630665381,
+          "ndcg@10": 0.036961031160494276,
+          "mrr@10": 0.028620027245871024,
+          "coverage@10": 0.30869757174392937
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.0003,
+          "dropout": 0.1,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 41
+        },
+        "source": "exp_results/service_files/models/ADRec/amazon_toys/tuning_files/2026-08-03_13-49-33/validation_selection.json",
+        "validation": {
+          "recall@10": 0.06190935390549662,
+          "ndcg@10": 0.03673511636994063,
+          "mrr@10": 0.029046241447398632,
+          "coverage@10": 0.48362030905077263
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "amazon_Toys_and_Games|100": [
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.001,
+          "dropout": 0.2,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 21
+        },
+        "source": "exp_results/service_files/models/ADRec/amazon_toys/tuning_files/2026-08-04_14-29-09/validation_selection.json",
+        "validation": {
+          "recall@10": 0.06248794599807136,
+          "ndcg@10": 0.037916815787387044,
+          "mrr@10": 0.030449250738546783,
+          "coverage@10": 0.354083885209713
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.001,
+          "dropout": 0.1,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 16
+        },
+        "source": "exp_results/service_files/models/ADRec/amazon_toys/tuning_files/2026-08-03_10-11-50/validation_selection.json",
+        "validation": {
+          "recall@10": 0.06248794599807136,
+          "ndcg@10": 0.036791736221609216,
+          "mrr@10": 0.028968330501599544,
+          "coverage@10": 0.3091390728476821
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 512,
+          "hidden_size": 128,
+          "lr": 0.0003,
+          "dropout": 0.1,
+          "emb_dropout": 0.3,
+          "weight_decay": 1e-05,
+          "diffusion_steps": 32,
+          "noise_schedule": "trunc_lin",
+          "epochs": 51
+        },
+        "source": "exp_results/service_files/models/ADRec/amazon_toys/tuning_files/2026-08-03_14-02-59/validation_selection.json",
+        "validation": {
+          "recall@10": 0.0609450337512054,
+          "ndcg@10": 0.035977456899586806,
+          "mrr@10": 0.028358972004102187,
+          "coverage@10": 0.5247682119205298
+        },
+        "evidence": "August validation"
+      }
+    ]
+  },
+  "DiffuRec": {
+    "ml-1m|50": [
+      {
+        "params": {
+          "batch_size": 1024,
+          "epochs": 26,
+          "hidden_size": 64,
+          "num_blocks": 2,
+          "lr": 0.003,
+          "noise_schedule": "cosine"
+        },
+        "source": "src/experiment_tools/run_demo_experiments.py:DIFFUREC_TUNED_PRESETS",
+        "evidence": "Fixed experiment preset; August validation selection absent"
+      }
+    ],
+    "ml-1m|100": [
+      {
+        "params": {
+          "batch_size": 512,
+          "epochs": 55,
+          "hidden_size": 64,
+          "num_blocks": 2,
+          "lr": 0.003,
+          "noise_schedule": "trunc_lin"
+        },
+        "source": "src/experiment_tools/run_demo_experiments.py:DIFFUREC_TUNED_PRESETS",
+        "evidence": "Fixed experiment preset; August validation selection absent"
+      }
+    ],
+    "amazon_Baby|50": [
+      {
+        "params": {
+          "batch_size": 128,
+          "epochs": 60,
+          "hidden_size": 64,
+          "num_blocks": 2,
+          "lr": 0.001,
+          "noise_schedule": "trunc_lin"
+        },
+        "source": "src/experiment_tools/run_demo_experiments.py:DIFFUREC_TUNED_PRESETS",
+        "evidence": "Fixed experiment preset; August validation selection absent"
+      }
+    ],
+    "amazon_Baby|100": [
+      {
+        "params": {
+          "batch_size": 128,
+          "epochs": 130,
+          "hidden_size": 64,
+          "num_blocks": 2,
+          "lr": 0.001,
+          "noise_schedule": "trunc_lin"
+        },
+        "source": "src/experiment_tools/run_demo_experiments.py:DIFFUREC_TUNED_PRESETS",
+        "evidence": "Fixed experiment preset; August validation selection absent"
+      }
+    ],
+    "amazon_Toys_and_Games|50": [
+      {
+        "params": {
+          "batch_size": 128,
+          "epochs": 60,
+          "hidden_size": 64,
+          "num_blocks": 2,
+          "lr": 0.003,
+          "noise_schedule": "trunc_lin"
+        },
+        "source": "src/experiment_tools/run_demo_experiments.py:DIFFUREC_TUNED_PRESETS",
+        "evidence": "Fixed experiment preset; August validation selection absent"
+      }
+    ],
+    "amazon_Toys_and_Games|100": [
+      {
+        "params": {
+          "batch_size": 256,
+          "epochs": 100,
+          "hidden_size": 64,
+          "num_blocks": 2,
+          "lr": 0.003,
+          "noise_schedule": "trunc_lin"
+        },
+        "source": "src/experiment_tools/run_demo_experiments.py:DIFFUREC_TUNED_PRESETS",
+        "evidence": "Fixed experiment preset; August validation selection absent"
+      }
+    ]
+  },
+  "SASRec": {
+    "ml-1m|50": [
+      {
+        "params": {
+          "hidden_units": 256,
+          "dropout_rate": 0.2,
+          "num_blocks": 2,
+          "num_heads": 2,
+          "batch_size": 128,
+          "learning_rate": 0.001,
+          "l2_emb": 0.0001,
+          "epochs": 250
+        },
+        "source": "src/SASRec/tune.py:FIXED_PRESETS",
+        "evidence": "Fixed experiment preset; August validation selection absent"
+      }
+    ],
+    "ml-1m|100": [
+      {
+        "params": {
+          "hidden_units": 256,
+          "dropout_rate": 0.2,
+          "num_blocks": 2,
+          "num_heads": 2,
+          "batch_size": 128,
+          "learning_rate": 0.001,
+          "l2_emb": 0.0001,
+          "epochs": 250
+        },
+        "source": "src/SASRec/tune.py:FIXED_PRESETS",
+        "evidence": "Fixed experiment preset; August validation selection absent"
+      }
+    ],
+    "amazon_Baby|50": [
+      {
+        "params": {
+          "hidden_units": 128,
+          "dropout_rate": 0.3,
+          "num_blocks": 2,
+          "num_heads": 2,
+          "batch_size": 256,
+          "learning_rate": 0.001,
+          "l2_emb": 0.0001,
+          "epochs": 250
+        },
+        "source": "src/SASRec/tune.py:FIXED_PRESETS",
+        "evidence": "Fixed experiment preset; August validation selection absent"
+      }
+    ],
+    "amazon_Baby|100": [
+      {
+        "params": {
+          "hidden_units": 128,
+          "dropout_rate": 0.3,
+          "num_blocks": 2,
+          "num_heads": 2,
+          "batch_size": 256,
+          "learning_rate": 0.001,
+          "l2_emb": 0.0001,
+          "epochs": 250
+        },
+        "source": "src/SASRec/tune.py:FIXED_PRESETS",
+        "evidence": "Fixed experiment preset; August validation selection absent"
+      }
+    ],
+    "amazon_Toys_and_Games|50": [
+      {
+        "params": {
+          "hidden_units": 128,
+          "dropout_rate": 0.2,
+          "num_blocks": 2,
+          "num_heads": 2,
+          "batch_size": 256,
+          "learning_rate": 0.0003,
+          "l2_emb": 0.0001,
+          "epochs": 33
+        },
+        "source": "exp_results/service_files/models/SASRec/amazon_toys/tuning_files/20260801_072409/validation_selection.json",
+        "validation": {
+          "recall@10": 0.07181467181467181,
+          "ndcg@10": 0.0402302537998287,
+          "mrr@10": 0.030642811178525468,
+          "coverage@10": 0.38728476821192054
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "hidden_units": 128,
+          "dropout_rate": 0.3,
+          "num_blocks": 2,
+          "num_heads": 2,
+          "batch_size": 256,
+          "learning_rate": 0.0003,
+          "l2_emb": 0.0001,
+          "epochs": 43
+        },
+        "source": "exp_results/service_files/models/SASRec/amazon_toys/tuning_files/20260801_062617/validation_selection.json",
+        "validation": {
+          "recall@10": 0.06969111969111969,
+          "ndcg@10": 0.04056801093112143,
+          "mrr@10": 0.03171799350370779,
+          "coverage@10": 0.45456953642384107
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "hidden_units": 256,
+          "dropout_rate": 0.3,
+          "num_blocks": 2,
+          "num_heads": 2,
+          "batch_size": 256,
+          "learning_rate": 0.001,
+          "l2_emb": 0.0001,
+          "epochs": 7
+        },
+        "source": "exp_results/service_files/models/SASRec/amazon_toys/tuning_files/20260801_120709/validation_selection.json",
+        "validation": {
+          "recall@10": 0.0667953667953668,
+          "ndcg@10": 0.03819634859968914,
+          "mrr@10": 0.029460148924434645,
+          "coverage@10": 0.5129359823399559
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "amazon_Toys_and_Games|100": [
+      {
+        "params": {
+          "hidden_units": 128,
+          "dropout_rate": 0.3,
+          "num_blocks": 2,
+          "num_heads": 2,
+          "batch_size": 256,
+          "learning_rate": 0.0003,
+          "l2_emb": 0.0001,
+          "epochs": 43
+        },
+        "source": "exp_results/service_files/models/SASRec/amazon_toys/tuning_files/20260801_133425/validation_selection.json",
+        "validation": {
+          "recall@10": 0.07413127413127413,
+          "ndcg@10": 0.041740112113923374,
+          "mrr@10": 0.031862474719617576,
+          "coverage@10": 0.4631346578366446
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "hidden_units": 256,
+          "dropout_rate": 0.3,
+          "num_blocks": 2,
+          "num_heads": 2,
+          "batch_size": 256,
+          "learning_rate": 0.001,
+          "l2_emb": 0.0001,
+          "epochs": 9
+        },
+        "source": "exp_results/service_files/models/SASRec/amazon_toys/tuning_files/20260802_141654/validation_selection.json",
+        "validation": {
+          "recall@10": 0.07104247104247104,
+          "ndcg@10": 0.03975520100328157,
+          "mrr@10": 0.03013299013299013,
+          "coverage@10": 0.571832229580574
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "hidden_units": 128,
+          "dropout_rate": 0.2,
+          "num_blocks": 2,
+          "num_heads": 2,
+          "batch_size": 256,
+          "learning_rate": 0.0003,
+          "l2_emb": 0.0001,
+          "epochs": 38
+        },
+        "source": "exp_results/service_files/models/SASRec/amazon_toys/tuning_files/20260801_124626/validation_selection.json",
+        "validation": {
+          "recall@10": 0.06969111969111969,
+          "ndcg@10": 0.038711934637710506,
+          "mrr@10": 0.029270622663479805,
+          "coverage@10": 0.4384105960264901
+        },
+        "evidence": "August validation"
+      }
+    ]
+  },
+  "GPTRec": {
+    "ml-1m|50": [
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.0003,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 0.3,
+          "epochs": 55
+        },
+        "source": "exp_results/service_files/models/GPTRec/ml-1m/tuning_files/20260804_203544/validation_selection.json",
+        "validation": {
+          "recall@10": 0.2542372881355932,
+          "ra_temperature": 0.3
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.001,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 0.3,
+          "epochs": 22
+        },
+        "source": "exp_results/service_files/models/GPTRec/ml-1m/tuning_files/20260804_193222/validation_selection.json",
+        "validation": {
+          "recall@10": 0.24152542372881355,
+          "ra_temperature": 0.3
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "model_params.n_embd": 128,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 2,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.001,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 2.0,
+          "epochs": 14
+        },
+        "source": "exp_results/service_files/models/GPTRec/ml-1m/tuning_files/20260804_201849/validation_selection.json",
+        "validation": {
+          "recall@10": 0.2309322033898305,
+          "ra_temperature": 2.0
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "ml-1m|100": [
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.0003,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 0.3,
+          "epochs": 29
+        },
+        "source": "exp_results/service_files/models/GPTRec/ml-1m/tuning_files/20260806_215255/validation_selection.json",
+        "validation": {
+          "recall@10": 0.24258474576271186,
+          "ra_temperature": 0.3
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.001,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 1.2,
+          "epochs": 51
+        },
+        "source": "exp_results/service_files/models/GPTRec/ml-1m/tuning_files/20260804_194427/validation_selection.json",
+        "validation": {
+          "recall@10": 0.22033898305084745,
+          "ra_temperature": 1.2
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "amazon_Baby|50": [
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.001,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 0.8,
+          "epochs": 4
+        },
+        "source": "exp_results/service_files/models/GPTRec/amazon_baby/tuning_files/20260804_204427/validation_selection.json",
+        "validation": {
+          "recall@10": 0.041804180418041806,
+          "ra_temperature": 0.8
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.3,
+          "model_params.attn_pdrop": 0.3,
+          "seqrec_module.lr": 0.001,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 1.2,
+          "epochs": 23
+        },
+        "source": "exp_results/service_files/models/GPTRec/amazon_baby/tuning_files/20260806_211155/validation_selection.json",
+        "validation": {
+          "recall@10": 0.04048404840484048,
+          "ra_temperature": 1.2
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.3,
+          "model_params.attn_pdrop": 0.3,
+          "seqrec_module.lr": 0.001,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 0.3,
+          "epochs": 5
+        },
+        "source": "exp_results/service_files/models/GPTRec/amazon_baby/tuning_files/20260805_074422/validation_selection.json",
+        "validation": {
+          "recall@10": 0.03850385038503851,
+          "ra_temperature": 0.3
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "amazon_Baby|100": [
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.0003,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 1.0,
+          "epochs": 28
+        },
+        "source": "exp_results/service_files/models/GPTRec/amazon_baby/tuning_files/20260805_093802/validation_selection.json",
+        "validation": {
+          "recall@10": 0.03872387238723873,
+          "ra_temperature": 1.0
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.001,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 2.0,
+          "epochs": 38
+        },
+        "source": "exp_results/service_files/models/GPTRec/amazon_baby/tuning_files/20260806_220515/validation_selection.json",
+        "validation": {
+          "recall@10": 0.036963696369636964,
+          "ra_temperature": 2.0
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.001,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 1.0,
+          "epochs": 4
+        },
+        "source": "exp_results/service_files/models/GPTRec/amazon_baby/tuning_files/20260804_210532/validation_selection.json",
+        "validation": {
+          "recall@10": 0.036743674367436745,
+          "ra_temperature": 1.0
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "amazon_Toys_and_Games|50": [
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.0003,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 0.3,
+          "epochs": 19
+        },
+        "source": "exp_results/service_files/models/GPTRec/amazon_toys/tuning_files/20260805_100851/validation_selection.json",
+        "validation": {
+          "recall@10": 0.05637065637065637,
+          "ra_temperature": 0.3
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 1,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.001,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 0.3,
+          "epochs": 9
+        },
+        "source": "exp_results/service_files/models/GPTRec/amazon_toys/tuning_files/20260806_224327/validation_selection.json",
+        "validation": {
+          "recall@10": 0.05501930501930502,
+          "ra_temperature": 0.3
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.001,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 0.8,
+          "epochs": 11
+        },
+        "source": "exp_results/service_files/models/GPTRec/amazon_toys/tuning_files/20260804_213109/validation_selection.json",
+        "validation": {
+          "recall@10": 0.054826254826254826,
+          "ra_temperature": 0.8
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "amazon_Toys_and_Games|100": [
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.0003,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 1.2,
+          "epochs": 22
+        },
+        "source": "exp_results/service_files/models/GPTRec/amazon_toys/tuning_files/20260805_104609/validation_selection.json",
+        "validation": {
+          "recall@10": 0.057335907335907335,
+          "ra_temperature": 1.2
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "model_params.n_embd": 64,
+          "model_params.n_layer": 2,
+          "model_params.n_head": 1,
+          "model_params.embd_pdrop": 0.1,
+          "model_params.attn_pdrop": 0.1,
+          "seqrec_module.lr": 0.001,
+          "dataloader.batch_size": 64,
+          "generation_params.num_return_sequences": 30,
+          "ra_temperature": 1.6,
+          "epochs": 17
+        },
+        "source": "exp_results/service_files/models/GPTRec/amazon_toys/tuning_files/20260806_231626/validation_selection.json",
+        "validation": {
+          "recall@10": 0.05308880308880309,
+          "ra_temperature": 1.6
+        },
+        "evidence": "August validation"
+      }
+    ]
+  },
+  "T-DiffRec": {
+    "ml-1m|0": [
+      {
+        "params": {
+          "batch_size": 400,
+          "lr": 0.0005,
+          "weight_decay": 0.0,
+          "dims": "[500]",
+          "steps": 100,
+          "sampling_steps": 100,
+          "noise_scale": 0.1,
+          "noise_min": 0.0001,
+          "noise_max": 0.02,
+          "w_min": 0.1,
+          "w_max": 1.0,
+          "epochs": 35
+        },
+        "source": "exp_results/service_files/models/T-DiffRec/ml-1m/tuning_files/20260804_181910/validation_selection.json",
+        "validation": {
+          "recall@10": 0.09745762711864407,
+          "ndcg@10": 0.050975717770984655,
+          "mrr@10": 0.03725870998116761,
+          "coverage@10": 0.21442334159097165
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 400,
+          "lr": 0.0005,
+          "weight_decay": 0.0,
+          "dims": "[1000]",
+          "steps": 100,
+          "sampling_steps": 100,
+          "noise_scale": 0.1,
+          "noise_min": 0.0001,
+          "noise_max": 0.02,
+          "w_min": 0.1,
+          "w_max": 1.0,
+          "epochs": 40
+        },
+        "source": "exp_results/service_files/models/T-DiffRec/ml-1m/tuning_files/20260804_185853/validation_selection.json",
+        "validation": {
+          "recall@10": 0.09639830508474577,
+          "ndcg@10": 0.05333333606696747,
+          "mrr@10": 0.04044718523002421,
+          "coverage@10": 0.2180016515276631
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 400,
+          "lr": 0.001,
+          "weight_decay": 0.0,
+          "dims": "[1000]",
+          "steps": 100,
+          "sampling_steps": 100,
+          "noise_scale": 0.1,
+          "noise_min": 0.0001,
+          "noise_max": 0.02,
+          "w_min": 0.1,
+          "w_max": 1.0,
+          "epochs": 20
+        },
+        "source": "exp_results/service_files/models/T-DiffRec/ml-1m/tuning_files/20260804_170922/validation_selection.json",
+        "validation": {
+          "recall@10": 0.09533898305084745,
+          "ndcg@10": 0.04896380340317584,
+          "mrr@10": 0.03512997713209577,
+          "coverage@10": 0.19900908340214699
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "amazon_Baby|0": [
+      {
+        "params": {
+          "batch_size": 400,
+          "lr": 0.0001,
+          "weight_decay": 0.0,
+          "dims": "[500]",
+          "steps": 100,
+          "sampling_steps": 100,
+          "noise_scale": 0.1,
+          "noise_min": 0.0001,
+          "noise_max": 0.02,
+          "w_min": 0.1,
+          "w_max": 1.0,
+          "epochs": 70
+        },
+        "source": "exp_results/service_files/models/T-DiffRec/amazon_baby/tuning_files/20260804_182040/validation_selection.json",
+        "validation": {
+          "recall@10": 0.0352035203520352,
+          "ndcg@10": 0.01716376595002198,
+          "mrr@10": 0.011756858225505089,
+          "coverage@10": 0.07437156031533541
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 400,
+          "lr": 0.0001,
+          "weight_decay": 0.0,
+          "dims": "[1000]",
+          "steps": 100,
+          "sampling_steps": 100,
+          "noise_scale": 0.1,
+          "noise_min": 0.0001,
+          "noise_max": 0.02,
+          "w_min": 0.1,
+          "w_max": 1.0,
+          "epochs": 85
+        },
+        "source": "exp_results/service_files/models/T-DiffRec/amazon_baby/tuning_files/20260804_164516/validation_selection.json",
+        "validation": {
+          "recall@10": 0.033663366336633666,
+          "ndcg@10": 0.017744947631323317,
+          "mrr@10": 0.01293633331587127,
+          "coverage@10": 0.11259854231741782
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 256,
+          "lr": 0.0001,
+          "weight_decay": 0.0,
+          "dims": "[1000]",
+          "steps": 100,
+          "sampling_steps": 100,
+          "noise_scale": 0.1,
+          "noise_min": 0.0001,
+          "noise_max": 0.02,
+          "w_min": 0.1,
+          "w_max": 1.0,
+          "epochs": 45
+        },
+        "source": "exp_results/service_files/models/T-DiffRec/amazon_baby/tuning_files/20260804_173332/validation_selection.json",
+        "validation": {
+          "recall@10": 0.033443344334433446,
+          "ndcg@10": 0.01804561937499427,
+          "mrr@10": 0.01340676131105174,
+          "coverage@10": 0.08270117507065299
+        },
+        "evidence": "August validation"
+      }
+    ],
+    "amazon_Toys_and_Games|0": [
+      {
+        "params": {
+          "batch_size": 512,
+          "lr": 0.0001,
+          "weight_decay": 0.0,
+          "dims": "[1000]",
+          "steps": 100,
+          "sampling_steps": 100,
+          "noise_scale": 0.1,
+          "noise_min": 0.0001,
+          "noise_max": 0.02,
+          "w_min": 0.1,
+          "w_max": 1.0,
+          "epochs": 65
+        },
+        "source": "exp_results/service_files/models/T-DiffRec/amazon_toys/tuning_files/20260804_175844/validation_selection.json",
+        "validation": {
+          "recall@10": 0.037065637065637064,
+          "ndcg@10": 0.021519295975215697,
+          "mrr@10": 0.01681145431145431,
+          "coverage@10": 0.14860927152317882
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 256,
+          "lr": 0.0001,
+          "weight_decay": 0.0,
+          "dims": "[1000]",
+          "steps": 100,
+          "sampling_steps": 100,
+          "noise_scale": 0.1,
+          "noise_min": 0.0001,
+          "noise_max": 0.02,
+          "w_min": 0.1,
+          "w_max": 1.0,
+          "epochs": 55
+        },
+        "source": "exp_results/service_files/models/T-DiffRec/amazon_toys/tuning_files/20260804_174000/validation_selection.json",
+        "validation": {
+          "recall@10": 0.03687258687258687,
+          "ndcg@10": 0.022421899575869954,
+          "mrr@10": 0.017957574921860633,
+          "coverage@10": 0.16362030905077263
+        },
+        "evidence": "August validation"
+      },
+      {
+        "params": {
+          "batch_size": 400,
+          "lr": 0.0001,
+          "weight_decay": 0.0,
+          "dims": "[1000]",
+          "steps": 100,
+          "sampling_steps": 100,
+          "noise_scale": 0.1,
+          "noise_min": 0.0001,
+          "noise_max": 0.02,
+          "w_min": 0.1,
+          "w_max": 1.0,
+          "epochs": 75
+        },
+        "source": "exp_results/service_files/models/T-DiffRec/amazon_toys/tuning_files/20260804_165537/validation_selection.json",
+        "validation": {
+          "recall@10": 0.03474903474903475,
+          "ndcg@10": 0.020060078164693008,
+          "mrr@10": 0.0155806061163204,
+          "coverage@10": 0.16679911699779248
+        },
+        "evidence": "August validation"
+      }
+    ]
+  },
+  "TopPopular": {
+    "ml-1m|0": [
+      {
+        "params": {},
+        "source": "baseline",
+        "evidence": "No trainable hyperparameters"
+      }
+    ],
+    "amazon_Baby|0": [
+      {
+        "params": {},
+        "source": "baseline",
+        "evidence": "No trainable hyperparameters"
+      }
+    ],
+    "amazon_Toys_and_Games|0": [
+      {
+        "params": {},
+        "source": "baseline",
+        "evidence": "No trainable hyperparameters"
+      }
+    ]
+  },
+  "Random": {
+    "ml-1m|0": [
+      {
+        "params": {},
+        "source": "baseline",
+        "evidence": "No trainable hyperparameters"
+      }
+    ],
+    "amazon_Baby|0": [
+      {
+        "params": {},
+        "source": "baseline",
+        "evidence": "No trainable hyperparameters"
+      }
+    ],
+    "amazon_Toys_and_Games|0": [
+      {
+        "params": {},
+        "source": "baseline",
+        "evidence": "No trainable hyperparameters"
+      }
+    ]
+  }
+}

@@ -44,7 +44,8 @@ def _selection_value(value) -> bool | None:
 
 
 def select_runs(rows: list[dict], seed: int = 42) -> dict[tuple[str, str, str], list[dict]]:
-    eligible = [row for row in rows if str(row.get("seed", "")) == str(seed)]
+    eligible = [row for row in rows if str(row.get("seed", "")) == str(seed)
+                and row.get("run_type", "") != "tuning"]
     grouped: dict[tuple[str, str, str], dict[str, list[dict]]] = {}
     for row in eligible:
         key = (
@@ -177,13 +178,17 @@ def main():
     parser.add_argument("--registry", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--suffix", default=None)
     args = parser.parse_args()
+    if args.suffix is not None:
+        os.environ["EXPERIMENT_FILE_SUFFIX"] = args.suffix
     source = args.registry or registry_path()
     destination = args.output_dir or (output_root() / "experiment_tables")
     destination.mkdir(parents=True, exist_ok=True)
     tables = build_tables(read_registry(source), args.seed)
-    markdown_path = destination / "experimental_results.md"
-    excel_path = destination / "experimental_results.xlsx"
+    suffix = os.environ.get("EXPERIMENT_FILE_SUFFIX", "")
+    markdown_path = destination / f"experimental_results{suffix}.md"
+    excel_path = destination / f"experimental_results{suffix}.xlsx"
     write_markdown(tables, markdown_path)
     write_excel(tables, excel_path)
     print(markdown_path)

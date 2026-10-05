@@ -93,6 +93,8 @@ def selection_key(metrics):
 def build_config(args):
     return {
         **FIXED_PRESETS[args.dataset],
+        **{name: getattr(args, name) for name in FIXED_PRESETS[args.dataset]
+           if getattr(args, name, None) is not None},
         "num_epochs": args.max_epochs,
         "maxlen": args.maxlen,
         "sampler_seed": args.seed,
@@ -256,6 +258,9 @@ def parse_args():
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--resume_checkpoint", default=None)
+    for name, kind in [('hidden_units', int), ('dropout_rate', float), ('num_blocks', int),
+                       ('num_heads', int), ('batch_size', int), ('learning_rate', float), ('l2_emb', float)]:
+        parser.add_argument('--' + name, type=kind, default=None)
     return parser.parse_args()
 
 

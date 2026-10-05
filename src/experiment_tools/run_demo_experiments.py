@@ -215,9 +215,12 @@ def prepare_data(datasets, models):
             REPO / "src/ADRec/datasets/data" / ALIASES[name]["adrec"] / "dataset.pkl"
             for name in datasets
         ]
-        if not all(path.exists() for path in required):
-            print("Preparing ADRec datasets (the source script downloads all supported subsets).")
-            subprocess.check_call([sys.executable, "get_data.py"], cwd=REPO / "src/ADRec/src")
+        for path in required:
+            if not path.exists():
+                subprocess.check_call(
+                    [sys.executable, "get_data.py", "--dataset", path.parent.name],
+                    cwd=REPO / "src/ADRec/src",
+                )
 
 
 def main():

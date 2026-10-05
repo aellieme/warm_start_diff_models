@@ -203,7 +203,7 @@ def main() -> None:
         accelerator='gpu' if device == 'cuda' else 'cpu',
         devices=1,
     )
-    test_last = test.sort_values('time_idx').groupby('user_id').last().reset_index()
+    test_last = test.sort_values('time_idx', kind='mergesort').groupby('user_id').last().reset_index()
     tracker = ExperimentTracker(
         cli.dataset,
         str(config.model),

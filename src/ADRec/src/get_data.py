@@ -1,29 +1,26 @@
 # prepare_gts_datasets.py
 import os
+import sys
 import pickle
 import pandas as pd
-import requests
-from tqdm import tqdm
-from zipfile import ZipFile
+import argparse
+from pathlib import Path
 from sklearn.preprocessing import LabelEncoder
 # from huggingface_hub import hf_hub_download
 
-def download_file(url, local_filename):
-    """Download a file with a progress bar."""
-    # with requests.get(url, stream=True, timeout=(10, 60)) as r:
-    with requests.get(url, stream=True, timeout=(100, 560)) as r:
-        r.raise_for_status()
-        total_size = int(r.headers.get('content-length', 0))
-        chunk_size = 8192
-        with open(local_filename, 'wb') as f:
-            for chunk in tqdm(r.iter_content(chunk_size=chunk_size),
-                              total=total_size // chunk_size,
-                              unit='KB', unit_scale=True,
-                              desc=f"Downloading {os.path.basename(local_filename)}"):
-                f.write(chunk)
-    return local_filename
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from experiment_tools.warm_start import load_movielens
 
-def save_dataset_with_gts(dataset_name, df, output_dir='../datasets/data/'):
+DATA_DIR = Path(__file__).resolve().parents[2] / 'data'
+OUTPUT_DIR = Path(__file__).resolve().parents[1] / 'datasets' / 'data'
+AMAZON_FILES = {
+    'baby': 'reviews_Baby_5.json',
+    'beauty': 'reviews_Beauty_5.json',
+    'sports': 'reviews_Sports_and_Outdoors_5.json',
+    'toys': 'reviews_Toys_and_Games_5.json',
+}
+
+def save_dataset_with_gts(dataset_name, df, output_dir=OUTPUT_DIR):
     """
     Process interactions DataFrame with time-split (70% train, 10% val, 20% test)
     and save as dataset.pkl.
@@ -38,7 +35,7 @@ def save_dataset_with_gts(dataset_name, df, output_dir='../datasets/data/'):
     df['userid'] = user_enc.fit_transform(df['userid'])
     df['movieid'] = item_enc.fit_transform(df['movieid']) + 1  # shift, 0 = padding
 
-    df = df.sort_values('timestamp').reset_index(drop=True)
+    df = df.sort_values('timestamp', kind='mergesort').reset_index(drop=True)
 
     T_valid = df['timestamp'].quantile(0.7)
     T_test = df['timestamp'].quantile(0.8)
@@ -50,7 +47,7 @@ def save_dataset_with_gts(dataset_name, df, output_dir='../datasets/data/'):
     test_tgt_dict = {}
 
     for uid, group in df.groupby('userid'):
-        group = group.sort_values('timestamp')
+        group = group.sort_values('timestamp', kind='mergesort')
         items = group['movieid'].tolist()
         times = group['timestamp'].tolist()
 
@@ -99,84 +96,34 @@ def save_dataset_with_gts(dataset_name, df, output_dir='../datasets/data/'):
     print(f"Saved {len(data_pkl['train'])} training sequences to {output_path}")
     return output_path
 
-def prepare_ml100k():
-    url = "http://files.grouplens.org/datasets/movielens/ml-100k.zip"
-    zip_path = "ml-100k.zip"
-    download_file(url, zip_path)
-    with ZipFile(zip_path, 'r') as zip_ref:
-        for name in zip_ref.namelist():
-            if name.endswith('u.data'):
-                with zip_ref.open(name) as f:
-                    df = pd.read_csv(f, sep='\t', header=None,
-                                     usecols=[0,1,3],
-                                     names=['userid', 'movieid', 'timestamp'])
-                break
-        else:
-            raise FileNotFoundError("u.data not found")
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
-    save_dataset_with_gts('ml-100k', df)
-    os.remove(zip_path)
-
-def prepare_ml1m():
-    url = "http://files.grouplens.org/datasets/movielens/ml-1m.zip"
-    zip_path = "ml-1m.zip"
-    download_file(url, zip_path)
-    with ZipFile(zip_path, 'r') as zip_ref:
-        for name in zip_ref.namelist():
-            if name.endswith('ratings.dat'):
-                with zip_ref.open(name) as f:
-                    df = pd.read_csv(f, sep='::', header=None,
-                                     usecols=[0,1,3],
-                                     names=['userid', 'movieid', 'timestamp'],
-                                     engine='python')
-                break
-        else:
-            raise FileNotFoundError("ratings.dat not found")
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
-    save_dataset_with_gts('ml-1m', df)
-    os.remove(zip_path)
-    
-# def download_from_huggingface(dataset_name, repo_id, filename):
-#     """Helper to download a dataset file from Hugging Face Hub."""
-#     local_path = hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset")
-#     return pd.read_csv(local_path)
-
-def clean_amazon_reviews(df):
-    """Keep only necessary columns for our processing."""
-    if 'reviewerID' in df.columns and 'asin' in df.columns and 'unixReviewTime' in df.columns:
-        return df[['reviewerID', 'asin', 'unixReviewTime']].rename(
-            columns={'reviewerID': 'userid', 'asin': 'movieid', 'unixReviewTime': 'timestamp'}
+def load_dataset(dataset, data_dir=DATA_DIR):
+    data_dir = Path(data_dir)
+    if dataset == 'ml-1m':
+        return load_movielens(data_dir / 'info')[['userid', 'movieid', 'timestamp']]
+    if dataset == 'ml-100k':
+        path = data_dir / 'ml-100k/u.data'
+        return pd.read_csv(
+            path, sep='\t', engine='python',
+            header=None, names=['userid', 'movieid', 'rating', 'timestamp'],
+            usecols=['userid', 'movieid', 'timestamp'],
         )
-    return None
+    path = data_dir / 'amazon' / AMAZON_FILES[dataset]
+    df = pd.read_json(path, lines=True)
+    return df[['reviewerID', 'asin', 'unixReviewTime']].rename(
+        columns={'reviewerID': 'userid', 'asin': 'movieid', 'unixReviewTime': 'timestamp'}
+    )
 
-# ===== Main Execution =====
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='Prepare one ADRec dataset from Polara or shared local sources.')
+    parser.add_argument('--dataset', required=True, choices=['ml-1m', 'ml-100k', *AMAZON_FILES])
+    args = parser.parse_args(argv)
+    df = load_dataset(args.dataset)
+    save_dataset_with_gts(args.dataset, df)
+
+
 if __name__ == '__main__':
-    # 1. MovieLens 100k
-    prepare_ml100k()
-    prepare_ml1m() 
-
-    # 2. Amazon subsets (McAuley Lab, 2014) – official source
-    amazon_datasets = {
-        'baby': 'https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/reviews_Baby_5.json.gz',
-        'beauty': 'https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/reviews_Beauty_5.json.gz',
-        'sports': 'https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/reviews_Sports_and_Outdoors_5.json.gz',
-        'toys': 'https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/reviews_Toys_and_Games_5.json.gz',
-    }
-    # amazon_datasets = {
-    #     'beauty': 'https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/reviews_Beauty_5.json.gz',
-    #     'sports': 'https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/reviews_Sports_and_Outdoors_5.json.gz',
-    #     'toys': 'https://snap.stanford.edu/data/amazon/productGraph/categoryFiles/reviews_Toys_and_Games_5.json.gz',
-    # }
-
-    for name, url in amazon_datasets.items():
-        print(f"\nProcessing {name}")
-        gz_path = f"{name}.json.gz"
-        download_file(url, gz_path)
-        df = pd.read_json(gz_path, lines=True, compression='gzip')
-        df_clean = clean_amazon_reviews(df)
-        if df_clean is not None and len(df_clean) > 0:
-            save_dataset_with_gts(name, df_clean)
-        os.remove(gz_path)
+    main()
 
     
 

@@ -43,6 +43,7 @@ REGISTRY_FIELDS = [
     "recall@20", "ndcg@20", "mrr@20", "coverage@20",
     "recall@100", "ndcg@100", "mrr@100", "coverage@100",
     "latency_sec", "latency_ms_per_user", "n_users", "checkpoint", "summary_path",
+    "recall@5", "ndcg@5", "mrr@5", "coverage@5",
 ]
 
 DATASET_NAMES = {
@@ -99,7 +100,8 @@ def checkpoint_path(
     extension: str = ".pt",
 ) -> Path:
     """Return a stable checkpoint path beside logs and reports."""
-    model_dir = output_root() / "checkpoints" / _safe(normalize_model_name(model))
+    checkpoint_root = Path(os.environ.get("EXPERIMENT_CHECKPOINT_DIR", output_root() / "checkpoints"))
+    model_dir = checkpoint_root / _safe(normalize_model_name(model))
     model_dir.mkdir(parents=True, exist_ok=True)
     parts = [_dataset_folder(dataset)]
     if maxlen is not None:
@@ -171,7 +173,7 @@ def make_run_dir(
     run_id: str | None = None,
     run_type: str = "training",
 ) -> Path:
-    run_id = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_id = run_id or os.environ.get("EXPERIMENT_RUN_ID") or datetime.now().strftime("%Y%m%d_%H%M%S")
     folder = "tuning_files" if run_type == "tuning" else "logs"
     path = (
         output_root() / "service_files" / "models"
@@ -191,7 +193,8 @@ def normalize_model_name(value: str) -> str:
 
 
 def registry_path() -> Path:
-    return output_root() / "service_files" / "all_experiments.csv"
+    suffix = os.environ.get("EXPERIMENT_FILE_SUFFIX", "")
+    return output_root() / "service_files" / f"all_experiments{suffix}.csv"
 
 
 class ExperimentTracker:

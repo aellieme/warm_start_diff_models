@@ -1,9 +1,13 @@
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from experiment_tools.warm_start import load_movielens
 import time
 import pandas as pd
 import numpy as np
 import torch
-from polara import get_movielens_data
 
 from data_utils import transform_indices, data_to_sequences
 from evaluate_metrics import (drop_invalid_items, mask_invalid_items,
@@ -32,7 +36,7 @@ def load_amazon(dataset_name, data_dir='../data/amazon'):
 
 def prepare_data_and_description(dataset):
     if dataset == 'ml-1m':
-        raw_data = get_movielens_data(include_time=True)
+        raw_data = load_movielens()
         userid_col = 'userid'
         itemid_col = 'movieid'
         time_col = 'timestamp'
@@ -43,7 +47,7 @@ def prepare_data_and_description(dataset):
         time_col = 'timestamp'
 
     all_data, data_index = transform_indices(raw_data.copy(), userid_col, itemid_col)
-    all_data_sorted = all_data.sort_values(time_col).reset_index(drop=True)
+    all_data_sorted = all_data.sort_values(time_col, kind='mergesort').reset_index(drop=True)
 
     T_valid = all_data_sorted[time_col].quantile(0.70)
     T_test  = all_data_sorted[time_col].quantile(0.80)
@@ -54,14 +58,14 @@ def prepare_data_and_description(dataset):
     # Validation (T_valid < ts <= T_test)
     val_window = future_data[future_data[time_col] <= T_test].copy()
     val_seq_dict = (
-        val_window.sort_values([userid_col, time_col])
+        val_window.sort_values(time_col, kind='mergesort')
         .groupby(userid_col)[itemid_col].apply(list)
         .to_dict()
     )
 
     val_inputs, val_targets, val_users = [], [], []
     for uid, user_future in future_data.groupby(userid_col):
-        user_future = user_future.sort_values(time_col)
+        user_future = user_future.sort_values(time_col, kind='mergesort')
         items = user_future[itemid_col].tolist()
         times = user_future[time_col].tolist()
         # последний элемент до T_test
@@ -88,7 +92,7 @@ def prepare_data_and_description(dataset):
     train_val_data = all_data_sorted[all_data_sorted[time_col] <= T_test].copy()
     test_examples = []
     for uid, user_test in test_data.groupby(userid_col):
-        user_test = user_test.sort_values(time_col)
+        user_test = user_test.sort_values(time_col, kind='mergesort')
         items = user_test[itemid_col].tolist()
         if len(items) == 0:
             continue
@@ -131,7 +135,7 @@ def run_inference_pipeline(
     metric_ks=None,
 ):
     start_time = time.perf_counter()   
-    history_sorted = history_data.sort_values([userid_col, time_col])
+    history_sorted = history_data.sort_values(time_col, kind='mergesort')
     # Получаем последовательности из history_data (train+adapt) в виде словаря {user: list}
     train_seq_dict = data_to_sequences(history_sorted, data_description)
 
